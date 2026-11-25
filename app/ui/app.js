@@ -38,7 +38,7 @@ const FALLBACK_OPTIONS = {
   books: { status: ["To read", "Reading", "Read", "Dropped", "Wishlist"], priority: ["Extreme", "High", "Medium", "Low"], format: ["Physical", "eBook", "Audiobook"] },
 };
 const TABS = {
-  games: [["home", "Home"], ["library", "Library"], ["wishlist", "Wishlist"], ["deals", "Deals"], ["played", "Completed"], ["stats", "Your years"]],
+  games: [["home", "Home"], ["library", "Library"], ["wishlist", "Wishlist"], ["deals", "Deals"], ["played", "Completed"], ["ranking", "Top 100"], ["stats", "Your years"]],
   books: [["shelf", "Shelf"], ["books", "All books"], ["bookyears", "Read"]],
   news: [["leaks", "Leaks & rumours"], ["breaking", "Breaking news"], ["yours", "Your games"], ["marvel", "Marvel & DC"]],
 };
@@ -130,7 +130,7 @@ const coverObserver = new IntersectionObserver(entries => {
   }
 }, { rootMargin: "300px" });
 function activateArt(root) { root.querySelectorAll(".art").forEach(el => { if (!el.querySelector("img")) coverObserver.observe(el); }); }
-function findItem(kind, id) { return (kind === "book" ? state.books : state.games).find(x => x.id === +id); }
+function findItem(kind, id) { return kind === "book" ? state.books.find(x => x.id === +id) : (state.games.find(x => x.id === +id) || accountCopies().find(x => x.id === +id)); }
 
 /* ---------- the game case ---------- */
 function upgradeLabel(g) {
@@ -145,6 +145,8 @@ function caseHTML(g, o = {}) {
   else if (st === "Second chance") badge = `<span class="badge chance">↺</span>`;
   else if (g.status === "Dropped") badge = `<span class="badge drop">✗</span>`;
   else if (g.priority === "Extreme" || g.priority === "High") badge = `<span class="badge" style="color:${PRIO_COLOR[g.priority]}">${g.priority}</span>`;
+  const rkn = rankOf(g);
+  const rankChip = rkn && rkn > 10 ? `<span class="rankchip" title="#${rkn} in your Top 100">#${rkn}</span>` : "";
   const fresh = state.updated[g.name] ? `<span class="freshline" title="${esc(state.updated[g.name].title || "")}"><i></i>Newly updated!</span>` : "";
   const upOwned = g.upgrade_owned || factsOf(g).ps5_version;
   const up = g.upgrade && UPGRADE_TO[g.platform] && g.upgrade !== "No upgrade" ? `<span class="tag up ${upOwned ? "owned" : g.upgrade.startsWith("Free") ? "free" : "paid"}" title="${esc(upgradeLabel(g))}${upOwned ? " · you own the upgrade" : ""}">${upOwned ? `${esc(UPGRADE_TO[g.platform].replace("PlayStation ", "PS").replace("Nintendo ", ""))} ✓` : `${g.upgrade.startsWith("Free") ? "FREE" : "PAID"} ↑`}</span>` : "";
@@ -158,7 +160,7 @@ function caseHTML(g, o = {}) {
     ? `<div class="media card"><div class="card-face"><span>${esc(p.label.replace("Nintendo ", ""))}</span></div></div>`
     : `<div class="media disc ${p.disc || ""}"><div class="disc-face"></div></div>`;
   const dups = (dupsOf.get(g) || []).slice(0, 3);
-  const stack = dups.length ? `<div class="stackdiscs" aria-hidden="true">${dups.map((d, i) => { const dp = plat(d.platform); return `<i style="--i:${i + 1};--dc:${dp.band}" title="${esc(d.name)} · ${esc(dp.label)}"></i>`; }).join("")}</div><span class="copies" title="${esc(dups.map(d => `${d.name} (${plat(d.platform).label}, ${d.status})`).join(" · "))}">×${dups.length + 1}</span>` : "";
+  const stack = dups.length ? `<div class="fancards" aria-hidden="true">${dups.map((d, i) => { const dp = plat(d.platform), c = covers.get(coverKey(d)) || covers.get(coverKey(g)); return `<i style="--i:${i + 1};--n:${dups.length};--dc:${dp.band};--dt:${dp.text || "#fff"};--ds:${dp.shell || "#10162A"}"><em>${esc(dp.label)}</em>${c ? `<img alt="" src="${c}">` : ""}</i>`; }).join("")}</div><span class="copies" title="${esc(dups.map(d => `${d.name} (${plat(d.platform).label}, ${d.status})`).join(" · "))}">×${dups.length + 1}</span>` : "";
   return `<button class="case p-${(g.platform || "x").replace(/\W+/g, "")} ${g.status === "Wishlist" ? "unowned" : ""} ${dups.length ? "stacked" : ""} ${effectClass(g)} ${ach ? "honored" : ""}" data-id="${g.id}" data-kind="game"
     style="--band:${p.band};--band-text:${p.text};--shell:${p.shell};--accent:${p.accent};--plat:${p.chip}" aria-label="${esc(g.name)}">
     <div class="stage">${stack}${media}${effectLayer(g)}
@@ -168,7 +170,7 @@ function caseHTML(g, o = {}) {
         <div class="hinge"></div><div class="sheen"></div>${typeTag}${quick}
       </div>${ach}
     </div>
-    ${o.noLabel ? "" : `<div class="label">${fresh}<div class="name">${esc(g.name)}</div><div class="sub">${badge}${esc(o.sub ?? subline(g))}</div>${g.status === "Wishlist" ? priceTag(g) : ""}</div>`}
+    ${o.noLabel ? "" : `<div class="label">${fresh}<div class="name">${esc(g.name)}</div><div class="sub">${badge}${rankChip}${esc(o.sub ?? subline(g))}</div>${g.status === "Wishlist" ? priceTag(g) : ""}</div>`}
   </button>`;
 }
 function factsOf(g) { return state.facts[g.name] || {}; }
@@ -196,6 +198,8 @@ function effectClass(g) {
 function effectLayer(g) {
   const st = statusOf(g);
   let out = "";
+  const rk = rankOf(g);
+  if (rk && rk <= 10) out += `<span class="favstar" title="All-time favourite · #${rk} in your Top 100"><svg viewBox="0 0 24 24"><path d="M12 2.5l2.9 6 6.6.9-4.8 4.6 1.2 6.5L12 17.4l-5.9 3.1 1.2-6.5-4.8-4.6 6.6-.9z"/></svg><b>${rk}</b></span>`;
   if (g.priority === "Extreme" && g.status !== "Completed" && g.status !== "Dropped") out += `<div class="flames" aria-hidden="true"><i></i><i></i><i></i><i></i><i></i></div>`;
   if ((st === "Paused" || g.status === "Paused") && st !== "Second chance") out += `<div class="cobweb" aria-hidden="true"><svg viewBox="0 0 60 60"><path d="M0 0L60 60M0 0L60 22M0 0L22 60M0 0L60 0M0 0L0 60M10 0Q8 8 0 10M22 0Q18 18 0 22M36 0Q30 30 0 36M52 0Q42 42 0 52"/></svg></div><div class="dust" aria-hidden="true"></div>`;
   if (st === "Second chance") out += `<span class="extralife" title="Second chance"><svg viewBox="0 0 24 24"><path d="M12 21s-7.5-4.6-9.5-9.1C1 8.4 3.2 5 6.6 5c2 0 3.4 1.1 4.2 2.4C11.6 6.1 13 5 15 5c3.4 0 5.6 3.4 4.1 6.9C17.1 16.4 12 21 12 21z"/></svg><b>↻ 1UP</b></span>`;
@@ -235,7 +239,7 @@ function bookHTML(b, o = {}) {
 const byPrio = (a, b) => (PRIO_ORDER[a.priority] ?? 9) - (PRIO_ORDER[b.priority] ?? 9) || a.name.localeCompare(b.name);
 const byDone = (a, b) => (b.completed || "").localeCompare(a.completed || "");
 function shelves() {
-  const G = collapse(state.games), year = new Date().getFullYear();
+  const G = collapse(withCopies(state.games)), year = new Date().getFullYear();
   const fresh = G.filter(g => state.updated[g.name] && owned(g) && g.status !== "Completed");
   return [
     { title: "Continue playing", items: G.filter(g => g.status === "Playing" && g.type !== "Live service").concat(G.filter(g => g.status === "Paused").sort(byPrio)), view: "library", preset: { status: "Playing" } },
@@ -252,6 +256,48 @@ function shelves() {
     { title: "Second chances", items: G.filter(g => statusOf(g) === "Second chance"), view: "played" },
   ];
 }
+/* ----- your Top 100 ----- */
+let rankIndex = null, rankDirty = false;
+function rankKey(n) {
+  const R = { ii: "2", iii: "3", iv: "4", v: "5", vi: "6", vii: "7", viii: "8", ix: "9", x: "10" };
+  return String(n || "").normalize("NFD").replace(/[\u0300-\u036f]/g, "").toLowerCase().replace(/[™®©]/g, "").replace(/&/g, " and ")
+    .replace(/[^a-z0-9]+/g, " ").split(" ").filter(w => w && w !== "the").map(w => R[w] || w).join(" ");
+}
+function rankOf(g) {
+  if (!rankIndex) { rankIndex = new Map(); (state.ranking || []).forEach((n, i) => { if (!rankIndex.has(rankKey(n))) rankIndex.set(rankKey(n), i + 1); }); }
+  return rankIndex.get(rankKey(g.name)) || null;
+}
+function rankedGame(name) { const k = rankKey(name); return state.games.find(g => rankKey(g.name) === k) || null; }
+function rankingHTML() {
+  const list = state.ranking || [];
+  const row = (n, i) => {
+    const g = rankedGame(n), fav = i < 10;
+    const art = g ? `<div class="art" data-kind="game" data-id="${g.id}"></div>` : `<div class="art virtual" data-vname="${esc(n)}"></div>`;
+    return `<li class="rk ${fav ? "fav" : ""}" draggable="true" data-ri="${i}">
+      <span class="rk-n">${fav ? "★" : ""}${i + 1}</span>${art}
+      <div class="rk-t"><b>${esc(n)}</b><small>${g ? `${esc(plat(g.platform).label)} · ${esc(statusOf(g))}${g.score != null ? ` · ${scoreText(g.score)}` : ""}` : "Not in your library"}</small></div>
+      <div class="rk-act"><button class="icon" data-rkmove="${i}:-1" title="Move up" aria-label="Move up">▲</button><button class="icon" data-rkmove="${i}:1" title="Move down" aria-label="Move down">▼</button>
+        ${g ? `<button class="ghost small" data-open="${g.id}" data-kind="game">Open</button>` : ""}<button class="icon" data-rkdel="${i}" title="Remove from Top 100" aria-label="Remove">✕</button></div></li>`;
+  };
+  return `<section class="ranking"><header class="deals-head"><div><h1>Top 100</h1><p class="muted">Drag to reorder (or use the arrows). The top 10 are your all-time favourites and get gold stars on their covers.${state.rankingLocal ? " Saved on this PC until you update the connection script (Settings)." : " Saved to the Ranking tab in your sheet."}</p></div>
+    <div class="deals-actions"><input class="search" id="rankAdd" list="rankAddList" placeholder="Add a game to the ranking"><datalist id="rankAddList">${state.games.filter(g => !rankOf(g)).map(g => `<option value="${esc(g.name)}">`).join("")}</datalist></div></header>
+    <ol class="rklist" id="rkList">${list.map(row).join("")}</ol></section>`;
+}
+function saveRanking(msg) {
+  rankDirty = true; rankIndex = null;
+  clearTimeout(saveRanking.t);
+  saveRanking.t = setTimeout(async () => {
+    const r = await Promise.resolve(api?.save_ranking(state.ranking)).catch(e => ({ error: String(e) }));
+    rankDirty = false;
+    if (r?.error) toast(r.error, "err"); else if (msg) toast(msg, "ok");
+  }, 700);
+  const v = $("#view"), top = v.scrollTop;
+  if (state.view === "ranking") { v.innerHTML = rankingHTML(); activateArt(v); loadVirtualArt(v); v.scrollTop = top; }
+}
+function loadVirtualArt(root) {
+  root.querySelectorAll(".art.virtual").forEach(el => Promise.resolve(api?.cover(el.dataset.vname, "")).then(uri => { if (uri && el.isConnected) el.innerHTML = `<img alt="" decoding="async" src="${uri}">`; }).catch(() => {}));
+}
+
 /* ----- the same game more than once: one cover, the other copies stacked behind it ----- */
 const PLAT_RANK = ["PS5", "Switch 2", "Switch", "Steam", "PS4", "GOG", "Epic Games", "EA", "Ubisoft Connect", "PC (Other)", "itch.io", "Emulation", "PS2"];
 const VERSION_WORDS = [[/\banniversary( edition)?\b/, 3], [/\bspecial edition\b/, 3], [/\benhanced( edition)?\b/, 3], [/\bdefinitive( edition)?\b/, 2],
@@ -270,6 +316,24 @@ const dupsOf = new WeakMap();   // main copy -> the other copies
 function copyRank(g) {
   return [-versionScore(g.name), g.format === "Physical" ? 0 : 1, (PLAT_RANK.indexOf(g.platform) + 1) || 99, g.status === "Wishlist" ? 1 : 0];
 }
+/* copies you own on a linked account but the sheet lists elsewhere (Assassin's Creed II on Ubisoft Connect, owned on Steam too) */
+let virtualCopies = [], virtualKey = "";
+function accountCopies() {
+  const key = JSON.stringify([state.games.length, state.facts && Object.keys(state.facts).length, state.syncedAt]);
+  if (key === virtualKey) return virtualCopies;
+  virtualKey = key; virtualCopies = [];
+  const have = new Set(state.games.map(g => rankKey(g.name) + "|" + g.platform));
+  for (const g of state.games) {
+    if (g.status === "Wishlist" || g.type === "Modded") continue;
+    for (const c of (state.facts?.[g.name]?.copies || [])) {
+      if (!c.platform || c.platform === g.platform || have.has(rankKey(g.name) + "|" + c.platform)) continue;
+      have.add(rankKey(g.name) + "|" + c.platform);
+      virtualCopies.push({ ...g, id: 500000 + virtualCopies.length, platform: c.platform, format: "Digital", play_on: CONSOLES.has(c.platform) ? "" : (g.play_on || "PC"), virtual: true, from: SRC_LABEL[c.src] || c.src, upgrade: "", migrate_to: "" });
+    }
+  }
+  return virtualCopies;
+}
+function withCopies(list) { const v = accountCopies().filter(c => list.some(g => g.row === c.row)); return v.length ? list.concat(v) : list; }
 function collapse(list) {
   const groups = new Map(), years = new Map();
   for (const g of list) {
@@ -322,6 +386,7 @@ function render() {
   if (empty) { v.innerHTML = welcomeHTML(); bindWelcome(); return; }
   if (state.view === "home") v.innerHTML = homeHTML();
   else if (state.view === "stats") v.innerHTML = yearsHTML();
+  else if (state.view === "ranking") { v.innerHTML = rankingHTML(); activateArt(v); loadVirtualArt(v); return; }
   else if (state.view === "deals") { v.innerHTML = dealsHTML(); activateArt(v); loadDeals(false); return; }
   else if (state.view === "shelf") v.innerHTML = bookShelfHTML();
   else if (state.view === "books") v.innerHTML = bookLibraryHTML();
@@ -497,7 +562,7 @@ function asSet(v) { return v instanceof Set ? v : new Set(!v || v === "All" ? []
 function filtered() {
   const f = state.filter, q = f.q.trim().toLowerCase();
   f.status = asSet(f.status); f.prio = asSet(f.prio); f.formats = asSet(f.formats);
-  const list = state.games.filter(g => {
+  const list = withCopies(state.games).filter(g => {
     if (state.view === "wishlist" && g.status !== "Wishlist") return false;
     if (state.view === "played" && !["Completed", "Dropped"].includes(g.status)) return false;
     if (state.view === "library" && g.status === "Wishlist" && !f.status.has("Wishlist")) return false;
@@ -553,7 +618,7 @@ function libraryHTML() {
         ${modeSwitch()}
         <span class="total">${list.length} ${list.length === 1 ? "game" : "games"}</span>
         ${active ? `<button class="ghost small" id="clearFilters">Clear filters (${active})</button>` : ""}
-        ${state.canEdit ? `<button class="ghost small" data-add="games">+ Add game</button><button class="ghost small" data-modpacks>+ Modpack</button>` : ""}
+        ${state.canEdit ? `<button class="ghost small" data-add="games">+ Add game</button>${state.view === "wishlist" ? `<button class="ghost small" data-itch>Browse itch.io</button>` : `<button class="ghost small" data-modpacks>+ Modpack</button>`}` : ""}
       </div>
       ${statuses.length ? `<div class="line">${multi(f.status, "status", statuses)}</div>` : ""}
       <div class="line">${multi(f.prio, "prio", [...Object.keys(PRIO_ORDER), "None"], { None: "No priority" })}${multi(f.formats, "formats", ["Physical", "Digital"])}</div>
@@ -873,9 +938,10 @@ function gameOverviewHTML(g) {
   if (g.status === "Dropped") flags.push(["Second chance", g.second_chance]);
   const quick = state.canEdit ? `<div class="quick">${opts("games", "status").map(s => `<button class="qs ${g.status === s ? "on" : ""}" data-quick="${esc(s)}" style="--c:${STATUS_COLOR[s] || "#8F9BB3"}">${esc(s)}</button>`).join("")}</div>` : "";
   const fresh = state.updated[g.name];
-  collapse(state.games);
-  const others = dupsOf.get(g) || state.games.filter(x => x !== g && (dupsOf.get(x) || []).includes(g));
-  const copies = others.length ? `<div class="copiesbar"><span>Also in your library:</span>${others.map(o => `<button class="chip" data-open="${o.id}" data-kind="game">${esc(o.name)} · ${esc(plat(o.platform).label)}${o.format === "Physical" ? " (disc)" : ""} · ${esc(statusOf(o))}</button>`).join("")}</div>` : "";
+  collapse(withCopies(state.games));
+  const others = dupsOf.get(g) || withCopies(state.games).filter(x => x !== g && (dupsOf.get(x) || []).includes(g));
+  const copies = (g.virtual ? `<div class="copiesbar"><span>Owned on ${esc(plat(g.platform).label)} (from your ${esc(g.from)} account); your sheet lists it on ${esc(plat(state.games.find(x => x.row === g.row)?.platform).label)}.</span></div>` : "")
+    + (others.length ? `<div class="copiesbar"><span>Also in your library:</span>${others.map(o => `<button class="chip" data-open="${o.id}" data-kind="game">${esc(o.name)} · ${esc(plat(o.platform).label)}${o.format === "Physical" ? " (disc)" : ""} · ${esc(statusOf(o))}</button>`).join("")}</div>` : "");
   return `${fresh ? `<div class="freshbar" data-url="${esc(fresh.url || "")}"><b>Newly updated!</b> ${esc(fresh.title)} · ${ago(fresh.date)}</div>` : ""}${copies}
     <div class="gallery" id="gallery"><div class="g-main" id="gMain"><div class="g-empty"><span class="spinner"></span></div></div><div class="g-strip" id="gStrip"></div></div>
     <div class="links" id="links"><button class="ghost" disabled>Finding links…</button></div>
@@ -969,12 +1035,20 @@ function milestonesHTML(g, items) {
         <b>${esc(m.title)}</b>${m.summary ? `<p>${esc(m.summary)}</p>` : ""}</div></li>`).join("")}</ol>`;
 }
 function wikiHTML(g, w) {
-  const wp = w?.wikipedia;
+  const wp = w?.wikipedia, fd = w?.fandom, mg = w?.mapgenie;
   const pc = !CONSOLES.has(g.platform);
-  return `${wp ? `<div class="wiki">${wp.thumb ? `<img alt="" src="${esc(wp.thumb)}">` : ""}<h3>${esc(wp.title)}</h3><p>${esc(wp.extract)}</p></div>` : `<p class="muted">No Wikipedia article found.</p>`}
-    <div class="links">${wp?.url ? `<button class="primary" data-url="${esc(wp.url)}">Read on Wikipedia</button>` : ""}
-      ${w?.fandom ? `<button class="ghost" data-url="${esc(w.fandom)}">Search Fandom wikis</button>` : ""}
-      ${pc && w?.pcgamingwiki ? `<button class="ghost" data-url="${esc(w.pcgamingwiki)}">PCGamingWiki</button>` : ""}</div>`;
+  const inside = (url, title, label = "Open in Masterlog", browser = "Open in browser") => `<button class="primary small" data-inside="${esc(url)}" data-title="${esc(title)}">${label}</button><button class="ghost small" data-url="${esc(url)}">${browser}</button>`;
+  return `<section class="wsec"><h3>Wikipedia</h3>
+      ${wp ? `<div class="wiki">${wp.thumb ? `<img alt="" src="${esc(wp.thumb)}">` : ""}<h4>${esc(wp.title)}</h4><p>${esc(wp.extract)}</p></div><div class="links">${inside(wp.url, wp.title)}</div>` : `<p class="muted">No Wikipedia article found.</p>`}</section>
+    <section class="wsec"><h3>Fandom wiki</h3>
+      ${fd ? `<div class="wiki fandom">${fd.article?.thumb ? `<img alt="" src="${esc(fd.article.thumb)}">` : fd.logo ? `<img alt="" src="${esc(fd.logo)}">` : ""}<h4>${esc(fd.name)}</h4>
+          ${fd.article ? `<p><b>${esc(fd.article.title)}</b>${fd.article.abstract ? ` — ${esc(fd.article.abstract)}` : ""}</p>` : ""}</div>
+        <div class="links">${fd.article ? inside(fd.article.url, fd.article.title, "Open the article", "Article in browser") : ""}${inside(fd.url, fd.name, "Open the wiki", "Wiki in browser")}</div>`
+        : `<p class="muted">No Fandom wiki found for this game.</p><div class="links"><button class="ghost small" data-url="${esc(w?.fandom_search || "")}">Search Fandom</button></div>`}</section>
+    <section class="wsec"><h3>Map Genie</h3>
+      ${mg ? `<p class="muted">Interactive maps with every item, collectible and secret marked.</p><div class="mapgrid">${mg.maps.map(m => `<button class="mapbtn" data-inside="${esc(m.url)}" data-title="${esc(mg.game)}: ${esc(m.name)}"><span>🗺</span>${esc(m.name)}</button>`).join("")}</div>
+        <div class="links"><button class="ghost small" data-url="${esc(mg.url)}">All of ${esc(mg.game)} on Map Genie (browser)</button></div>` : `<p class="muted">Map Genie doesn't have maps for this game.</p>`}</section>
+    ${pc ? `<div class="links"><button class="ghost small" data-url="${esc(w?.pcgamingwiki || "")}">PCGamingWiki (fixes and settings)</button></div>` : ""}`;
 }
 function newsHTML(g, items) {
   if (!items.length) return `<p class="muted">No recent news found.</p>`;
@@ -1127,6 +1201,8 @@ function applyData(res) {
   state.games = res.games || []; state.plays = res.playthroughs || []; state.books = res.books || [];
   state.options = { games: res.games_options || {}, plays: res.playthroughs_options || {}, books: res.books_options || {} };
   state.canEdit = !!res.can_edit; state.syncedAt = res.synced_at;
+  if (!rankDirty) { state.ranking = (res.ranking || []).map(r => r.game); state.rankingLocal = !!res.ranking_local; }
+  rankIndex = null;
 }
 async function sync(manual) {
   if (!api) return;
@@ -1609,9 +1685,28 @@ function bindGlobal() {
     const open = e.target.closest("[data-open]"); if (open) return openPanel(open.dataset.kind || "game", open.dataset.open);
     if (e.target.closest("[data-catalog-go]")) { switchCatalog("news"); return go("yours"); }
     if (e.target.closest("[data-modpacks]")) return openModpacks();
+    if (e.target.closest("[data-itch]")) { api?.browse_itch(); return toast("itch.io opened. On any game's page, press \"+ Add to Masterlog wishlist\".", "ok"); }
+    const mv = e.target.closest("[data-rkmove]");
+    if (mv) { const [i, d] = mv.dataset.rkmove.split(":").map(Number), j = i + d, L = state.ranking; if (j < 0 || j >= L.length) return; [L[i], L[j]] = [L[j], L[i]]; try { FX.play.move(); } catch {} return saveRanking(); }
+    const rd = e.target.closest("[data-rkdel]");
+    if (rd) { const n = state.ranking.splice(+rd.dataset.rkdel, 1)[0]; return saveRanking(`${n} removed from your Top 100.`); }
   });
   document.addEventListener("click", e => { const u = e.target.closest("[data-url]"); if (u && u.dataset.url && !(u.matches(".nitem.spoiler"))) api?.open(u.dataset.url); });
+  // dragging rows in the Top 100
+  let dragFrom = null;
+  view.addEventListener("dragstart", e => { const li = e.target.closest?.(".rk"); if (!li) return; dragFrom = +li.dataset.ri; li.classList.add("dragging"); e.dataTransfer.effectAllowed = "move"; });
+  view.addEventListener("dragover", e => { const li = e.target.closest?.(".rk"); if (dragFrom == null || !li) return; e.preventDefault(); view.querySelectorAll(".rk.over").forEach(x => x.classList.remove("over")); li.classList.add("over"); });
+  view.addEventListener("dragend", () => { dragFrom = null; view.querySelectorAll(".rk.dragging, .rk.over").forEach(x => x.classList.remove("dragging", "over")); });
+  view.addEventListener("drop", e => {
+    const li = e.target.closest?.(".rk"); if (dragFrom == null || !li) return;
+    e.preventDefault();
+    const to = +li.dataset.ri, item = state.ranking.splice(dragFrom, 1)[0];
+    state.ranking.splice(to, 0, item); dragFrom = null;
+    try { FX.play.save(); } catch {}
+    saveRanking(to < 10 ? `${item} is now #${to + 1}: an all-time favourite.` : `${item} is now #${to + 1}.`);
+  });
   view.addEventListener("change", e => {
+    if (e.target.id === "rankAdd" && e.target.value.trim()) { const n = e.target.value.trim(); if (!state.ranking.some(x => rankKey(x) === rankKey(n))) { state.ranking.push(n); saveRanking(`${n} added at #${state.ranking.length}. Drag it where it belongs.`); } return; }
     if (e.target.id === "scale") applyScale(+e.target.value, true);
     if (e.target.id === "sort") { state.filter.sort = e.target.value; render(); }
     if (e.target.id === "bsort") { state.bfilter.sort = e.target.value; render(); }
@@ -1687,6 +1782,7 @@ function bindGlobal() {
     if (e.target.closest("[data-coverpick]")) { e.stopPropagation(); return openCoverPicker(); }
     if (e.target.closest("[data-refresh]")) return refreshGame();
     const dl = e.target.closest("[data-dlcown]"); if (dl) return markDlc(dl.dataset.dlcown);
+    const ins = e.target.closest("[data-inside]"); if (ins) { api?.open_inside(ins.dataset.inside, ins.dataset.title || "Masterlog"); return; }
     const tw = e.target.closest("[data-twitch]"); if (tw) return playWatch("twitch", +tw.dataset.twitch);
     const yw = e.target.closest("[data-ytw]"); if (yw) return playWatch("yt", +yw.dataset.ytw);
   });
@@ -1765,7 +1861,7 @@ async function addModpack(i, btn) {
 const CLAUDE_FIELDS = ["status", "priority", "platform", "play_on", "format", "hours", "score", "genre", "developer", "publisher", "notes", "type", "migrate_to", "upgrade", "upgrade_owned", "dlc_owned", "dlc_done", "platinum", "second_chance"];
 function claudePrompt(ask) {
   const opts = state.options.games || {};
-  const rows = state.games.map(g => [g.name, g.status, g.priority || "", g.platform, g.format || "", g.hours ?? "", g.score ?? "", g.genre || "", g.completed || "", g.type || ""].join(" | ")).join("\n");
+  const rows = state.games.map(g => [g.name, g.status, g.priority || "", g.platform, g.format || "", g.hours ?? "", g.score ?? "", g.genre || "", g.completed || "", g.type || "", rankOf(g) || ""].join(" | ")).join("\n");
   return `You're helping me manage my game backlog app, Masterlog. My library is below (one game per line).
 
 My request: ${ask}
@@ -1774,13 +1870,14 @@ Answer normally (recommendations, thoughts) for me to read. If my request means 
 \`\`\`masterlog
 {"actions": [
   {"do": "update", "game": "<exact name from my library>", "set": {"status": "Completed", "score": 7, "hours": 10.5}},
-  {"do": "add", "game": "<new game's official name>", "set": {"status": "Wishlist", "platform": "Steam", "priority": "High"}}
+  {"do": "add", "game": "<new game's official name>", "set": {"status": "Wishlist", "platform": "Steam", "priority": "High"}},
+  {"do": "rank", "game": "<exact name>", "position": 26}
 ]}
 \`\`\`
 Rules: use exact names from my library for updates. Fields you may set: ${CLAUDE_FIELDS.join(", ")}.
-Allowed values: status ${JSON.stringify(opts.status || ["Library", "Playing", "Paused", "Wishlist", "Completed", "Dropped"])}, priority ${JSON.stringify(opts.priority || ["Extreme", "High", "Medium", "Low"])}, platform ${JSON.stringify(opts.platform || Object.keys(PLAT))}, format ["Digital","Physical"], type ["Live service","Modded"]. Scores are out of 10, hours are numbers. Completion dates fill in automatically. Rankings and favourites aren't supported yet, so just mention them in text.
+Allowed values: status ${JSON.stringify(opts.status || ["Library", "Playing", "Paused", "Wishlist", "Completed", "Dropped"])}, priority ${JSON.stringify(opts.priority || ["Extreme", "High", "Medium", "Low"])}, platform ${JSON.stringify(opts.platform || Object.keys(PLAT))}, format ["Digital","Physical"], type ["Live service","Modded"]. Scores are out of 10, hours are numbers. Completion dates fill in automatically. "rank" places a game in my Top 100 (1 = best; the top 10 are my all-time favourites; position 0 removes it). My current Top 100 in order: ${(state.ranking || []).map((n, i) => `${i + 1}. ${n}`).join("; ")}.
 
-My library (name | status | priority | platform | format | hours | score | genre | finished | type):
+My library (name | status | priority | platform | format | hours | score | genre | finished | type | top-100 rank):
 ${rows}`;
 }
 function parseClaude(text) {
@@ -1788,7 +1885,8 @@ function parseClaude(text) {
   if (!m) return { actions: [], say: text.trim() };
   let data;
   try { data = JSON.parse(m[1]); } catch { return { error: "Claude's change list isn't valid JSON. Ask Claude to send the masterlog block again." }; }
-  const actions = (data.actions || []).filter(a => a && (a.do === "update" || a.do === "add") && a.game).map(a => {
+  const actions = (data.actions || []).filter(a => a && (a.do === "update" || a.do === "add" || a.do === "rank") && a.game).map(a => {
+    if (a.do === "rank") return { ...a, set: { position: +a.position || 0 }, ok: true };
     const set = {};
     for (const [k, v] of Object.entries(a.set || {})) if (CLAUDE_FIELDS.includes(k)) set[k] = v;
     const g = a.do === "update" ? state.games.find(x => x.name.toLowerCase() === String(a.game).toLowerCase()) : null;
@@ -1802,7 +1900,7 @@ function claudePreview() {
   $("#claudeApply").disabled = !(r.actions || []).some(a => a.ok);
   if (r.error) { box.innerHTML = `<p class="nerr">${esc(r.error)}</p>`; return r; }
   if (!r.actions.length) { box.innerHTML = $("#claudeReply").value.trim() ? `<p class="muted">No library changes in this answer.</p>` : ""; return r; }
-  box.innerHTML = `<h3>Changes Claude suggests</h3><ul class="claudeacts">${r.actions.map(a => `<li class="${a.ok ? "" : "bad"}"><b>${a.do === "add" ? "Add" : "Update"} ${esc(a.game)}</b>
+  box.innerHTML = `<h3>Changes Claude suggests</h3><ul class="claudeacts">${r.actions.map(a => `<li class="${a.ok ? "" : "bad"}"><b>${a.do === "add" ? "Add" : a.do === "rank" ? (a.set.position ? `Rank #${a.set.position}:` : "Remove from Top 100:") : "Update"} ${esc(a.game)}</b>
     <span>${Object.entries(a.set).map(([k, v]) => `${esc(k.replace(/_/g, " "))}: ${esc(v)}`).join(" · ") || "—"}</span>${a.ok ? "" : `<small>Not in your library, skipped</small>`}</li>`).join("")}</ul>`;
   return r;
 }
@@ -1813,6 +1911,12 @@ async function claudeApply() {
   $("#claudeApply").disabled = true;
   let done = 0;
   for (const a of acts) {
+    if (a.do === "rank") {
+      const L = state.ranking, k = rankKey(a.game), at = L.findIndex(n => rankKey(n) === k);
+      const name = at >= 0 ? L.splice(at, 1)[0] : a.game;
+      if (a.set.position > 0) L.splice(Math.min(a.set.position - 1, L.length), 0, name);
+      saveRanking(); done++; continue;
+    }
     const res = a.do === "add" ? await api.add("games", { name: a.game, status: "Library", format: "Digital", ...a.set }).catch(e => ({ error: String(e) }))
       : await api.edit("games", a.target.row, a.target.name, a.set).catch(e => ({ error: String(e) }));
     if (res && !res.error) done++;
@@ -2260,6 +2364,7 @@ async function start() {
   setTimeout(checkNewsDot, 15000); setInterval(checkNewsDot, 15 * 60 * 1000);
   setTimeout(() => loadDeals(false), 6000); setInterval(() => loadDeals(false), 30 * 60 * 1000);
   setInterval(pollRenames, 60 * 1000);
+  setInterval(async () => { const a = await Promise.resolve(api?.itch_added()).catch(() => []); if (a?.length) { toast(`Added to your wishlist from itch.io: ${a.join(", ")}.`, "party"); sync(true); } }, 5000);
   setInterval(() => { if (state.catalog === "news") loadNews(state.view, true); }, 15 * 60 * 1000);
   pollAccounts(false);
 }

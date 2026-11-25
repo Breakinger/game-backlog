@@ -252,7 +252,12 @@ class ScriptClient:
             rows = [(r["row"], r["values"]) for r in t["rows"]]
             result[tab] = parse(t["headers"], rows)
             result[tab + "_options"] = options_for(tab, t.get("options"))
+        result["ranking"] = out.get("ranking")          # None when the script is older than the Ranking tab
+        result["script_version"] = out.get("script") or 1
         return result
+
+    def rank(self, names):
+        return self._call(body={"action": "rank", "key": self.key, "list": [{"game": n} for n in names]})
 
     def _to_headers(self, tab, changes):
         fields = TABS[tab]

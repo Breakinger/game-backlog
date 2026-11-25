@@ -498,6 +498,7 @@ class Accounts:
                 if best:
                     f = facts.setdefault(best["name"], {})
                     f.setdefault("sources", []).append(src)
+                    f.setdefault("copies", []).append({"src": src, "platform": a.get("platform") or {"steam": "Steam", "itch": "itch.io"}.get(src), "id": a["id"]})
                     f["minutes"] = max(f.get("minutes") or 0, a.get("minutes") or 0)
                     if a.get("last_played"):
                         f["last_played"] = a["last_played"]

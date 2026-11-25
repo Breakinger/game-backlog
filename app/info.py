@@ -519,16 +519,19 @@ class Info:
     def wiki(self, game):
         key = self._key(game)
         hit = self.cache.get("wiki", key)
-        if hit is not None:
+        if hit is not None and "mapgenie" in hit:
             return hit
         try:
             w = wikipedia(game.get("name", ""), ("video game " + (game.get("developer") or "")).strip())
         except Exception:
             return None
+        import guides
         q = urllib.parse.quote(game.get("name", ""))
         out = {"wikipedia": w,
-               "fandom": f"https://community.fandom.com/wiki/Special:Search?query={q}&scope=cross-wiki",
-               "pcgamingwiki": f"https://www.pcgamingwiki.com/w/index.php?search={q}"}
+               "fandom_search": f"https://community.fandom.com/wiki/Special:Search?query={q}&scope=cross-wiki",
+               "pcgamingwiki": f"https://www.pcgamingwiki.com/w/index.php?search={q}",
+               "fandom": _safe(guides.fandom, game.get("name", "")),
+               "mapgenie": _safe(guides.mapgenie, game.get("name", ""))}
         self.cache.put("wiki", key, out)
         return out
 

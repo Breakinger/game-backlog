@@ -1,5 +1,5 @@
 /**
- * Game Backlog connection.
+ * Masterlog connection (version 2: adds the Ranking tab).
  *
  * Paste this into your sheet (Extensions → Apps Script), then Deploy → New deployment →
  * Web app, Execute as: Me, Who has access: Anyone. Copy the Web app link into the app's Settings.
@@ -54,6 +54,7 @@ function route_(p) {
   if (p.action === 'read') return read_();
   if (p.action === 'update') return withLock_(() => update_(p));
   if (p.action === 'add') return withLock_(() => add_(p));
+  if (p.action === 'rank') return withLock_(() => rank_(p));
   return { error: 'Unknown action: ' + p.action };
 }
 
@@ -122,7 +123,35 @@ function read_() {
     games: table_('games'),
     plays: table_('plays'),
     books: table_('books'),
+    ranking: ranking_(),
+    script: 2,
   };
+}
+
+/* ---------- your ranking (Ranking tab: Rank | Game | Note) ---------- */
+function rankingSheet_(create) {
+  const ss = SpreadsheetApp.getActive();
+  let sh = ss.getSheetByName('Ranking');
+  if (!sh && create) { sh = ss.insertSheet('Ranking'); sh.getRange(1, 1, 1, 3).setValues([['Rank', 'Game', 'Note']]).setFontWeight('bold'); sh.setFrozenRows(1); }
+  return sh;
+}
+
+function ranking_() {
+  const sh = rankingSheet_(false);
+  if (!sh || sh.getLastRow() < 2) return [];
+  return sh.getRange(2, 1, sh.getLastRow() - 1, 3).getDisplayValues()
+    .filter(r => String(r[1]).trim())
+    .map(r => ({ rank: Number(r[0]) || 0, game: String(r[1]).trim(), note: String(r[2] || '') }))
+    .sort((a, b) => (a.rank || 9999) - (b.rank || 9999));
+}
+
+function rank_(p) {
+  const list = (p.list || []).map(x => typeof x === 'string' ? { game: x, note: '' } : x).filter(x => x && String(x.game).trim());
+  const sh = rankingSheet_(true);
+  const last = sh.getLastRow();
+  if (last > 1) sh.getRange(2, 1, last - 1, 3).clearContent();
+  if (list.length) sh.getRange(2, 1, list.length, 3).setValues(list.map((x, i) => [i + 1, String(x.game).trim(), x.note || (i < 10 ? 'All-time favourite' : '')]));
+  return { ok: true, count: list.length };
 }
 
 /* ---------- writing ---------- */

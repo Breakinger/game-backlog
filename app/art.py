@@ -82,6 +82,11 @@ PC_PLATFORMS = {"Steam", "GOG", "Epic Games", "EA", "EA App", "Ubisoft Connect",
 PS_PLATFORMS = {"PS5", "PS4", "PS2"}
 NINTENDO = {"Switch 2", "Switch"}
 USER_CHOSEN = ("custom", "picked")
+
+
+def plat_group(p):
+    """Covers differ between PlayStation, Nintendo and PC boxes, not between PC launchers."""
+    return "ps" if p in PS_PLATFORMS else "nin" if p in NINTENDO else "pc"
 STEAM_CDN = "https://shared.akamai.steamstatic.com/store_item_assets/"
 
 
@@ -356,11 +361,13 @@ class Art:
         if entry:
             fname = entry.get("file")
             have = fname and os.path.exists(os.path.join(self.dir, fname))
-            current = entry.get("v", 1) >= COVER_VERSION and entry.get("plat", "") == (platform or "")
+            current = entry.get("v", 1) >= COVER_VERSION and plat_group(entry.get("plat", "")) == plat_group(platform or "")
             if have and (entry.get("src") in USER_CHOSEN or current):
                 return self._data_uri(os.path.join(self.dir, fname))
             if not fname and current and time.time() - entry.get("t", 0) < MISS_RETRY_DAYS * 86400:
                 return None
+            if have and entry.get("v", 1) >= COVER_VERSION and time.time() - entry.get("t", 0) < 86400:
+                return self._data_uri(os.path.join(self.dir, fname))   # asked for under another platform today: don't flip-flop
         img, src = self._official(name, platform or "", hints)
         if not img:
             if entry and entry.get("file") and os.path.exists(os.path.join(self.dir, entry["file"])):

@@ -1,6 +1,7 @@
 """Masterlog: a console-style library for your games and books, on top of your Google Sheet."""
 import json
 import os
+import re
 import sys
 import threading
 import time
@@ -73,6 +74,34 @@ def audio_marks(path):
     return {"intro_end": 0, "loop_end": 0, "xfade": 3}
 
 
+class ItchBridge:
+    """The only thing itch.io pages opened inside Masterlog can do: add the game you're looking at to your wishlist."""
+
+    def __init__(self, api):
+        self._api = api
+        self._last = 0
+
+    def add_to_wishlist(self, url, title):
+        host = urllib.parse.urlparse(url or "").netloc.lower()
+        if not (host == "itch.io" or host.endswith(".itch.io")) or not (title or "").strip():
+            return {"error": "Open a game's page on itch.io first."}
+        if time.time() - self._last < 2:
+            return {"error": "One at a time."}
+        self._last = time.time()
+        name = re.sub(r"\s+by\s+.+$", "", title.split(" - itch.io")[0].split(" by ")[0]).strip()[:120]
+        client = self._api._script()
+        if not client:
+            return {"error": "Adding needs the sheet connection (Masterlog Settings)."}
+        try:
+            if not client.headers:
+                client.read()
+            client.add("games", {"name": name, "status": "Wishlist", "platform": "itch.io", "play_on": "PC", "format": "Digital", "store_link": url.split("?")[0]})
+            self._api._itch_added.append(name)
+            return {"ok": True, "name": name}
+        except Exception as e:
+            return {"error": str(e)}
+
+
 class Api:
     """Every public method here can be called from the page as window.pywebview.api.<name>()."""
 
@@ -103,6 +132,7 @@ class Api:
         self._deals = deals.Deals(self._art, self._dir)
         self._deals.ebay = deals.Ebay(self._vault)
         self._renamed = []   # official-title renames done in the background, for the page to announce
+        self._itch_added = []
         threading.Thread(target=self._deals_loop, daemon=True).start()
         self._names_path = os.path.join(self._dir, "names.json")
         try:
@@ -313,12 +343,47 @@ class Api:
             except Exception as e:  # report, keep showing the last good data
                 return {"error": str(e) or e.__class__.__name__, "code": getattr(e, "code", None)}
             data["can_edit"] = bool(client)
+            if data.get("ranking") is None:
+                data["ranking"] = [{"rank": i + 1, "game": n} for i, n in enumerate(self._local_ranking())]
+                data["ranking_local"] = True
+            elif self._settings.get("ranking") and client:
+                # you reordered while the old script was in place: move that order into the sheet now
+                try:
+                    client.rank(self._settings["ranking"])
+                    data["ranking"] = [{"rank": i + 1, "game": n} for i, n in enumerate(self._settings["ranking"])]
+                    self._settings.pop("ranking", None)
+                    self._write_settings()
+                except Exception:
+                    pass
             data["synced_at"] = time.time()
             data["playthroughs"] = data.pop("plays")
             data["playthroughs_options"] = data.pop("plays_options")
             with open(self._cache_path, "w", encoding="utf-8") as f:
                 json.dump(data, f, ensure_ascii=False)
             return data
+
+    # ----- your ranking -----
+    def _local_ranking(self):
+        r = self._settings.get("ranking")
+        if r is None:
+            with open(resource("top100.txt"), encoding="utf-8") as f:
+                r = [l.strip() for l in f if l.strip()]
+        return r
+
+    def save_ranking(self, names):
+        """Saves the order to the sheet's Ranking tab (or, with an older connection script, on this PC)."""
+        names = [n for n in (names or []) if (n or "").strip()]
+        client = self._script()
+        if client:
+            try:
+                client.rank(names)
+                return {"ok": True, "where": "sheet"}
+            except Exception as e:
+                if "Unknown action" not in str(e):
+                    return {"error": str(e)}
+        self._settings["ranking"] = names
+        self._write_settings()
+        return {"ok": True, "where": "local"}
 
     def edit(self, tab, row, name, changes):
         client = self._script()
@@ -836,6 +901,46 @@ class Api:
             return {"error": f"YouTube didn't accept that key ({e})."}
         self._vault.set("youtube", {"key": key})
         return {"ok": True}
+
+    # ----- pages opened inside Masterlog (wikis, maps, itch.io) -----
+    def open_inside(self, url, title="Masterlog"):
+        """Opens a web page in its own Masterlog window (wikis and maps work fine there, unlike in an embedded frame)."""
+        import webview
+        if not re.match(r"^https://", url or ""):
+            return {"error": "Only https pages can be opened."}
+        win = webview.create_window(f"{title} · Masterlog", url, width=1320, height=860, background_color="#0A1430")
+        return {"ok": bool(win)}
+
+    def browse_itch(self, url="https://itch.io/games"):
+        """itch.io inside Masterlog, with an 'Add to Masterlog wishlist' button on every game page."""
+        import webview
+        if not hasattr(self, "_itch_bridge"):
+            self._itch_bridge = ItchBridge(self)
+        win = webview.create_window("itch.io · Masterlog", url, js_api=self._itch_bridge, width=1320, height=860, background_color="#0A1430")
+        script = r"""
+(function () {
+  if (document.getElementById('ml-add')) return;
+  var og = document.querySelector('meta[property="og:title"]');
+  var isGame = /\.itch\.io$/.test(location.hostname) && location.pathname.split('/').filter(Boolean).length === 1;
+  if (!isGame) return;
+  var b = document.createElement('button');
+  b.id = 'ml-add'; b.textContent = '+ Add to Masterlog wishlist';
+  b.style.cssText = 'position:fixed;right:22px;bottom:22px;z-index:2147483647;padding:12px 18px;border-radius:999px;border:0;font:600 14px Segoe UI,sans-serif;background:#4A8CFF;color:#fff;box-shadow:0 8px 24px rgba(0,0,0,.4);cursor:pointer';
+  b.onclick = function () {
+    var t = (og && og.content) || document.title;
+    window.pywebview.api.add_to_wishlist(location.href, t).then(function (r) {
+      b.textContent = r && r.ok ? '\u2713 Added "' + r.name + '"' : (r && r.error) || 'Could not add it';
+      b.style.background = r && r.ok ? '#2F9E44' : '#C92A2A';
+    });
+  };
+  document.body.appendChild(b);
+})();"""
+        win.events.loaded += lambda: win.evaluate_js(script)
+        return {"ok": True}
+
+    def itch_added(self):
+        out, self._itch_added = self._itch_added, []
+        return out
 
     def set_reddit_app(self, app_id):
         """Optional: a free Reddit app ID, so Reddit lets Masterlog read the subreddits."""

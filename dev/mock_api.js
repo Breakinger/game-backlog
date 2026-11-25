@@ -20,7 +20,9 @@
       steam: { label: "Very Positive", percent: 91, count: 48210, url: "x" }, playstation: { stars: 4.71, count: 132000, url: "x" } }),
     dlcs: async g => wait([{ name: g.name + ": The Lost Expansion", major: true, kind: "dlc", art: art("Lost Expansion", 4), metacritic: 91, steam: { label: "Overwhelmingly Positive", percent: 96, count: 12000 }, release: "Jun 21, 2024", price: "$39.99", url: "x", summary: "A whole new region to explore, with new bosses and gear." },
       { name: g.name + " – Season Pass", kind: "upgrade", steam: { label: "Mostly Positive", percent: 74, count: 820 }, release: "2023", url: "x", summary: "" }]),
-    wiki: async g => wait({ wikipedia: { title: g.name, extract: `${g.name} is an action role-playing game. It received critical acclaim for its world design, combat and atmosphere, and sold millions of copies in its first year.`, url: "x" }, fandom: "x", pcgamingwiki: "x" }),
+    wiki: async g => wait({ wikipedia: { title: g.name, extract: `${g.name} is an action role-playing game. It received critical acclaim for its world design, combat and atmosphere, and sold millions of copies in its first year.`, url: "https://en.wikipedia.org/wiki/X" },
+      fandom: { name: g.name + " Wiki", url: "https://x.fandom.com/wiki/Main_Page", article: { title: g.name, url: "https://x.fandom.com/wiki/G", abstract: "The game's own wiki: characters, quests, items and lore." } },
+      mapgenie: { game: g.name, url: "https://mapgenie.io/x", maps: [{ name: "The Lands Between", url: "https://mapgenie.io/x/maps/a" }, { name: "Underground", url: "https://mapgenie.io/x/maps/b" }, { name: "Realm of Shadow", url: "https://mapgenie.io/x/maps/c" }] }, pcgamingwiki: "x" }),
     news: async g => wait([{ title: `${g.name}: Update 1.12 "Ember" is out`, url: "x", date: Date.now() / 1000 - 3 * 86400, source: "Steam", summary: "A new region, photo mode filters and fixes for rare crashes.", patch: true, kind: "major", thumb: art("Ember", 6) },
       { title: "Hotfix 1.12.1", url: "x", date: Date.now() / 1000 - 1 * 86400, source: "Steam", summary: "Fixed a crash when loading saves.", patch: true, kind: "minor" },
       { title: `What's next for ${g.name}`, url: "x", date: Date.now() / 1000 - 40 * 86400, source: "IGN", summary: "", patch: false }]),
@@ -34,7 +36,7 @@
     set_igdb: async () => ({ ok: true }), toggle_big_picture: async () => true,
     set_cover: async () => null, clear_cover: async n => art(n, 1),
     accounts_status: async () => ({ steam: { linked: true, who: "Breakinger", games: 412, synced: Date.now() / 1000 - 300 }, psn: { linked: false }, heroic: { linked: false, found: true }, itch: { linked: false } }),
-    account_data: async () => ({ facts: { "Elden Ring": { sources: ["steam"], minutes: 10600, achievements: { done: 42, total: 42 }, complete: "100%" }, "Astro Bot": { sources: ["psn"], minutes: 1020, complete: "Platinum", trophies: { progress: 100, platinum: true } }, "Baldur's Gate 3": { sources: ["steam"], minutes: 5400, achievements: { done: 21, total: 54 } } },
+    account_data: async () => ({ facts: { "Assassin's Creed II": { sources: ["steam"], copies: [{ src: "steam", platform: "Steam", id: "steam:33230" }], minutes: 900 }, "Elden Ring": { sources: ["steam"], minutes: 10600, achievements: { done: 42, total: 42 }, complete: "100%" }, "Astro Bot": { sources: ["psn"], minutes: 1020, complete: "Platinum", trophies: { progress: 100, platinum: true } }, "Baldur's Gate 3": { sources: ["steam"], minutes: 5400, achievements: { done: 21, total: 54 } } },
       candidates: [{ id: "steam:1", name: "Hollow Knight", platform: "Steam", minutes: 1800, source: "steam" }, { id: "steam:2", name: "Celeste", platform: "Steam", minutes: 0, source: "steam" }],
       wishlist: [{ id: "steamwish:9", name: "Hollow Knight: Silksong", platform: "Steam", source: "steam", appid: 9 }], wish_appids: [9], new: [], unreviewed: window.MOCK_IMPORT ? ["steam"] : [] }),
     accounts_seen: async () => true, accounts_sync: async () => true, import_games: async l => wait({ added: l.map(x => x.name), failed: [] }),
@@ -70,6 +72,7 @@
       { name: "The Elder Scrolls V: Skyrim Special Edition: Lorerim", manager: "Mod Organizer 2", mods: 1450, detail: "enabled mods", last: Date.now() / 1000 - 3 * 86400, added: true }] }),
     add_modpack: async () => wait({ ok: true }), candidate_cover: async n => art(n, 3), hide_games: async () => ({ hidden: [] }), hidden_games: async () => [],
     dlc_marks: async () => ({}), mark_dlc: async (g, d, o) => ({ [g]: { [d]: o } }), refresh_game: async () => true,
+    save_ranking: async l => wait({ ok: true, where: "sheet" }), open_inside: async () => ({ ok: true }), browse_itch: async () => ({ ok: true }), itch_added: async () => [],
     connection_script: async () => "// script", clear_covers: async () => true, open: async () => true, open_sheet: async () => true,
   } };
 })();

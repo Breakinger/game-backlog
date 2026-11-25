@@ -56,7 +56,7 @@ books_raw = [("Neuromancer","William Gibson","Sprawl",1,"Reading"),("Fahrenheit 
  ("Dune","Frank Herbert","Dune",1,"Read"),("Dune Messiah","Frank Herbert","Dune",2,"To read"),("Children of Dune","Frank Herbert","Dune",3,"To read"),
  ("God Emperor of Dune","Frank Herbert","Dune",4,"To read"),("Heretics of Dune","Frank Herbert","Dune",5,"To read"),("Chapterhouse: Dune","Frank Herbert","Dune",6,"To read")]
 books = [{"id":i,"row":i+2,"name":t,"author":a,"series":s_,"number":n,"status":st,"priority":"High" if t=="Dune Messiah" else "","finished":"2026-03-14" if st=="Read" else None,"format":"Physical","score":9.0 if st=="Read" else None,"notes":"","store_link":""} for i,(t,a,s_,n,st) in enumerate(books_raw)]
-data = {"games": games, "playthroughs": plays, "books": books, "can_edit": True, "synced_at": 1764078000,
+data = {"ranking": [{"rank": i + 1, "game": l.strip()} for i, l in enumerate(open("app/top100.txt")) if l.strip()], "games": games, "playthroughs": plays, "books": books, "can_edit": True, "synced_at": 1764078000,
         "games_options": {"status":["Library","Playing","Paused","Wishlist","Completed","Dropped"],"priority":["Extreme","High","Medium","Low"],"platform":["Steam","PS5","Switch 2","GOG","Epic Games","Ubisoft Connect","EA App","Emulation","PS4","PS2","PC (Other)","Switch"],"play_on":["PC","Steam Deck"],"format":["Digital","Physical"],"upgrade":["Free upgrade","Paid upgrade","No upgrade"]},
         "books_options": {}, "playthroughs_options": {}}
 open("dev/mock.js", "w").write("window.MOCK = " + json.dumps(data) + ";\n" + open("dev/mock_api.js").read())
