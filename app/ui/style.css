@@ -1053,3 +1053,25 @@ body.away *, body.away *::before, body.away *::after { animation-play-state: pau
 .band .emblem.deck + .tag.up { margin-left: .35em; }
 .p-Switch .band .wm, .p-Switch2 .band .wm { font-size: .74em; letter-spacing: .04em; font-weight: 800; }
 .band .emblem.sw + .wm { margin-right: auto; }
+
+/* right-click menu */
+.ctx { position: fixed; z-index: 300; min-width: 230px; padding: 6px; border-radius: 10px; background: #0F1C42; border: 1px solid var(--line-strong);
+  box-shadow: 0 18px 48px rgba(0,0,0,.6); font-size: 14px; animation: ctxin .12s ease-out; }
+@keyframes ctxin { from { opacity: 0; transform: translateY(-4px) scale(.98); } }
+.ctx-head { padding: 6px 10px 8px; font-size: 12px; color: var(--muted); max-width: 280px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; border-bottom: 1px solid var(--line); margin-bottom: 4px; }
+.ctx ul { list-style: none; margin: 0; padding: 0; }
+.ctx li { position: relative; display: flex; align-items: center; gap: 8px; padding: 7px 10px; border-radius: 6px; cursor: pointer; color: var(--glass); outline: none; }
+.ctx li:hover, .ctx li:focus-visible { background: rgba(74, 140, 255, .22); }
+.ctx li[disabled] { opacity: .45; cursor: default; }
+.ctx li small { color: var(--muted); margin-left: auto; max-width: 150px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.ctx li.sep { height: 1px; padding: 0; margin: 4px 6px; background: var(--line); cursor: default; }
+.ctx li.has-sub > i { margin-left: auto; font-style: normal; color: var(--muted); }
+.ctx .sub { display: none; position: absolute; left: calc(100% + 4px); top: -6px; min-width: 190px; max-height: 60vh; overflow-y: auto; padding: 6px; border-radius: 10px; background: #0F1C42; border: 1px solid var(--line-strong); box-shadow: 0 18px 48px rgba(0,0,0,.6); }
+.ctx.flip .sub { left: auto; right: calc(100% + 4px); }
+.ctx li.has-sub:hover > .sub, .ctx li.has-sub:focus-within > .sub { display: block; }
+.ctx .sub li[aria-checked="true"]::before { content: "✓"; color: var(--ok); }
+.ctx .sub li[aria-checked="false"]::before { content: ""; width: .7em; }
+.ctx-rank { cursor: default !important; }
+.ctx-rank span { flex: 1; }
+.ctx-rank input { width: 64px; padding: 3px 6px; border-radius: 5px; border: 1px solid var(--line-strong); background: rgba(6,12,31,.7); color: var(--glass); font: inherit; }
+.ctx-rank button { border: 0; border-radius: 5px; padding: 4px 8px; background: var(--focus); color: #fff; cursor: pointer; font: inherit; font-size: 12.5px; }

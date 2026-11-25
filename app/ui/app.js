@@ -577,6 +577,7 @@ function movePeek(x, y) {
 function hidePeek() { const p = $("#peek"); if (p) { p.classList.remove("show"); p.dataset.key = ""; } }
 
 /* ----- library / wishlist / played ----- */
+function splitList(s) { return String(s || "").split(/\s*[,/;&]\s*|\s+and\s+/i).map(x => x.trim().toLowerCase()).filter(Boolean); }
 const SPECIAL = {
   "Live service": g => g.type === "Live service",
   "Modpacks": g => g.type === "Modded",
@@ -599,6 +600,8 @@ function filtered() {
     if (f.prio.size && !f.prio.has(g.priority || "None")) return false;
     if (f.formats.size && !f.formats.has(g.format || "Digital")) return false;
     if (q && !`${g.name} ${g.genre} ${g.developer} ${g.publisher} ${g.platform}`.toLowerCase().includes(q)) return false;
+    if (f.genre && !splitList(g.genre).some(x => f.genre.includes(x))) return false;
+    if (f.studio && !splitList(`${g.developer},${g.publisher}`).some(x => f.studio.includes(x))) return false;
     return true;
   });
   const order = Object.keys(PLAT);
@@ -633,7 +636,8 @@ function libraryHTML() {
     return `<button class="chip" data-plat="${esc(p)}" aria-pressed="${f.plats.has(p)}" style="--c:${c.chip};--t:${c.chipText}"><i></i>${esc(label)}</button>`;
   }).join("");
   const list = filtered();
-  const active = f.status.size + f.prio.size + f.formats.size + f.plats.size + (f.playOn !== "All") + !!f.q;
+  const active = f.status.size + f.prio.size + f.formats.size + f.plats.size + (f.playOn !== "All") + !!f.q + !!f.genre + !!f.studio;
+  const pinned = [f.genre ? `<button class="chip on" data-unpin="genre">Genre: ${esc(f.genre.join(", "))} ✕</button>` : "", f.studio ? `<button class="chip on" data-unpin="studio">Made by: ${esc(f.studio.join(", "))} ✕</button>` : ""].join("");
   return `<div class="toolbar">
       <div class="line">
         <input class="search" id="search" type="search" placeholder="Search games, genres, studios" value="${esc(f.q)}">
@@ -648,6 +652,7 @@ function libraryHTML() {
       ${statuses.length ? `<div class="line">${multi(f.status, "status", statuses)}</div>` : ""}
       <div class="line">${multi(f.prio, "prio", [...Object.keys(PRIO_ORDER), "None"], { None: "No priority" })}${multi(f.formats, "formats", ["Physical", "Digital"])}</div>
       <div class="line">${chips}</div>
+      ${pinned ? `<div class="line">${pinned}</div>` : ""}
     </div>
     ${!list.length ? `<p class="empty">No games match these filters. Clear the search or pick another platform.</p>`
       : state.mode === "list" ? gameListHTML(list) : `<div class="grid">${list.map(g => caseHTML(g)).join("")}</div>`}`;
@@ -1704,6 +1709,7 @@ function bindGlobal() {
       state.filter[key] = set; return render();
     }
     if (e.target.closest("#clearFilters")) { state.filter = { q: "", status: new Set(), plats: new Set(), playOn: "All", prio: new Set(), formats: new Set(), sort: state.filter.sort }; return render(); }
+    const up = e.target.closest("[data-unpin]"); if (up) { state.filter[up.dataset.unpin] = null; return render(); }
     const segB = e.target.closest("[data-seg] button");
     if (segB) { state.filter[segB.parentElement.dataset.seg] = segB.dataset.v; return render(); }
     const bseg = e.target.closest("[data-bseg] button");
@@ -1732,6 +1738,29 @@ function bindGlobal() {
     try { FX.play.save(); } catch {}
     saveRanking(to < 10 ? `${item} is now #${to + 1}: an all-time favourite.` : `${item} is now #${to + 1}.`);
   });
+  // right-click a game's cover for quick changes
+  document.addEventListener("contextmenu", e => {
+    const c = e.target.closest?.(".case[data-kind='game'], tr[data-kind='game'], .rkcell .case");
+    if (!c || e.target.closest("#panel")) { closeCtx(); return; }
+    const g = findItem("game", c.dataset.id);
+    if (!g) return;
+    e.preventDefault(); hidePeek();
+    ctxMenu(g, e.clientX, e.clientY);
+  });
+  document.addEventListener("click", e => {
+    const m = document.getElementById("ctx");
+    if (!m) return;
+    if (!m.contains(e.target)) return closeCtx();
+    const li = e.target.closest("li[data-act], li[data-set], button[data-act]");
+    if (li) { e.preventDefault(); e.stopPropagation(); ctxAction(li.tagName === "BUTTON" ? li : li); }
+  }, true);
+  document.addEventListener("keydown", e => {
+    const m = document.getElementById("ctx");
+    if (!m) return;
+    if (e.key === "Escape") { e.stopPropagation(); closeCtx(); }
+    if (e.key === "Enter" && e.target.closest?.(".ctx-rank")) { e.preventDefault(); ctxAction(m.querySelector('[data-act="rank"]')); }
+  }, true);
+  view.addEventListener("scroll", closeCtx, { passive: true });
   view.addEventListener("change", e => {
     if (e.target.id === "rankAdd" && e.target.value.trim()) { const n = e.target.value.trim(); if (!state.ranking.some(x => rankKey(x) === rankKey(n))) { state.ranking.push(n); saveRanking(`${n} added at #${state.ranking.length}. Drag it where it belongs.`); } return; }
     if (e.target.id === "scale") applyScale(+e.target.value, true);
@@ -1958,6 +1987,70 @@ async function claudeApply() {
   toast(`Applied ${done} of ${acts.length} change${acts.length === 1 ? "" : "s"} from Claude.`, done === acts.length ? "ok" : "err");
   $("#claudeDialog").close(); $("#claudeReply").value = ""; $("#claudePreview").innerHTML = "";
   sync(true);
+}
+
+/* ---------- right-click a cover: quick changes right where you are ---------- */
+function ctxMenu(g, x, y) {
+  closeCtx();
+  const edit = state.canEdit ? "" : " disabled";
+  const sub = (label, key, values, current, fmt = v => v) => `<li class="has-sub" role="menuitem" tabindex="-1"><span>${label}</span><i>›</i><ul class="sub" role="menu">${values.map(v =>
+    `<li role="menuitemradio" tabindex="-1" aria-checked="${(current ?? "") === v}" data-set="${key}" data-val="${esc(v)}"${edit}>${esc(fmt(v))}</li>`).join("")}</ul></li>`;
+  const opts = (k, d) => state.options.games?.[k]?.length ? state.options.games[k] : d;
+  const genres = splitList(g.genre), studios = [...new Set(splitList(`${g.developer},${g.publisher}`))];
+  const rk = rankOf(g);
+  const m = document.createElement("div");
+  m.id = "ctx"; m.className = "ctx"; m.setAttribute("role", "menu"); m.dataset.id = g.id;
+  m.innerHTML = `<div class="ctx-head">${esc(g.name)}</div><ul>
+    <li role="menuitem" tabindex="-1" data-act="open">Open</li>
+    ${sub("Status", "status", opts("status", ["Library", "Playing", "Paused", "Wishlist", "Completed", "Dropped"]), g.status)}
+    ${sub("Priority", "priority", [...opts("priority", ["Extreme", "High", "Medium", "Low"]), ""], g.priority, v => v || "No priority")}
+    ${sub("Platform", "platform", opts("platform", Object.keys(PLAT)), g.platform, v => plat(v).label)}
+    ${sub("Format", "format", ["Physical", "Digital"], g.format)}
+    ${sub("Type", "type", ["", "Live service", "Modded"], g.type || "", v => v || "Normal game")}
+    <li role="menuitem" tabindex="-1" class="ctx-rank"><span>Top 100</span><input type="number" min="1" max="${(state.ranking || []).length + 1}" value="${rk || ""}" placeholder="place" aria-label="Top 100 place"><button type="button" data-act="rank">Set</button></li>
+    <li class="sep" role="separator"></li>
+    ${genres.length ? `<li role="menuitem" tabindex="-1" data-act="genre">Similar genre <small>${esc(genres.slice(0, 3).join(", "))}</small></li>` : ""}
+    ${g.developer ? `<li role="menuitem" tabindex="-1" data-act="dev">More by ${esc(g.developer)}</li>` : ""}
+    ${g.publisher && g.publisher !== g.developer ? `<li role="menuitem" tabindex="-1" data-act="pub">More from ${esc(g.publisher)}</li>` : ""}
+    <li class="sep" role="separator"></li>
+    <li role="menuitem" tabindex="-1" data-act="cover">Change cover…</li>
+    <li role="menuitem" tabindex="-1" data-act="refresh">Refresh info</li>
+  </ul>`;
+  document.body.append(m);
+  // keep it on screen, and open submenus to whichever side has room
+  const r = m.getBoundingClientRect();
+  const left = Math.min(x, innerWidth - r.width - 8), top = Math.min(y, innerHeight - r.height - 8);
+  m.style.left = `${Math.max(8, left)}px`; m.style.top = `${Math.max(8, top)}px`;
+  if (left + r.width * 2 > innerWidth) m.classList.add("flip");
+  try { FX.play.tab(); } catch {}
+  m.querySelector("li[data-act]")?.focus();
+}
+function closeCtx() { document.getElementById("ctx")?.remove(); }
+async function ctxAction(li) {
+  const m = document.getElementById("ctx"), g = findItem("game", m?.dataset.id);
+  if (!g || li.hasAttribute("disabled")) return;
+  const act = li.dataset.act;
+  if (li.dataset.set) {
+    const k = li.dataset.set, v = li.dataset.val;
+    closeCtx();
+    if ((g[k] ?? "") === v) return;
+    const target = g.virtual ? state.games.find(x => x.row === g.row) : g;
+    await saveEdit("games", target, { [k]: v }, true);
+    toast(`${g.name}: ${k.replace("_", " ")} set to ${v || "none"}.`, "ok");
+    return;
+  }
+  if (act === "rank") { const v = m.querySelector(".ctx-rank input").value; closeCtx(); placeInRanking(g, v === "" ? 0 : Math.max(1, Math.round(+v))); return render(); }
+  closeCtx();
+  if (act === "open") return openPanel("game", g.id);
+  if (act === "cover") { panelItem = { kind: "game", id: g.id }; coverFor = null; return openCoverPicker(); }
+  if (act === "refresh") { openPanel("game", g.id); return refreshGame(); }
+  if (act === "genre" || act === "dev" || act === "pub") {
+    const vals = act === "genre" ? splitList(g.genre) : splitList(act === "dev" ? g.developer : g.publisher);
+    state.filter = { q: "", status: new Set(), plats: new Set(), playOn: "All", prio: new Set(), formats: new Set(), sort: "priority",
+      genre: act === "genre" ? vals : null, studio: act !== "genre" ? vals : null };
+    if (state.catalog !== "games") switchCatalog("games");
+    return go("library");
+  }
 }
 
 /* fetch everything about a game again, in case something came out wrong */
