@@ -48,9 +48,9 @@ def resource(rel):
 DEFAULTS = {"sheet_url": sheet.DEFAULT_SHEET, "sheet_key": "", "sgdb_key": "", "refresh_minutes": 2,
             "view_mode": "covers", "sound_on": True, "ambient_volume": 0.35, "fx_volume": 0.5, "intro": True,
             "heroic_linked": False, "big_picture": False, "ambience_path": "", "steam_cc": "GE", "ps_locale": "en-us",
-            "money": "native", "auto_names": True, "scale": 1, "ui_state": {}}
+            "money": "native", "auto_names": True, "scale": 1, "ui_state": {}, "eshop_country": "DE"}
 PREFS = ("view_mode", "refresh_minutes", "sound_on", "ambient_volume", "fx_volume", "intro", "big_picture",
-         "steam_cc", "ps_locale", "money", "auto_names", "scale", "ui_state")
+         "steam_cc", "ps_locale", "money", "auto_names", "scale", "ui_state", "eshop_country")
 PRIVATE = ("sgdb_key", "sheet_key", "ambience_path")
 AUDIO_TYPES = {".mp3": "audio/mpeg", ".ogg": "audio/ogg", ".opus": "audio/ogg", ".m4a": "audio/mp4", ".aac": "audio/aac",
                ".wav": "audio/wav", ".flac": "audio/flac", ".webm": "audio/webm"}
@@ -97,6 +97,7 @@ class Api:
         self._feeds = feeds.Feeds()
         self._twitch = twitch.Twitch(self._igdb)
         self._deals = deals.Deals(self._art, self._dir)
+        self._deals.ebay = deals.Ebay(self._vault)
         self._renamed = []   # official-title renames done in the background, for the page to announce
         threading.Thread(target=self._deals_loop, daemon=True).start()
         self._accounts = accounts.Accounts(self._dir, self._vault, self._settings)
@@ -214,6 +215,7 @@ class Api:
         s["has_sgdb_key"] = bool(self._settings.get("sgdb_key"))
         s["has_igdb"] = self._igdb.configured()
         s["has_youtube"] = self._vault.has("youtube")
+        s["has_ebay"] = self._deals.ebay.configured() if getattr(self, "_deals", None) else False
         s["connected"] = bool(sheet.is_script_link(self._settings.get("sheet_url")) and self._settings.get("sheet_key"))
         s["link_kind"] = "script" if sheet.is_script_link(self._settings.get("sheet_url")) else ("csv" if self._settings.get("sheet_url") else "")
         s["data_dir"] = self._dir
@@ -248,15 +250,16 @@ class Api:
                     result["paired"] = out.get("title") or True
                 except Exception as e:
                     result["pair_error"] = str(e)
-        region = (self._settings.get("steam_cc"), self._settings.get("ps_locale"))
+        region = (self._settings.get("steam_cc"), self._settings.get("ps_locale"), self._settings.get("eshop_country"))
         for k in ("sgdb_key",) + PREFS:
             if k in new:
                 self._settings[k] = new[k]
-        if region != (self._settings.get("steam_cc"), self._settings.get("ps_locale")):
+        if region != (self._settings.get("steam_cc"), self._settings.get("ps_locale"), self._settings.get("eshop_country")):
             self._deals.state["t"] = 0      # new region: fetch prices again
             for e in self._deals.state.get("games", {}).values():
                 e.pop("ps", None)
                 e.pop("steam_ends", None)
+                e.pop("eshop", None)
         self._art.sgdb_key = self._settings.get("sgdb_key", "")
         self._write_settings()
         s = self.get_settings()
@@ -595,7 +598,18 @@ class Api:
         wish, owned = self._deals_inputs()
         if not wish and not owned:
             return
-        self._deals.refresh(wish, owned, self._settings.get("steam_cc") or "GE", self._settings.get("ps_locale") or "en-us", self._dlc_cached)
+        facts, wish_dlc = {}, []
+        try:
+            m = self._accounts.match(self._sheet_games())
+            facts = m["facts"]
+            for src, e in self._accounts.state["sources"].items():
+                wish_dlc += [w["appid"] for w in e.get("wishlist") or [] if w.get("dlc")]
+        except Exception:
+            pass
+        extra = {"appids": {n: f["appid"] for n, f in facts.items() if f.get("appid")}, "wish_dlc": wish_dlc, "owned_marks": self.dlc_marks()}
+        self._deals.refresh(wish, owned, self._settings.get("steam_cc") or "GE", self._settings.get("ps_locale") or "en-us", self._dlc_cached,
+                            extra=extra, eshop_country=self._settings.get("eshop_country") or "DE",
+                            news_lookup=lambda name: info.google_news(name, 20))
         self._apply_renames()
 
     def _deals_loop(self):
@@ -619,8 +633,8 @@ class Api:
         wish = {g["name"]: g for g in self._sheet_games() if g.get("status") == "Wishlist"}
         for old, hit in list(props.items()):
             g = wish.get(old)
-            if not g or hit.get("done") or hit.get("undone"):
-                continue
+            if not g or hit.get("done") or hit.get("undone") or hit.get("suggest"):
+                continue   # titles only seen in the news wait for you to confirm them
             r = self.edit("games", g.get("row"), old, {"name": hit["name"]})
             if r and not r.get("error"):
                 hit["done"] = time.time()
@@ -761,6 +775,23 @@ class Api:
         except Exception as e:
             return {"error": f"YouTube didn't accept that key ({e})."}
         self._vault.set("youtube", {"key": key})
+        return {"ok": True}
+
+    def set_ebay_keys(self, client_id, secret):
+        """Optional: your free eBay developer keys, for the cheapest physical copy of wishlist games."""
+        client_id, secret = (client_id or "").strip(), (secret or "").strip()
+        if not client_id or not secret:
+            self._vault.set("ebay", None)
+            self._vault.set("ebay_token", None)
+            return {"ok": True, "removed": True}
+        self._vault.set("ebay", {"id": client_id, "secret": secret})
+        self._vault.set("ebay_token", None)
+        try:
+            self._deals.ebay._token()
+        except Exception as e:
+            self._vault.set("ebay", None)
+            return {"error": f"eBay didn't accept those keys ({e})."}
+        self._deals.state["t"] = 0
         return {"ok": True}
 
     def milestones(self, game):

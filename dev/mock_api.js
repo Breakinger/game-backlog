@@ -53,12 +53,14 @@
     deals: async () => { const W = window.MOCK.games.filter(g => g.status === "Wishlist"); const games = {};
       W.forEach((g, k) => { games[g.name] = { appid: 100 + k, steam: k % 4 === 3 ? null : { currency: "USD", initial: 59.99, final: k % 3 === 0 ? 23.99 : 59.99, discount: k % 3 === 0 ? 60 : 0 }, steam_ends: k % 3 === 0 ? Date.now() / 1000 + 3 * 86400 + 4000 : null,
         stores: { deals: [{ store: "Fanatical", price: k % 3 === 0 ? 21.49 : 44.99, retail: 59.99, savings: k % 3 === 0 ? 64 : 25, url: "x" }, { store: "GOG", price: 59.99, retail: 59.99, savings: 0, url: "x" }], low: 17.99 },
+        eshop: k === 2 ? { currency: "EUR", initial: 59.99, final: 41.99, discount: 30, ends: Date.now() / 1000 + 5 * 86400 } : undefined,
         release: k % 5 === 1 ? { coming: true, ts: Date.now() / 1000 + (k + 3) * 86400, text: "Dec 2026" } : { coming: false } }; });
       return wait({ games, subs: [{ game: W[0]?.name || "Game", owned: false, title: `[Amazon] ${W[0]?.name} (PS5) $29.99`, url: "x", date: Date.now() / 1000 - 7200, source: "r/PS5Deals", domain: "amazon.com", link: "x", thumb: null }],
-        dlc: [{ game: "Elden Ring", name: "Shadow of the Erdtree", art: art("Erdtree", 3), url: "x", major: true, price: { currency: "USD", final: 23.99, discount: 40 } }],
+        dlc: [{ game: "Elden Ring", name: "Shadow of the Erdtree", art: art("Erdtree", 3), url: "x", major: true, price: { currency: "USD", final: 23.99, discount: 40 }, alt: { store: "Fanatical", price: 21.5, url: "x" } }],
+        bundles: [{ game: W[1]?.name || "Game", store: "Humble Bundle", name: "Indie Treasures Bundle", url: "x", ends: Date.now() / 1000 + 9 * 86400, count: 8, owned: false }],
         rates: { rates: { USD: 2.5922, EUR: 2.8343, GEL: 1 }, date: "2026-11-25T00:00:00Z", source: "National Bank of Georgia" },
         sale: window.MOCK_SALE ? { id: "winter-2026", name: "Steam Winter Sale", start: Date.now() / 1000 - 3600, end: Date.now() / 1000 + 18 * 86400, live: true } : { id: "winter-2026", name: "Steam Winter Sale", start: Date.now() / 1000 + 22 * 86400, end: Date.now() / 1000 + 40 * 86400, live: false },
-        renames: { "The Elder Scrolls VI": { name: "The Elder Scrolls VI: Sentinel", source: "Steam" } }, links: {}, running: false }); },
+        renames: { "The Elder Scrolls VI": { name: "The Elder Scrolls VI: Sentinel", source: "the news (3 outlets)", suggest: true } }, links: {}, running: false }); },
     renamed: async () => [], undo_rename: async () => ({}), apply_rename: async () => ({ ok: true }),
     cover_options: async (n) => wait({ items: [{ url: art(n + " steam", 1), thumb: art(n + " steam", 1), source: "Steam", note: "official library cover" }, { url: art(n + " ps", 2), thumb: art(n + " ps", 2), source: "PlayStation Store", note: "official" }, { url: art(n + " igdb", 3), thumb: art(n + " igdb", 3), source: "IGDB", note: "box art" }].concat([4,5,6,7,8].map(k => ({ url: art(n + k, k), thumb: art(n + k, k), source: "SteamGridDB", note: "fan" }))) }),
     pick_cover: async (n) => wait({ uri: art(n + " picked", 5) }), choose_ambience: async () => null, clear_ambience: async () => ({ ambience: null }), set_youtube_key: async () => ({ ok: true }),

@@ -200,6 +200,169 @@ def ps_price(name, locale="en-us"):
     return None
 
 
+# ---------------- Nintendo eShop (Europe) ----------------
+
+ESHOP_COUNTRIES = {"DE": "EUR", "FR": "EUR", "IT": "EUR", "ES": "EUR", "NL": "EUR", "AT": "EUR", "PL": "PLN", "GB": "GBP", "CZ": "CZK"}
+
+
+def eshop_find(name):
+    """The game's European eShop ID (nsuid), from Nintendo's own store search."""
+    data = _json("https://searching.nintendo-europe.com/en/select?fq=type:GAME&rows=8&wt=json&q=" + urllib.parse.quote(name))
+    docs = (data.get("response") or {}).get("docs") or []
+    docs = [d for d in docs if same_title(name, d.get("title", ""), 0.8) and d.get("nsuid_txt")]
+    if not docs:
+        return None
+    exact = [d for d in docs if _norm(d.get("title", "")) == _norm(name)]
+    d = (exact or docs)[0]
+    return {"nsuid": d["nsuid_txt"][0], "title": d.get("title"), "url": "https://www.nintendo.com" + (d.get("url") or ""),
+            "systems": d.get("system_names_txt") or []}
+
+
+def eshop_prices(nsuids, country="DE"):
+    """Live eShop prices, including how long a discount lasts."""
+    out = {}
+    ids = [str(i) for i in nsuids if i]
+    for i in range(0, len(ids), 50):
+        data = _json(f"https://api.ec.nintendo.com/v1/price?country={country}&lang=en&ids={','.join(ids[i:i + 50])}")
+        for p in data.get("prices") or []:
+            reg, disc = p.get("regular_price") or {}, p.get("discount_price") or {}
+            if not reg:
+                continue
+            base = float(reg.get("raw_value") or 0)
+            final = float(disc.get("raw_value") or base)
+            end = disc.get("end_datetime")
+            out[str(p.get("title_id"))] = {"currency": reg.get("currency"), "initial": base, "final": final,
+                                           "discount": round(100 - final / base * 100) if base and disc else 0,
+                                           "ends": int(datetime.fromisoformat(end.replace("Z", "+00:00")).timestamp()) if end else None}
+    return out
+
+
+# ---------------- bundles: Humble Bundle and Fanatical ----------------
+
+def humble_bundles():
+    """Every current Humble game bundle and what's in it."""
+    page = _get("https://www.humblebundle.com/bundles", timeout=25)
+    m = re.search(r'<script id="landingPage-json-data" type="application/json">\s*(\{.*?\})\s*</script>', page, re.S)
+    if not m:
+        return []
+    data = json.loads(m.group(1))
+    tiles = []
+    for cat, block in (data.get("data") or {}).items():
+        if cat not in ("games", "software"):
+            continue
+        for mosaic in block.get("mosaic") or []:
+            tiles += mosaic.get("products") or []
+    out = []
+    for t in tiles[:14]:
+        url = "https://www.humblebundle.com" + (t.get("product_url") or "")
+        try:
+            bp = _get(url, timeout=25)
+            mm = re.search(r'<script id="webpack-bundle-page-data" type="application/json">\s*(\{.*?\})\s*</script>', bp, re.S)
+            items = [v.get("human_name") for v in ((json.loads(mm.group(1)).get("bundleData") or {}).get("tier_item_data") or {}).values()] if mm else []
+        except Exception:
+            items = []
+        end = t.get("end_date|datetime") or t.get("end_date_datetime")
+        out.append({"store": "Humble Bundle", "name": t.get("tile_name") or t.get("tile_short_name"), "url": url,
+                    "ends": int(datetime.fromisoformat(end.replace("Z", "+00:00")).timestamp()) if end else None,
+                    "items": [i for i in items if i]})
+        time.sleep(0.4)
+    return out
+
+
+def fanatical_bundles():
+    """Current Fanatical bundles and their games (best effort: Fanatical has no documented public API)."""
+    out = []
+    data = _json("https://www.fanatical.com/api/algolia/bundles?altRank=false")
+    for b in (data if isinstance(data, list) else data.get("results") or [])[:30]:
+        slug = b.get("slug")
+        if not slug:
+            continue
+        items = []
+        try:
+            pg = _json(f"https://www.fanatical.com/api/products-group/{slug}/en")
+            for tier in pg.get("bundles") or []:
+                items += [g.get("name") for g in tier.get("games") or [] if g.get("name")]
+        except Exception:
+            pass
+        out.append({"store": "Fanatical", "name": b.get("name"), "url": f"https://www.fanatical.com/en/pick-and-mix/{slug}" if b.get("type") == "pick-and-mix" else f"https://www.fanatical.com/en/bundle/{slug}",
+                    "ends": b.get("available_valid_until"), "items": items})
+        time.sleep(0.3)
+    return out
+
+
+def bundle_hits(bundles, games):
+    out = []
+    for b in bundles:
+        for g in games:
+            if any(mentions(i, g["name"]) or _norm(i) == _norm(g["name"]) for i in b.get("items") or []):
+                out.append({"game": g["name"], "owned": g.get("status") != "Wishlist", **{k: v for k, v in b.items() if k != "items"},
+                            "count": len(b.get("items") or [])})
+    return out
+
+
+# ---------------- eBay (optional: your own free eBay developer keys) ----------------
+
+class Ebay:
+    def __init__(self, vault):
+        self.vault = vault
+
+    def configured(self):
+        c = self.vault.get("ebay") or {}
+        return bool(c.get("id") and c.get("secret"))
+
+    def _token(self):
+        tok = self.vault.get("ebay_token") or {}
+        if tok.get("token") and time.time() < tok.get("until", 0):
+            return tok["token"]
+        import base64
+        c = self.vault.get("ebay") or {}
+        auth = base64.b64encode(f"{c['id']}:{c['secret']}".encode()).decode()
+        req = urllib.request.Request("https://api.ebay.com/identity/v1/oauth2/token", method="POST",
+                                     data=urllib.parse.urlencode({"grant_type": "client_credentials", "scope": "https://api.ebay.com/oauth/api_scope"}).encode(),
+                                     headers={"Authorization": f"Basic {auth}", "Content-Type": "application/x-www-form-urlencoded"})
+        with urllib.request.urlopen(req, timeout=20) as r:
+            out = json.load(r)
+        tok = {"token": out["access_token"], "until": time.time() + int(out.get("expires_in", 7200)) - 300}
+        self.vault.set("ebay_token", tok)
+        return tok["token"]
+
+    def cheapest(self, name, platform_label, market="EBAY_US"):
+        """The cheapest Buy It Now listing of the physical game (new or used)."""
+        q = urllib.parse.quote(f"{name} {platform_label}")
+        req = urllib.request.Request(f"https://api.ebay.com/buy/browse/v1/item_summary/search?q={q}&category_ids=139973&limit=25&sort=price"
+                                     "&filter=buyingOptions:%7BFIXED_PRICE%7D",
+                                     headers={"Authorization": f"Bearer {self._token()}", "X-EBAY-C-MARKETPLACE-ID": market})
+        with urllib.request.urlopen(req, timeout=20) as r:
+            items = json.load(r).get("itemSummaries") or []
+        plat = platform_label.lower().replace("nintendo ", "")
+        for it in items:
+            t = it.get("title", "")
+            if mentions(t, name) and plat.split()[0] in t.lower() and not re.search(r"\b(case only|no game|empty|steelbook only|manual only|art ?book|guide)\b", t, re.I):
+                p = it.get("price") or {}
+                ship = ((it.get("shippingOptions") or [{}])[0].get("shippingCost") or {}).get("value")
+                return {"store": "eBay", "title": t, "price": float(p.get("value") or 0), "currency": p.get("currency") or "USD",
+                        "shipping": float(ship) if ship else None, "condition": it.get("condition"), "url": it.get("itemWebUrl")}
+        return None
+
+
+# ---------------- official titles spotted in the news ----------------
+
+def news_title_hint(name, headlines):
+    """'The Elder Scrolls VI: Sentinel' showing up in headlines from two or more outlets."""
+    pat = re.compile(re.escape(name) + r"\s*[:\-–—]\s*([A-Z0-9][\w'’]*(?:\s+(?:of|the|and|in|a|[A-Z0-9][\w'’]*)){0,5})")
+    seen = {}
+    for h in headlines:
+        for m in pat.finditer(h.get("title", "")):
+            full = f"{name}: {m.group(1).strip()}"
+            if EDITION_TAIL.match(m.group(1)) or re.search(r"\b(trailer|review|preview|update|patch|release|leak|rumou?r|interview|hands-on|everything|how|why|what|when)\b", m.group(1), re.I):
+                continue
+            seen.setdefault(full, set()).add(h.get("source") or "")
+    best = max(seen.items(), key=lambda kv: len(kv[1]), default=None)
+    if best and len(best[1]) >= 2:
+        return {"name": best[0], "source": f"the news ({len(best[1])} outlets)", "suggest": True}
+    return None
+
+
 # ---------------- deal subreddits ----------------
 
 SEQUEL = re.compile(r"^(?:\d{1,2}|ii|iii|iv|vi|vii|viii|ix|xi|xii)$", re.I)
@@ -252,6 +415,7 @@ class Deals:
         self.lock = threading.Lock()
         self.running = False
         self.state = {"games": {}, "subs": [], "rates": None, "t": 0}
+        self.ebay = None
         try:
             with open(self.path, encoding="utf-8") as f:
                 st = json.load(f)
@@ -276,7 +440,66 @@ class Deals:
                 continue
         return r
 
-    def refresh(self, wishlist, owned, cc="GE", ps_locale="en-us", dlc_lookup=None):
+    def _dlc_sales(self, owned, cc, extra):
+        """Discounted DLC for your Steam games (and DLC you wishlisted on Steam), cheapest store first."""
+        now = time.time()
+        lists = self.state.setdefault("dlc_ids", {})     # base appid -> {"t", "ids"}
+        info = self.state.setdefault("dlc_info", {})     # dlc appid -> {"name", "art"}
+        fetched = 0
+        base = {}
+        for g in owned:
+            a = extra.get("appids", {}).get(g["name"]) or self.art.steam_appid(g["name"]) if g.get("platform") == "Steam" else None
+            if not a:
+                continue
+            base[g["name"]] = a
+            e = lists.get(str(a))
+            if (not e or now - e["t"] > 7 * 24 * HOUR) and fetched < 40:
+                try:
+                    d = (_json(f"https://store.steampowered.com/api/appdetails?appids={a}&filters=basic&l=english").get(str(a)) or {}).get("data") or {}
+                    lists[str(a)] = {"t": now, "ids": (d.get("dlc") or [])[:60]}
+                except Exception:
+                    pass
+                fetched += 1
+                time.sleep(0.35)
+        owner = {}
+        for n, a in base.items():
+            for dlc in (lists.get(str(a)) or {}).get("ids") or []:
+                owner[int(dlc)] = n
+        for dlc in extra.get("wish_dlc") or []:
+            owner.setdefault(int(dlc), "")
+        prices = steam_prices(list(owner), cc) if owner else {}
+        marks = extra.get("owned_marks") or {}
+        out = []
+        for a, p in prices.items():
+            if not p or not p["discount"]:
+                continue
+            if str(a) not in info:
+                try:
+                    d = (_json(f"https://store.steampowered.com/api/appdetails?appids={a}&l=english").get(str(a)) or {}).get("data") or {}
+                    info[str(a)] = {"name": d.get("name"), "art": d.get("header_image"), "game": (d.get("fullgame") or {}).get("name")}
+                except Exception:
+                    info[str(a)] = {}
+                time.sleep(0.3)
+            i = info[str(a)]
+            game = owner.get(a) or i.get("game") or ""
+            if not i.get("name") or marks.get(game, {}).get(i["name"]) or JUNK_DLC.search(i["name"]):
+                continue
+            out.append({"game": game, "name": i["name"], "art": i.get("art"), "url": f"https://store.steampowered.com/app/{a}", "appid": a,
+                        "price": p, "wishlisted": a in set(extra.get("wish_dlc") or [])})
+        # a cheaper key store for the bigger ones
+        for d in sorted(out, key=lambda d: -d["price"]["initial"])[:20]:
+            try:
+                gid = cheapshark_id(d["name"], d["appid"])
+                deals = (cheapshark_deals([gid]).get(str(gid)) or {}).get("deals") if gid else None
+                best = next((x for x in deals or [] if x["store"] != "Steam"), None)
+                if best and best["price"] < d["price"]["final"]:
+                    d["alt"] = best
+            except Exception:
+                pass
+        out.sort(key=lambda d: (not d["wishlisted"], -d["price"]["discount"]))
+        return out[:60]
+
+    def refresh(self, wishlist, owned, cc="GE", ps_locale="en-us", dlc_lookup=None, extra=None, eshop_country="DE", news_lookup=None):
         """Slow: runs in the background and fills self.state; the page polls snapshot()."""
         if self.running:
             return
@@ -392,20 +615,66 @@ class Deals:
             st["subs"] = [{"game": k, "owned": False, **p} for k, v in hits.items() for p in v] + \
                          [{"game": k, "owned": True, **p} for k, v in own_hits.items() for p in v]
             st["subs"].sort(key=lambda p: -p.get("date", 0))
-            # DLC on sale for games you own (Steam)
-            if dlc_lookup:
-                dl = []
-                for g in owned:
-                    for d in (dlc_lookup(g) or []):
-                        m = re.search(r"/app/(\d+)", d.get("url") or "")
-                        if m and d.get("kind") != "upgrade":
-                            dl.append((g["name"], int(m.group(1)), d))
+            # DLC on sale: for every Steam game you own, and DLC on your Steam wishlist
+            try:
+                st["dlc"] = self._dlc_sales(owned, cc, extra or {})
+            except Exception:
+                pass
+            self._remember()
+            # Nintendo eShop
+            for g in wishlist:
+                if g.get("platform") in SWITCH:
+                    e = games[g["name"]]
+                    if e.get("eshop_id") is None or now - e.get("eshop_t", 0) > 7 * 24 * HOUR:
+                        try:
+                            hit = eshop_find(g["name"])
+                            e["eshop_id"], e["eshop_url"], e["eshop_t"] = (hit or {}).get("nsuid") or "", (hit or {}).get("url"), now
+                        except Exception:
+                            pass
+                        time.sleep(0.3)
+            ids = {games[g["name"]]["eshop_id"]: g["name"] for g in wishlist if games.get(g["name"], {}).get("eshop_id")}
+            if ids:
                 try:
-                    dp = steam_prices([x[1] for x in dl], cc)
+                    for nid, p in eshop_prices(list(ids), eshop_country).items():
+                        games[ids[nid]]["eshop"] = p
                 except Exception:
-                    dp = {}
-                st["dlc"] = [{"game": n, "name": d.get("name"), "art": d.get("art"), "url": d.get("url"), "major": d.get("major"),
-                              "price": dp.get(a)} for n, a, d in dl if dp.get(a) and dp[a]["discount"]]
+                    pass
+            self._remember()
+            # bundles
+            bundles = []
+            for fn in (humble_bundles, fanatical_bundles):
+                try:
+                    bundles += fn()
+                except Exception:
+                    continue
+            if bundles:
+                st["bundles"] = bundle_hits(bundles, list(wishlist) + list(owned_dlc_games(owned)))
+            self._remember()
+            # eBay, if you added keys
+            if self.ebay and self.ebay.configured():
+                for g in wishlist:
+                    if g.get("platform") in PHYSICAL_LABEL and (g.get("format") == "Physical" or g.get("platform") in PS | SWITCH):
+                        e = games[g["name"]]
+                        if not e.get("ebay") or now - e["ebay"].get("t", 0) > 12 * HOUR:
+                            try:
+                                hit = self.ebay.cheapest(g["name"], PHYSICAL_LABEL[g["platform"]])
+                                e["ebay"] = dict(hit or {}, t=now)
+                            except Exception:
+                                pass
+                            time.sleep(0.5)
+            # titles spotted in the news (suggestions only: you confirm them)
+            if news_lookup:
+                for g in wishlist:
+                    e = games[g["name"]]
+                    if g["name"] in props or now - e.get("news_t", 0) < 24 * HOUR:
+                        continue
+                    e["news_t"] = now
+                    try:
+                        hint = news_title_hint(g["name"], news_lookup(g["name"]))
+                    except Exception:
+                        hint = None
+                    if hint:
+                        props[g["name"]] = hint
             st["t"] = time.time()
             self._remember()
         finally:
@@ -415,9 +684,16 @@ class Deals:
         st = self.state
         sale = steam_sales()
         return {"games": {n: st["games"].get(n) for n in wishlist_names if st["games"].get(n)},
-                "subs": st.get("subs") or [], "dlc": st.get("dlc") or [], "rates": st.get("rates"),
+                "subs": st.get("subs") or [], "dlc": st.get("dlc") or [], "rates": st.get("rates"), "bundles": st.get("bundles") or [],
                 "renames": {k: v for k, v in (st.get("renames") or {}).items() if k in wishlist_names and not v.get("done") and not v.get("undone")},
                 "sale": sale, "t": st.get("t", 0), "running": self.running}
+
+
+JUNK_DLC = re.compile(r"soundtrack|\bost\b|art ?book|wallpaper|avatar|\bskin|costume|outfit|cosmetic|digital extras|pre-?order", re.I)
+
+
+def owned_dlc_games(owned):
+    return [g for g in owned if g.get("status") != "Wishlist"]
 
 
 # ---------------- official titles for wishlist games ----------------

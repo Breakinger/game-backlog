@@ -115,6 +115,17 @@
           <option value="en-pl">Poland (PLN)</option><option value="en-gb">United Kingdom (GBP)</option><option value="de-de">Germany (EUR)</option>
           <option value="en-cy">Cyprus (EUR)</option><option value="en-ae">United Arab Emirates (USD)</option><option value="en-in">India (INR)</option>
         </select></label>
+      <label>Nintendo eShop region (Europe)
+        <select name="eshop_country">
+          <option value="DE">Germany (EUR)</option><option value="FR">France (EUR)</option><option value="IT">Italy (EUR)</option><option value="ES">Spain (EUR)</option>
+          <option value="NL">Netherlands (EUR)</option><option value="PL">Poland (PLN)</option><option value="CZ">Czechia (CZK)</option><option value="GB">United Kingdom (GBP)</option>
+        </select></label>
+      <details class="howto"><summary>Optional: eBay prices for physical copies</summary>
+        <ol><li>Sign up free at developer.ebay.com and open <b>Application Keys</b>.</li>
+          <li>Create a <b>Production</b> keyset and copy the <b>App ID (Client ID)</b> and <b>Cert ID (Client Secret)</b>.</li>
+          <li>Paste both below and Save. Masterlog only searches listings; it can't buy or bid.</li></ol></details>
+      <label>eBay App ID <input name="ebay_id" type="text" autocomplete="off" placeholder="Leave empty to keep what's saved"></label>
+      <label>eBay Cert ID <input name="ebay_secret" type="password" autocomplete="off" placeholder="Leave empty to keep what's saved"><small id="ebayState"></small></label>
       <label class="check"><input type="checkbox" name="money_gel"> Show prices in Georgian lari (₾), at the National Bank of Georgia's daily rate</label>
       <label class="check"><input type="checkbox" name="auto_names"> Rename wishlist games to their official full title when a store lists it (you can undo each one)</label>
       <p class="fine">Prices are checked every few hours and when you open Deals. The Steam Winter Sale and Summer Sale get a little celebration when they start.</p>

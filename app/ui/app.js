@@ -1213,6 +1213,10 @@ function openSettings(showHowTo, tab = "sheet") {
   f.ps_locale.value = st.ps_locale || "en-us";
   f.money_gel.checked = st.money === "GEL";
   f.auto_names.checked = st.auto_names !== false;
+  f.eshop_country.value = st.eshop_country || "DE";
+  f.ebay_id.value = ""; f.ebay_secret.value = "";
+  $("#ebayState").textContent = st.has_ebay ? "eBay is connected. Paste new keys to replace them, or type a space in both to remove." : "Optional.";
+  $("#ebayState").className = st.has_ebay ? "ok" : "";
   ambienceState();
   $("#igdbState").textContent = st.has_igdb ? "IGDB is connected. Paste new values to replace them." : "Not connected.";
   $("#igdbState").className = st.has_igdb ? "ok" : "";
@@ -1244,7 +1248,8 @@ async function chooseAmbience(clear) {
 function soundSettings() {
   const f = $("#settingsForm");
   return { sound_on: f.sound_on.checked, ambient_volume: +f.ambient_volume.value, fx_volume: +f.fx_volume.value, intro: f.intro.checked, big_picture: f.big_picture.checked,
-    steam_cc: f.steam_cc.value, ps_locale: f.ps_locale.value, money: f.money_gel.checked ? "GEL" : "native", auto_names: f.auto_names.checked };
+    steam_cc: f.steam_cc.value, ps_locale: f.ps_locale.value, money: f.money_gel.checked ? "GEL" : "native", auto_names: f.auto_names.checked,
+    eshop_country: f.eshop_country.value };
 }
 function applySound(st = state.settings) {
   try { FX.configure({ on: st.sound_on !== false, ambient: st.ambient_volume ?? 0.35, fx: st.fx_volume ?? 0.5, track: st.ambience || null }); } catch {}
@@ -1269,6 +1274,11 @@ async function saveSettings() {
     if (r.error) toast(r.error, "err");
     else { toast("IGDB connected. Missing covers will fill in as you browse.", "ok"); covers.forEach((v, k) => { if (!v) covers.delete(k); }); state.settings.has_igdb = true; render(); }
     f.igdb_id.value = ""; f.igdb_secret.value = "";
+  }
+  if (f.ebay_id.value || f.ebay_secret.value) {
+    const r = await api.set_ebay_keys(f.ebay_id.value, f.ebay_secret.value);
+    if (r.error) toast(r.error, "err"); else { state.settings.has_ebay = !r.removed; toast(r.removed ? "eBay removed." : "eBay connected. Physical prices appear in Deals shortly.", "ok"); }
+    f.ebay_id.value = ""; f.ebay_secret.value = "";
   }
   const yk = f.youtube_key.value;
   if (yk) {
@@ -1981,6 +1991,8 @@ function offersFor(name) {
     if (d.store === "Steam" && e.steam) continue;  // your regional Steam price beats CheapShark's U.S. one
     out.push({ store: d.store, price: d.price, was: d.retail, cur: "USD", off: d.savings, url: d.url });
   }
+  if (e.eshop && e.eshop.initial) out.push({ store: "Nintendo eShop", price: e.eshop.final, was: e.eshop.initial, cur: e.eshop.currency, off: e.eshop.discount, ends: e.eshop.ends, url: e.eshop_url || "" });
+  if (e.ebay && e.ebay.price) out.push({ store: `eBay${e.ebay.condition ? ` (${e.ebay.condition.toLowerCase()})` : ""}`, price: e.ebay.price + (e.ebay.shipping || 0), cur: e.ebay.currency, off: 0, url: e.ebay.url, note: e.ebay.shipping ? "incl. shipping" : "" });
   if (e.ps && e.ps.final) {
     const cur = PS_CUR[state.settings.ps_locale || "en-us"] || "USD";
     const f = /free/i.test(e.ps.final) ? 0 : num(e.ps.final), b = num(e.ps.base);
@@ -2020,7 +2032,7 @@ function saleBanner() {
 function dealCard(g) {
   const o = offersFor(g.name), best = o[0], e = dealState.data?.games?.[g.name] || {};
   const low = e.stores?.low;
-  const alts = o.slice(1, 5).map(x => `<li data-url="${esc(x.url)}"><span>${esc(x.store)}</span><span>${x.off > 0 ? `<i>-${x.off}%</i> ` : ""}${esc(money(x.price, x.cur))}</span></li>`).join("");
+  const alts = o.slice(1, 6).map(x => `<li data-url="${esc(x.url)}"><span>${esc(x.store)}${x.note ? ` <small>${esc(x.note)}</small>` : ""}</span><span>${x.off > 0 ? `<i>-${x.off}%</i> ` : ""}${esc(money(x.price, x.cur))}</span></li>`).join("");
   const ends = best?.ends ? `<span class="ends">Sale ends in ${countdown(best.ends)}</span>` : "";
   const rel = e.release?.coming ? `<span class="ends">${e.release.ts ? `Out in ${countdown(e.release.ts)}` : esc(e.release.text || "Coming soon")}</span>` : "";
   return `<article class="dealcard">
@@ -2043,17 +2055,19 @@ function dealsHTML() {
   const onSale = wish.filter(g => offersFor(g.name).some(o => o.off > 0));
   const soon = wish.filter(g => d.games[g.name]?.release?.coming).sort((a, b) => (d.games[a.name].release.ts || 9e12) - (d.games[b.name].release.ts || 9e12));
   const waiting = wish.filter(g => !onSale.includes(g) && !soon.includes(g) && offersFor(g.name).length);
-  const renames = Object.entries(d.renames || {}).map(([old, h]) => `<li>${esc(old)} → <b>${esc(h.name)}</b> <small>(${esc(h.source)})</small> <button class="ghost small" data-rename="${esc(old)}">Rename</button></li>`).join("");
+  const renames = Object.entries(d.renames || {}).map(([old, h]) => `<li>${esc(old)} → <b>${esc(h.name)}</b> <small>(${h.suggest ? `spotted in ${esc(h.source)}, not on a store yet` : esc(h.source)})</small> <button class="ghost small" data-rename="${esc(old)}">Rename</button></li>`).join("");
   const subs = (d.subs || []).slice(0, 30).map(p => `<article class="nitem" data-url="${esc(p.url)}" tabindex="0">${p.thumb ? `<div class="nthumb"><img alt="" loading="lazy" referrerpolicy="no-referrer" src="${esc(p.thumb)}" onerror="this.parentNode.classList.add('none')"></div>` : ""}
       <div class="ntext"><div class="ntags"><span class="ngame">${esc(p.game)}</span>${p.owned ? `<span>You own it</span>` : ""}${p.flair ? `<span class="nflair">${esc(p.flair)}</span>` : ""}</div><h3>${esc(p.title)}</h3>
       <div class="nmeta"><span class="nsrc">${esc(p.source)}</span><span>${esc(ago(p.date))}</span>${p.domain ? `<span>${esc(p.domain)}</span>` : ""}</div>${p.link ? `<button class="linkish" data-url="${esc(p.link)}">Go to the deal</button>` : ""}</div></article>`).join("");
-  const dlc = (d.dlc || []).map(x => `<li data-url="${esc(x.url)}">${x.art ? `<img alt="" loading="lazy" src="${esc(x.art)}">` : ""}<div><b>${esc(x.name)}</b><small>${esc(x.game)}${x.major ? " · major DLC" : ""}</small></div><span><i>-${x.price.discount}%</i> ${esc(money(x.price.final, x.price.currency))}</span></li>`).join("");
+  const dlc = (d.dlc || []).map(x => `<li data-url="${esc(x.url)}">${x.art ? `<img alt="" loading="lazy" src="${esc(x.art)}">` : ""}<div><b>${esc(x.name)}</b><small>${esc(x.game || "")}${x.wishlisted ? " · on your Steam wishlist" : ""}</small>${x.alt ? `<small class="altstore" data-url="${esc(x.alt.url)}">Cheaper at ${esc(x.alt.store)}: ${esc(money(x.alt.price, "USD"))}</small>` : ""}</div><span><i>-${x.price.discount}%</i> ${esc(money(x.price.final, x.price.currency))}</span></li>`).join("");
+  const bundles = (d.bundles || []).map(b => `<li data-url="${esc(b.url)}"><div><b>${esc(b.name)}</b><small>${esc(b.store)} · has ${esc(b.game)}${b.owned ? " (you own it)" : ""}${b.count ? ` · ${b.count} items` : ""}${b.ends ? ` · ends in ${countdown(b.ends)}` : ""}</small></div><span class="ghost small">Open</span></li>`).join("");
   const sec = (title, sub, list) => list.length ? `<section class="dsec"><h2>${title}</h2>${sub ? `<p class="muted">${sub}</p>` : ""}<div class="dgrid">${list.map(dealCard).join("")}</div></section>` : "";
   return `<section class="deals">${head}${saleBanner()}
     ${renames ? `<section class="dsec"><h2>Official titles found</h2><ul class="renames">${renames}</ul></section>` : ""}
     ${sec("On sale now", "Cheapest place first. Prices from stores other than Steam and PlayStation are in U.S. dollars.", onSale)}
     ${sec("Coming out", "Counting down to release.", soon)}
-    ${dlc ? `<section class="dsec"><h2>DLC on sale for games you own</h2><ul class="dlcsale">${dlc}</ul></section>` : ""}
+    ${dlc ? `<section class="dsec"><h2>DLC on sale</h2><p class="muted">For your Steam games and DLC on your Steam wishlist, minus DLC you've marked as owned.</p><ul class="dlcsale">${dlc}</ul></section>` : ""}
+    ${bundles ? `<section class="dsec"><h2>In a bundle right now</h2><p class="muted">Humble Bundle and Fanatical bundles that include a game on your wishlist (or DLC territory for games you own).</p><ul class="dlcsale bundles">${bundles}</ul></section>` : ""}
     ${subs ? `<section class="dsec"><h2>Spotted on the deal subreddits</h2><p class="muted">r/GameDeals, r/PS5Deals, r/PS4Deals, r/NintendoSwitchDeals and r/FreeGameFindings: wishlist games, and DLC or editions for games you own. Amazon and eBay deals usually show up here.</p><div class="news-grid">${subs}</div></section>` : ""}
     ${sec("Waiting for a sale", d.sale && !d.sale.live ? `Full price for now. The ${esc(d.sale.name)} starts in ${countdown(d.sale.start)}.` : "Full price for now.", waiting)}
     ${!onSale.length && !soon.length && !waiting.length && !d.running ? `<p class="muted">No prices yet. Wishlist games need a Steam, PlayStation Store or PC store listing to be priced.</p>` : ""}
