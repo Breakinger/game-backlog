@@ -2461,6 +2461,18 @@ async function checkNewsDot() {
   } catch {}
 }
 
+/* a cover that isn't the 2:3 shape of the frame is shown whole instead of cropped */
+document.addEventListener("load", e => {
+  const img = e.target;
+  if (img.tagName !== "IMG") return;
+  const box = img.closest(".case .art, .opencase .face.outside .art, .rk .art, .vcase .art, .covercand");
+  if (!box || box.closest(".book")) return;
+  const r = img.naturalWidth / img.naturalHeight;
+  const odd = r && Math.abs(r - 2 / 3) / (2 / 3) > 0.08;
+  box.classList.toggle("odd", !!odd);
+  if (odd) box.style.setProperty("--img", `url("${img.src}")`);
+}, true);
+
 /* animations rest when Masterlog isn't the window you're using */
 addEventListener("blur", () => document.body.classList.add("away"));
 addEventListener("focus", () => document.body.classList.remove("away"));

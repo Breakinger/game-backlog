@@ -128,7 +128,7 @@ main::-webkit-scrollbar-thumb, .shelf-row::-webkit-scrollbar-thumb { background:
 .case { position: relative; width: var(--case-w); padding: 0; background: none; border: 0; text-align: left; cursor: pointer; isolation: isolate; display: flex; flex-direction: column; justify-content: flex-start; align-self: flex-start; }
 .case .stage { position: relative; perspective: 900px; }
 .case .box {
-  position: relative; z-index: 2; aspect-ratio: 135 / 190; border-radius: 6px 5px 5px 6px; overflow: hidden;
+  position: relative; z-index: 2; aspect-ratio: 120 / 190; border-radius: 6px 5px 5px 6px; overflow: hidden;
   background: var(--shell, #10162A);
   box-shadow: 0 14px 28px rgba(0, 0, 0, .55), inset 0 0 0 1px rgba(255, 255, 255, .14), inset 0 0 0 2px rgba(0, 0, 0, .35);
   transition: transform .28s cubic-bezier(.2, .8, .2, 1), box-shadow .28s;
@@ -284,7 +284,7 @@ select.pick { padding: 8px 12px; border-radius: 999px; background: rgba(6, 12, 3
 .cv-info .pbody { overflow-y: auto; padding-right: 10px; min-height: 0; flex: 1; }
 .cv-info .pbody::-webkit-scrollbar { width: 8px; } .cv-info .pbody::-webkit-scrollbar-thumb { background: rgba(201, 209, 220, .18); border-radius: 8px; }
 
-.opencase { --w: min(400px, calc((100vw - 620px) / 2), 46vh); position: relative; width: calc(var(--w) * 2); height: calc(var(--w) * 190 / 135); transform-style: preserve-3d; }
+.opencase { --w: min(380px, calc((100vw - 620px) / 2), 42vh); position: relative; width: calc(var(--w) * 2); height: calc(var(--w) * 190 / 120); transform-style: preserve-3d; }
 .opencase .leaf { position: absolute; top: 0; width: var(--w); height: 100%; border-radius: 6px; }
 .opencase .leaf.back { left: var(--w); background: var(--shell, #10162A); box-shadow: 0 30px 60px rgba(0, 0, 0, .6), inset 0 0 0 1px rgba(255, 255, 255, .12); }
 .opencase .leaf.front { left: var(--w); transform-origin: left center; transform-style: preserve-3d; transition: transform 1.05s cubic-bezier(.65, .05, .25, 1) .15s; z-index: 2; }
@@ -418,7 +418,7 @@ select.pick { padding: 8px 12px; border-radius: 999px; background: rgba(6, 12, 3
 .tick.small { width: auto; padding: 0 5px; margin-left: 4px; font-size: 10.5px; }
 .scorecell { font-weight: 700; padding: 3px 8px; border-radius: 5px; background: color-mix(in srgb, #2F9E44 calc(var(--s) * 100%), #7A5A00); color: #fff; }
 .fresh-dot { font-size: 10px; font-weight: 800; padding: 1px 5px; border-radius: 3px; background: #FFD43B; color: #1B1300; margin-left: 6px; vertical-align: 1px; }
-.peek { position: fixed; z-index: 15; left: 0; top: 0; width: 210px; aspect-ratio: 135 / 190; pointer-events: none; opacity: 0; border-radius: 8px; overflow: hidden;
+.peek { position: fixed; z-index: 15; left: 0; top: 0; width: 210px; aspect-ratio: 120 / 190; pointer-events: none; opacity: 0; border-radius: 8px; overflow: hidden;
   box-shadow: 0 24px 50px rgba(0, 0, 0, .6), 0 0 0 1px rgba(255, 255, 255, .12); transition: opacity .45s ease; background: #0B1124; }
 .peek.bookpeek { aspect-ratio: 2 / 3; }
 .peek.show { opacity: 1; }
@@ -1075,3 +1075,11 @@ body.away *, body.away *::before, body.away *::after { animation-play-state: pau
 .ctx-rank span { flex: 1; }
 .ctx-rank input { width: 64px; padding: 3px 6px; border-radius: 5px; border: 1px solid var(--line-strong); background: rgba(6,12,31,.7); color: var(--glass); font: inherit; }
 .ctx-rank button { border: 0; border-radius: 5px; padding: 4px 8px; background: var(--focus); color: #fff; cursor: pointer; font: inherit; font-size: 12.5px; }
+
+/* covers sit exactly in the window under the band (a 2:3 frame, like the store art); art in another shape
+   is shown whole over a soft blur of itself instead of being cropped */
+.art.odd { background: #0B1124; }
+.art.odd::before { content: ""; position: absolute; inset: -12px; background: var(--img) center / cover no-repeat; filter: blur(14px) brightness(.55) saturate(1.2); z-index: 0; }
+.art.odd img { position: relative; z-index: 1; object-fit: contain !important; }
+.vcase .art.virtual { aspect-ratio: 2 / 3; }
+.rk .art { aspect-ratio: 2 / 3; }
