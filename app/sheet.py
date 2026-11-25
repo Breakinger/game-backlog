@@ -4,7 +4,7 @@ import io
 import re
 import urllib.request
 
-DEFAULT_SHEET = "https://docs.google.com/spreadsheets/d/1duThbwmKNdye3u0N0Nf869_A08H8keGpKvcgr_qLBEo/edit"
+DEFAULT_SHEET = ""  # set your link in the app's Settings
 GAMES_GID = "0"
 PLAYTHROUGHS_GID = "200"
 UA = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) GameBacklog/1.0"
@@ -14,6 +14,8 @@ DATE_RE = re.compile(r"(\d{4})-(\d{2})-(\d{2})")
 def csv_url(link, gid):
     """Accepts a normal sheet link or a 'Publish to web' link and returns a CSV export URL for one tab."""
     link = (link or DEFAULT_SHEET).strip()
+    if not link:
+        raise ValueError("no sheet link yet. Paste it in Settings to get started.")
     m = re.search(r"/spreadsheets/d/e/([\w-]+)", link)
     if m:
         return f"https://docs.google.com/spreadsheets/d/e/{m.group(1)}/pub?output=csv&single=true&gid={gid}"

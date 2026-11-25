@@ -116,7 +116,8 @@ class Api:
             return str(e)
 
     def open_sheet(self):
-        return self.open(self._settings.get("sheet_url") or sheet.DEFAULT_SHEET)
+        link = self._settings.get("sheet_url") or sheet.DEFAULT_SHEET
+        return self.open(link) if link else "No sheet link yet."
 
 
 def main():

@@ -179,7 +179,7 @@ function welcomeHTML() {
         <li>Pick <b>Entire document</b> and <b>Comma-separated values (.csv)</b>, then <b>Publish</b>.</li>
         <li>Copy the link and paste it in Settings.</li>
       </ol>
-      <div class="actions"><button class="primary" id="wSettings">Open settings</button><button class="ghost" id="wSheet">Open the sheet</button></div></div>`;
+      <div class="actions"><button class="primary" id="wSettings">Open settings</button>${state.settings?.sheet_url ? '<button class="ghost" id="wSheet">Open the sheet</button>' : ""}</div></div>`;
   }
   return `<div class="welcome"><h1>Loading your backlog</h1><p class="intro">Reading the sheet…</p></div>`;
 }
