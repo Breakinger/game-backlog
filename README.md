@@ -1,10 +1,10 @@
-# Game Backlog
+# Masterlog
 
 A console-style desktop library for my game backlog. It reads the Google Sheet, shows every game as a PS2-style case, and slides the disc out when you hover.
 
 ## Get it
 
-Download **GameBacklog.exe** from the latest [release](../../releases). No install. Windows may warn that the app isn't signed: click **More info → Run anyway**.
+Download **Masterlog.exe** from the latest [release](../../releases). No install. Windows may warn that the app isn't signed: click **More info → Run anyway**.
 
 ## First run: connect your sheet
 
@@ -19,7 +19,7 @@ To disconnect the app, run `resetConnection` in the Apps Script editor.
 
 Optional, for better covers: make a free key at [steamgriddb.com/profile/preferences/api](https://www.steamgriddb.com/profile/preferences/api) and paste it into Settings.
 
-Settings, keys and the cover cache live only on this PC, in `%APPDATA%\GameBacklog`.
+Settings and the cover cache live only on this PC, in `%APPDATA%\Masterlog`. Linked-account keys are stored there too, encrypted with Windows DPAPI so only your Windows account on this PC can read them.
 
 ## Updating
 
@@ -43,7 +43,7 @@ When a new version is out, an **Update** button appears in the top bar. Click it
 
 ```
 pip install -r requirements.txt
-pyinstaller --noconfirm --onefile --windowed --name GameBacklog --icon assets/icon.ico --add-data "app/ui;ui" --paths app app/main.py
+pyinstaller --noconfirm --onefile --windowed --name Masterlog --icon assets/icon.ico --add-data "app/ui;ui" --paths app app/main.py
 ```
 
 Every push to `main` builds the exe on GitHub Actions and publishes a release.

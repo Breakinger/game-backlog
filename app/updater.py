@@ -15,8 +15,8 @@ import urllib.request
 from version import VERSION
 
 REPO = "Breakinger/game-backlog"
-ASSET = "GameBacklog.exe"
-UA = "GameBacklog-updater"
+ASSETS = ("Masterlog.exe", "GameBacklog.exe")
+UA = "Masterlog-updater"
 
 
 def _ver(v):
@@ -55,7 +55,8 @@ class Updater:
                                      headers={"User-Agent": UA, "Accept": "application/vnd.github+json"})
         with urllib.request.urlopen(req, timeout=15) as r:
             rel = json.load(r)
-        asset = next((a for a in rel.get("assets", []) if a.get("name") == ASSET), None)
+        assets = {a.get("name"): a for a in rel.get("assets", [])}
+        asset = next((assets[n] for n in ASSETS if n in assets), None)
         tag = rel.get("tag_name", "")
         self.latest = {"version": tag.lstrip("v"), "url": asset and asset["browser_download_url"],
                        "size": asset and asset.get("size"), "notes": rel.get("body") or "", "page": rel.get("html_url")}
@@ -73,7 +74,7 @@ class Updater:
             return "No new version to install."
         exe = sys.executable
         folder = os.path.dirname(exe)
-        new = os.path.join(folder, "GameBacklog.new.exe")
+        new = os.path.join(folder, "Masterlog.new.exe")
         old = os.path.splitext(exe)[0] + ".old.exe"
         self.progress = {"state": "downloading", "done": 0, "total": self.latest.get("size") or 0, "error": None}
         try:
@@ -98,7 +99,7 @@ class Updater:
             os.replace(new, exe)
         except PermissionError:
             self._undo(exe, new, old)
-            self.progress.update(state="error", error="Windows didn't allow replacing the app in this folder. Move GameBacklog.exe to a folder you own, like Documents, and try again.")
+            self.progress.update(state="error", error="Windows didn't allow replacing the app in this folder. Move the app to a folder you own, like Documents, and try again.")
             return self.progress["error"]
         except Exception as e:
             self._undo(exe, new, old)

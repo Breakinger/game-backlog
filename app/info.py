@@ -17,7 +17,7 @@ from art import similar, _norm
 BROWSER_UA = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/130.0 Safari/537.36"
 MC = "https://backend.metacritic.com"
 DAY = 86400
-TTL = {"ratings": 3 * DAY, "dlcs": 7 * DAY, "wiki": 30 * DAY, "news": 6 * 3600, "updated": 12 * 3600, "book": 30 * DAY}
+TTL = {"about": 30 * DAY, "ratings": 3 * DAY, "dlcs": 7 * DAY, "wiki": 30 * DAY, "news": 6 * 3600, "updated": 12 * 3600, "book": 30 * DAY}
 NEW_UPDATE_DAYS = 14
 PATCH_RE = re.compile(r"\b(patch|update|hotfix|hot-fix|version\s*\d|v\d+\.\d+|release notes)\b", re.I)
 JUNK_DLC_RE = re.compile(r"soundtrack|\bost\b|art ?book|wallpaper|avatar|theme|\bskin|costume|outfit|cosmetic|bonus content|digital extras|pre-?order", re.I)
@@ -178,17 +178,65 @@ def wikipedia(query, hint="video game"):
 
 # ---------------- news ----------------
 
+CLAN_BASE = 103582791429521408
+EVENT_KIND = {14: "major", 13: "update", 12: "minor", 10: "release", 28: "news"}
+MINOR_RE = re.compile(r"\b(hot-?fix|bug ?fix|patch notes|known issues|maintenance|server)\b", re.I)
+MAJOR_RE = re.compile(r"\b(major update|expansion|new season|season \d+|chapter \d+|update \d+|out now|launches|1\.0|dlc)\b", re.I)
+
+
+def _img_from(text):
+    m = re.search(r"\{STEAM_CLAN_IMAGE\}(/[^\s\]\[\"'<>]+\.(?:png|jpe?g|gif|webp))", text or "", re.I)
+    if m:
+        return "https://clan.akamai.steamstatic.com/images" + m.group(1)
+    m = re.search(r"(?:\[img\]|<img[^>]+src=[\"'])(https?://[^\]\"'<>\s]+)", text or "", re.I)
+    return m.group(1) if m else None
+
+
+def steam_events(appid, count=30):
+    """Steam's 'What's New' feed: every post is typed (patch, regular update, major update) and carries artwork."""
+    data = _json(f"https://store.steampowered.com/events/ajaxgetpartnereventspageable/?clan_accountid=0&appid={appid}"
+                 f"&offset=0&count={count}&l=english&origin=https:%2F%2Fstore.steampowered.com")
+    out = []
+    for ev in data.get("events") or []:
+        body = ev.get("announcement_body") or {}
+        try:
+            jd = json.loads(ev.get("jsondata") or "{}")
+        except Exception:
+            jd = {}
+        clan = int(ev.get("clan_steamid") or 0) - CLAN_BASE if ev.get("clan_steamid") else None
+        def img(key):
+            arr = [x for x in (jd.get(key) or []) if x]
+            return f"https://clan.akamai.steamstatic.com/images/{clan}/{arr[0]}" if arr and clan and clan > 0 else None
+        title = html.unescape(ev.get("event_name") or body.get("headline") or "")
+        kind = EVENT_KIND.get(int(ev.get("event_type") or 0), "news")
+        if kind in ("news", "update") and MINOR_RE.search(title):
+            kind = "minor"
+        if kind == "update" and MAJOR_RE.search(title):
+            kind = "major"
+        start = int(ev.get("rtime32_start_time") or body.get("posttime") or 0)
+        out.append({
+            "title": title, "date": int(body.get("posttime") or start or 0), "start": start,
+            "url": f"https://store.steampowered.com/news/app/{appid}/view/{body.get('gid') or ev.get('gid')}",
+            "source": "Steam", "summary": _clean(body.get("body", ""), 320),
+            "thumb": img("localized_capsule_image") or img("localized_title_image") or _img_from(body.get("body")),
+            "kind": kind, "patch": kind in ("minor", "update", "major"), "upcoming": start > time.time(),
+        })
+    return out
+
+
 def steam_news(appid, count=12):
     data = _json(f"https://api.steampowered.com/ISteamNews/GetNewsForApp/v2/?appid={appid}&count={count}&maxlength=0&format=json")
     out = []
     for it in (data.get("appnews") or {}).get("newsitems") or []:
         official = it.get("feedname") == "steam_community_announcements"
         tags = it.get("tags") or []
+        title = html.unescape(it.get("title", ""))
+        patch = official and ("patchnotes" in tags or bool(PATCH_RE.search(title)))
         out.append({
-            "title": html.unescape(it.get("title", "")), "url": it.get("url"), "date": int(it.get("date") or 0),
+            "title": title, "url": it.get("url"), "date": int(it.get("date") or 0),
             "source": "Steam" if official else (it.get("feedlabel") or "News"),
-            "summary": _clean(it.get("contents", "")),
-            "patch": official and ("patchnotes" in tags or bool(PATCH_RE.search(it.get("title", "")))),
+            "summary": _clean(it.get("contents", "")), "thumb": _img_from(it.get("contents")),
+            "patch": patch, "kind": ("minor" if MINOR_RE.search(title) else "major" if MAJOR_RE.search(title) else "update") if patch else "news",
         })
     return out
 
@@ -208,8 +256,10 @@ def google_news(query, count=10):
         source = src.text if src is not None else ""
         if source and title.endswith(" - " + source):
             title = title[: -len(source) - 3]
+        patch = bool(PATCH_RE.search(title)) and _norm(query) in _norm(title)
         out.append({"title": html.unescape(title), "url": it.findtext("link"), "date": date, "source": source or "News",
-                    "summary": "", "patch": bool(PATCH_RE.search(title)) and _norm(query) in _norm(title)})
+                    "summary": "", "thumb": None, "patch": patch,
+                    "kind": ("minor" if MINOR_RE.search(title) else "major" if MAJOR_RE.search(title) else "update") if patch else "news"})
         if len(out) >= count:
             break
     return out
@@ -301,12 +351,14 @@ class Info:
                     rv = steam_reviews(dlc_id)
                 except Exception:
                     pass
+                price = (d.get("price_overview") or {})
                 return {"name": d.get("name"), "steam": rv, "release": (d.get("release_date") or {}).get("date"),
-                        "url": f"https://store.steampowered.com/app/{dlc_id}", "price": (d.get("price_overview") or {}).get("final_formatted"),
-                        "summary": _clean(d.get("short_description", ""), 220)}
+                        "url": f"https://store.steampowered.com/app/{dlc_id}", "price": price.get("final_formatted"),
+                        "cents": price.get("initial") or price.get("final") or 0, "art": d.get("header_image") or d.get("capsule_image"),
+                        "summary": _clean(d.get("short_description", ""), 220), "coming": (d.get("release_date") or {}).get("coming_soon")}
             for r in self.pool.map(lambda i: _safe(one, i), ids):
                 if r and r.get("name"):
-                    found[_norm(r["name"])] = r
+                    found[_dlc_key(name, r["name"])] = r
         # bigger expansions also have Metacritic pages of their own
         try:
             base = _norm(name)
@@ -317,16 +369,60 @@ class Info:
                         or "edition" in t.lower() or "collection" in t.lower():
                     continue
                 score = (it.get("criticScoreSummary") or {}).get("score")
-                k = _norm(t)
-                match = next((v for kk, v in found.items() if similar(kk, k) > 0.8), None)
-                entry = match or found.setdefault(k, {"name": t, "steam": None, "release": it.get("releaseDate"),
-                                                      "url": f"https://www.metacritic.com/game/{it['slug']}/", "summary": ""})
+                k = _dlc_key(name, t)
+                match = found.get(k) or next((v for kk, v in found.items() if kk and k and (similar(kk, k) > 0.8 or (min(len(kk), len(k)) >= 4 and (kk in k or k in kk)))), None)
+                imgs = it.get("images") or []
+                art = next((f"https://www.metacritic.com/a/img/catalog{i['bucketPath']}" for i in imgs if i.get("bucketPath")), None)
+                entry = match or found.setdefault(k, {"name": t, "steam": None, "release": it.get("releaseDate"), "art": art,
+                                                      "url": f"https://www.metacritic.com/game/{it['slug']}/", "summary": _clean(it.get("description", ""), 220)})
+                entry.setdefault("art", art)
                 entry["metacritic"] = score
                 entry["metacritic_url"] = f"https://www.metacritic.com/game/{it['slug']}/"
         except Exception:
             pass
-        out = sorted(found.values(), key=lambda d: (-(d.get("metacritic") or 0), -((d.get("steam") or {}).get("count") or 0)))
+        for d in found.values():
+            n = d.get("name", "")
+            d["kind"] = "upgrade" if UPGRADE_RE.search(n) else "dlc"
+            d["major"] = d["kind"] == "dlc" and (d.get("metacritic") is not None or (d.get("cents", 0) >= 1499 and bool(EXPANSION_RE.search(n + " " + d.get("summary", "")))))
+        out = sorted(found.values(), key=lambda d: (d["kind"] == "upgrade", not d["major"], -(d.get("metacritic") or 0), -((d.get("steam") or {}).get("count") or 0)))
         self.cache.put("dlcs", key, out)
+        return out
+
+    # ----- back-of-the-box synopsis -----
+    def about(self, game):
+        key = self._key(game)
+        hit = self.cache.get("about", key)
+        if hit is not None:
+            return hit
+        text, source, facts = "", None, {}
+        appid = self._appid(game)
+        if appid:
+            try:
+                d = steam_details(appid)
+                text = _clean(d.get("short_description", ""), 700)
+                source = "Steam" if text else None
+                facts = {"release": (d.get("release_date") or {}).get("date"), "developers": d.get("developers"),
+                         "publishers": d.get("publishers"), "genres": [g.get("description") for g in d.get("genres") or []]}
+            except Exception:
+                pass
+        if not text:
+            try:
+                best = mc_best(game.get("name", ""))
+                if best:
+                    text, source = _clean(best.get("description", ""), 700), "Metacritic"
+            except Exception:
+                pass
+        if not text:
+            try:
+                w = wikipedia(game.get("name", ""), "video game")
+                if w and w.get("extract"):
+                    sentences = re.split(r"(?<=[.!?])\s+", w["extract"])
+                    text, source = " ".join(sentences[:3]), "Wikipedia"
+            except Exception:
+                pass
+        out = {"text": text, "source": source, **facts}
+        if text:
+            self.cache.put("about", key, out)
         return out
 
     # ----- wiki -----
@@ -356,9 +452,14 @@ class Info:
         items = []
         if appid:
             try:
-                items = steam_news(appid)
+                items = steam_events(appid)
             except Exception:
                 items = []
+            if not items:
+                try:
+                    items = steam_news(appid)
+                except Exception:
+                    items = []
         if len(items) < 5:
             try:
                 items += google_news(game.get("name", ""), 10 - len(items))
@@ -368,6 +469,12 @@ class Info:
         self.cache.put("news", key, items)
         self._remember_update(game, items)
         return items
+
+    # ----- milestones for live-service games -----
+    def milestones(self, game):
+        items = self.news(game)
+        out = [i for i in items if i.get("kind") in ("major", "release") or (i.get("kind") == "update" and i.get("thumb"))]
+        return sorted(out, key=lambda i: -(i.get("start") or i["date"]))[:24]
 
     # ----- "Newly updated!" -----
     def _remember_update(self, game, items):
@@ -396,7 +503,7 @@ class Info:
             for g in games:
                 appid = self._appid(g)
                 try:
-                    items = steam_news(appid, 8) if appid else google_news(g.get("name", ""), 8)
+                    items = (steam_events(appid, 10) or steam_news(appid, 8)) if appid else google_news(g.get("name", ""), 8)
                 except Exception:
                     continue
                 self._remember_update(g, items)
@@ -445,6 +552,16 @@ class Info:
             pass
         self.cache.put("book", key, out)
         return out
+
+
+UPGRADE_RE = re.compile(r"upgrade|deluxe edition|season pass|expansion pass|bundle|digital deluxe|premium edition|gold edition", re.I)
+EXPANSION_RE = re.compile(r"expansion|story|campaign|chapter|episode|new (?:region|land|area|zone)|adventure|dlc", re.I)
+
+
+def _dlc_key(base, name):
+    n = _norm(name)
+    b = _norm(base)
+    return (n[len(b):].strip() if n.startswith(b) else n) or n
 
 
 def _safe(fn, *a):

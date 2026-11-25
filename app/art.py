@@ -42,6 +42,7 @@ class Art:
         self.index = self._read(self.index_path)
         self.appids = self._read(self.appid_path)
         self.sgdb_key = ""
+        self.url_base = None  # set by the app: covers are served as local files instead of inline data
 
     @staticmethod
     def _read(p):
@@ -186,40 +187,121 @@ class Art:
                 img = None
         return self._store(key, img, src)
 
-    def _store(self, key, img, src):
+    def _store(self, key, img, src, suffix=""):
         if not img:
             self.index[key] = {"file": "", "t": time.time(), "src": "none"}
             self._save()
             return None
         ext = ".png" if img[:4] == b"\x89PNG" else ".webp" if img[8:12] == b"WEBP" else ".jpg"
-        fname = re.sub(r"[^a-z0-9]+", "-", key)[:70].strip("-") + ext
+        fname = re.sub(r"[^a-z0-9]+", "-", key)[:70].strip("-") + suffix + ext
         with open(os.path.join(self.dir, fname), "wb") as f:
             f.write(img)
         self.index[key] = {"file": fname, "t": time.time(), "src": src}
         self._save()
         return self._data_uri(os.path.join(self.dir, fname))
 
+    def _data_uri(self, path):
+        if self.url_base:
+            return f"{self.url_base}{urllib.parse.quote(os.path.basename(path))}?v={int(os.path.getmtime(path))}"
+        return self._inline(path)
+
     @staticmethod
-    def _data_uri(path):
+    def _inline(path):
         ext = os.path.splitext(path)[1].lower()
         mime = {".png": "image/png", ".webp": "image/webp"}.get(ext, "image/jpeg")
         with open(path, "rb") as f:
             return f"data:{mime};base64," + base64.b64encode(f.read()).decode()
 
     def clear(self):
+        keep = {e.get("file") for e in self.index.values() if e.get("src") == "custom"}
         for f in os.listdir(self.dir):
+            if f in keep:
+                continue
             try:
                 os.remove(os.path.join(self.dir, f))
             except OSError:
                 pass
-        self.index = {}
+        self.index = {k: e for k, e in self.index.items() if e.get("src") == "custom"}
         self._save()
+
+    # ---------- your own covers (modlists, fan art) ----------
+    def set_custom(self, name, src_path):
+        with open(src_path, "rb") as f:
+            img = f.read()
+        if len(img) > 25 * 1024 * 1024:
+            raise ValueError("That image is over 25 MB.")
+        key = _norm(name)
+        old = self.index.get(key, {}).get("file")
+        if old:
+            try:
+                os.remove(os.path.join(self.dir, old))
+            except OSError:
+                pass
+        uri = self._store(key, img, "custom", suffix="-custom")
+        return uri
+
+    def rename_custom(self, old, new):
+        e = self.index.get(_norm(old))
+        if e and e.get("src") == "custom":
+            self.index[_norm(new)] = self.index.pop(_norm(old))
+            self._save()
+
+    def clear_custom(self, name):
+        key = _norm(name)
+        e = self.index.pop(key, None)
+        if e and e.get("file"):
+            try:
+                os.remove(os.path.join(self.dir, e["file"]))
+            except OSError:
+                pass
+        self._save()
+
+    # ---------- wide artwork for the detail view ----------
+    def hero(self, name):
+        key = "hero|" + _norm(name)
+        entry = self.index.get(key)
+        if entry:
+            fname = entry.get("file")
+            if fname and os.path.exists(os.path.join(self.dir, fname)):
+                return self._data_uri(os.path.join(self.dir, fname))
+            if not fname and time.time() - entry.get("t", 0) < MISS_RETRY_DAYS * 86400:
+                return None
+        img, src = None, None
+        if self.sgdb_key:
+            try:
+                auth = {"Authorization": f"Bearer {self.sgdb_key}"}
+                body, _ = _get(f"https://www.steamgriddb.com/api/v2/search/autocomplete/{urllib.parse.quote(name)}", auth)
+                games = json.loads(body).get("data", [])
+                if games:
+                    best = max(games[:5], key=lambda g: similar(name, g.get("name", "")))
+                    body, _ = _get(f"https://www.steamgriddb.com/api/v2/heroes/game/{best['id']}?types=static&nsfw=false", auth)
+                    heroes = sorted(json.loads(body).get("data", []), key=lambda g: -(g.get("score") or 0))
+                    if heroes:
+                        img, _ = _get(heroes[0]["url"], timeout=30)
+                        src = "sgdb"
+            except Exception:
+                img = None
+        if not img:
+            appid = self.steam_appid(name)
+            if appid:
+                for url in (f"https://shared.akamai.steamstatic.com/store_item_assets/steam/apps/{appid}/library_hero.jpg",
+                            f"https://cdn.cloudflare.steamstatic.com/steam/apps/{appid}/library_hero.jpg",
+                            f"https://cdn.cloudflare.steamstatic.com/steam/apps/{appid}/header.jpg"):
+                    try:
+                        img, ctype = _get(url)
+                        if img and "image" in ctype:
+                            src = "steam"
+                            break
+                        img = None
+                    except Exception:
+                        img = None
+        return self._store(key, img, src)
 
 
 OWNED = {"Library", "Playing", "Paused", "Completed", "Dropped"}
 
 
-def links_for(game, appid=None):
+def links_for(game, appid=None, heroic=None):
     """Buttons for the detail panel: the platform's library first if you own it, otherwise its store."""
     name = game.get("name", "")
     q = urllib.parse.quote(name)
@@ -248,7 +330,11 @@ def links_for(game, appid=None):
         add("PlayStation Store (PS2 Classics)", f"https://store.playstation.com/en-us/search/{q}", True)
     elif plat in ("GOG", "Epic Games"):
         if owned:
-            add("Play in Heroic", "heroic://", True)
+            if heroic:
+                add("Play in Heroic", f"heroic://launch/{heroic['runner']}/{heroic['app']}", True)
+                add("Open Heroic", "heroic://")
+            else:
+                add("Play in Heroic", "heroic://", True)
         if plat == "GOG":
             add("GOG store page", f"https://www.gog.com/en/games?query={q}", not owned)
         else:
@@ -257,8 +343,12 @@ def links_for(game, appid=None):
         if owned:
             add("Open Ubisoft Connect", "uplay://", True)
         add("Ubisoft Store", f"https://store.ubisoft.com/search?q={q}", not owned)
-    elif plat == "EA App":
-        add("EA store page", f"https://www.ea.com/search?q={q}", True)
+    elif plat in ("EA", "EA App"):
+        if owned:
+            add("Open EA app", "origin2://", True)
+        add("EA store page", f"https://www.ea.com/search?q={q}", not owned)
+    elif plat == "itch.io":
+        add("Open on itch.io", game.get("store_link") or f"https://itch.io/search?q={q}", True)
     if game.get("store_link"):
         for o in out:
             o["primary"] = False

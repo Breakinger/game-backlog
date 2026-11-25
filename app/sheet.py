@@ -19,7 +19,7 @@ GAME_FIELDS = {
     "platform": "platform", "play_on": "play on", "format": "format", "upgrade": "upgrade",
     "dlc_owned": "dlc owned", "dlc_done": "dlc done", "platinum": "100% plat", "modded": "modded",
     "hours": "hours", "score": "score", "genre": "genre", "developer": "developer",
-    "publisher": "publisher", "migrate_to": "migrate to", "notes": "notes", "store_link": "store link",
+    "publisher": "publisher", "migrate_to": "migrate to", "notes": "notes", "store_link": "store link", "type": "type",
 }
 PLAY_FIELDS = {
     "game": "game", "platform": "platform", "play_on": "play on", "modded": "modded", "dlc": "with dlc",
@@ -148,6 +148,7 @@ def parse_games(header, rows):
             "migrate_to": get(r, "migrate to"),
             "notes": get(r, "notes"),
             "store_link": get(r, "store link"),
+            "type": get(r, "type"),
         })
     return games
 

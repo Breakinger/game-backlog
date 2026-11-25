@@ -1,4 +1,4 @@
-/* Game Backlog — front end. Talks to Python through window.pywebview.api. */
+/* Masterlog — front end. Talks to Python through window.pywebview.api. */
 "use strict";
 
 /* ---------- platforms: how each one's case looks ---------- */
@@ -12,14 +12,18 @@ const PLAT = {
   "GOG":             { label: "HEROIC", tag: "GOG", band: "linear-gradient(90deg,#1A1033,#2B1858)", text: "#D9C8FF", shell: "#1A1033", accent: "#9F7AEA", media: "disc", chip: "#86328A", chipText: "#FFFFFF" },
   "Epic Games":      { label: "HEROIC", tag: "EPIC", band: "linear-gradient(90deg,#1A1033,#2B1858)", text: "#D9C8FF", shell: "#1A1033", accent: "#9F7AEA", media: "disc", chip: "#2A2A2A", chipText: "#FFFFFF" },
   "Ubisoft Connect": { label: "UBISOFT CONNECT", band: "#0058C4", text: "#FFFFFF", shell: "#063A7E", accent: "#3D8BFF", media: "disc", chip: "#0058C4", chipText: "#FFFFFF" },
-  "EA App":          { label: "EA APP", band: "#FF4747", text: "#FFFFFF", shell: "#7A1D1D", accent: "#FF4747", media: "disc", chip: "#FF4747", chipText: "#FFFFFF" },
+  "EA":              { label: "EA", band: "#FF4747", text: "#FFFFFF", shell: "#7A1D1D", accent: "#FF4747", media: "disc", chip: "#FF4747", chipText: "#FFFFFF" },
+  "itch.io":         { label: "itch.io", band: "#FA5C5C", text: "#FFFFFF", shell: "#3A1515", accent: "#FA5C5C", media: "disc", chip: "#FA5C5C", chipText: "#FFFFFF" },
   "Emulation":       { label: "EMULATION", band: "#22262D", text: "#B8F2D8", shell: "#1B1F25", accent: "#20C997", media: "disc", chip: "#20C997", chipText: "#06231A" },
   "PC (Other)":      { label: "PC", band: "#343A40", text: "#DEE2E6", shell: "#24292E", accent: "#ADB5BD", media: "disc", chip: "#495057", chipText: "#FFFFFF" },
 };
 const PLAT_FALLBACK = { label: "GAME", band: "#2B2F36", text: "#FFFFFF", shell: "#1B1F25", accent: "#4A8CFF", media: "disc", chip: "#495057", chipText: "#FFFFFF" };
 // in the library Epic and GOG sit together as Heroic, the launcher that runs both
-const GROUPS = { "GOG": "Heroic", "Epic Games": "Heroic" };
-const GROUP_STYLE = { "Heroic": { chip: "#6B46C1", chipText: "#FFFFFF" } };
+const ALIAS = { "EA App": "EA" };
+// Epic + GOG run through Heroic; EA + Ubisoft are the launchers you're leaving behind
+const GROUPS = { "GOG": "Heroic", "Epic Games": "Heroic", "EA": "Exiled", "EA App": "Exiled", "Ubisoft Connect": "Exiled" };
+const GROUP_STYLE = { "Heroic": { chip: "#6B46C1", chipText: "#FFFFFF" }, "Exiled": { chip: "#5A2A2A", chipText: "#FFB4B4" } };
+const GROUP_LABEL = { "Heroic": "Heroic (Epic + GOG)", "Exiled": "Exiled (EA + Ubisoft)", "Switch": "Switch 1" };
 const groupOf = p => GROUPS[p] || p;
 const PRIO_ORDER = { Extreme: 0, High: 1, Medium: 2, Low: 3 };
 const PRIO_COLOR = { Extreme: "#FF5C93", High: "#FF8A3D", Medium: "#FFC94D", Low: "#8B97B3" };
@@ -29,18 +33,19 @@ const CONSOLES = new Set(["PS5", "PS4", "PS2", "Switch 2", "Switch"]);
 const UPGRADE_TO = { PS4: "PS5", Switch: "Switch 2" };
 const FALLBACK_OPTIONS = {
   games: { status: ["Library", "Playing", "Paused", "Wishlist", "Completed", "Dropped"], priority: ["Extreme", "High", "Medium", "Low"],
-    platform: Object.keys(PLAT), play_on: ["PC", "Steam Deck"], format: ["Digital", "Physical"], upgrade: ["Free upgrade", "Paid upgrade", "No upgrade"] },
+    platform: Object.keys(PLAT), play_on: ["PC", "Steam Deck"], format: ["Digital", "Physical"], upgrade: ["Free upgrade", "Paid upgrade", "No upgrade"],
+    type: ["Live service", "Modded"], migrate_to: ["Steam", "GOG", "PS5", "Switch 2", "Undecided"] },
   books: { status: ["To read", "Reading", "Read", "Dropped", "Wishlist"], priority: ["Extreme", "High", "Medium", "Low"], format: ["Physical", "eBook", "Audiobook"] },
 };
 const TABS = {
-  games: [["home", "Home"], ["library", "Library"], ["wishlist", "Wishlist"], ["played", "Played"], ["stats", "Your years"]],
+  games: [["home", "Home"], ["library", "Library"], ["wishlist", "Wishlist"], ["played", "Completed"], ["stats", "Your years"]],
   books: [["shelf", "Shelf"], ["books", "All books"], ["bookyears", "Read"]],
 };
 
 const state = {
   catalog: "games",
   games: [], plays: [], books: [], options: { games: {}, plays: {}, books: {} }, canEdit: false,
-  syncedAt: null, error: null, settings: {}, updated: {},
+  syncedAt: null, error: null, settings: {}, updated: {}, facts: {}, candidates: [],
   view: "home", focusId: null, mode: "covers",
   filter: { q: "", status: "All", plats: new Set(), playOn: "All", prio: "All", sort: "priority" },
   bfilter: { q: "", status: "All", sort: "series" },
@@ -53,7 +58,7 @@ let api = null, refreshTimer = null, updateInfo = null;
 /* ---------- helpers ---------- */
 const $ = (s, r = document) => r.querySelector(s);
 const esc = s => String(s ?? "").replace(/[&<>"']/g, c => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
-const plat = p => PLAT[p] || PLAT_FALLBACK;
+const plat = p => PLAT[p] || PLAT[ALIAS[p]] || PLAT_FALLBACK;
 const statusOf = g => (g.status === "Dropped" && g.second_chance ? "Second chance" : g.status);
 const owned = g => ["Library", "Playing", "Paused", "Completed", "Dropped"].includes(g.status);
 const parseDate = s => (s ? new Date(s + "T12:00:00") : null);
@@ -85,6 +90,7 @@ function daysAgoLabel(iso) {
   return ago(d);
 }
 function toast(text, kind = "") {
+  if (kind === "err") { try { FX.play.error(); } catch {} }
   const t = $("#toast");
   t.textContent = text; t.className = `toast ${kind}`; t.hidden = false;
   clearTimeout(toast.t); toast.t = setTimeout(() => { t.hidden = true; }, 3200);
@@ -114,7 +120,7 @@ const coverObserver = new IntersectionObserver(entries => {
     if (!e.isIntersecting) continue;
     coverObserver.unobserve(e.target);
     const el = e.target, item = findItem(el.dataset.kind, el.dataset.id);
-    if (item) loadCover(item).then(uri => { if (uri && el.isConnected) el.innerHTML = `<img alt="" src="${uri}">`; });
+    if (item) loadCover(item).then(uri => { if (uri && el.isConnected) el.innerHTML = `<img alt="" decoding="async" src="${uri}">`; });
   }
 }, { rootMargin: "300px" });
 function activateArt(root) { root.querySelectorAll(".art").forEach(el => { if (!el.querySelector("img")) coverObserver.observe(el); }); }
@@ -136,26 +142,46 @@ function caseHTML(g, o = {}) {
   const fresh = state.updated[g.name] ? `<span class="fresh">Newly updated!</span>` : "";
   const up = g.upgrade && UPGRADE_TO[g.platform] && g.upgrade !== "No upgrade" ? `<span class="tag up ${g.upgrade.startsWith("Free") ? "free" : "paid"}" title="${esc(upgradeLabel(g))}">${g.upgrade.startsWith("Free") ? "FREE" : "PAID"} ↑</span>` : "";
   const cached = covers.get(coverKey(g));
-  const art = cached ? `<img alt="" src="${cached}">` : `<div class="fallback"><div class="t">${esc(g.name)}</div><div class="d">${esc(g.developer || g.genre || "")}</div></div>`;
+  const art = cached ? `<img alt="" decoding="async" src="${cached}">` : `<div class="fallback"><div class="t">${esc(g.name)}</div><div class="d">${esc(g.developer || g.genre || "")}</div></div>`;
   const deck = g.platform === "Steam" && g.play_on === "Steam Deck" ? `<span class="tag deck">DECK</span>` : p.tag ? `<span class="tag">${p.tag}</span>` : "";
+  const typeTag = g.type === "Live service" ? `<span class="typetag live"><i></i>LIVE</span>` : g.type === "Modded" ? `<span class="typetag mod">MODDED</span>` : "";
+  const ach = achBadge(g);
+  const quick = !o.noLabel ? quickBtn(g) : "";
   const media = p.media === "card"
     ? `<div class="media card"><div class="card-face"><span>${esc(p.label.replace("Nintendo ", ""))}</span></div></div>`
     : `<div class="media disc ${p.disc || ""}"><div class="disc-face"></div></div>`;
-  return `<button class="case p-${(g.platform || "x").replace(/\W+/g, "")}" data-id="${g.id}" data-kind="game"
+  return `<button class="case p-${(g.platform || "x").replace(/\W+/g, "")} ${g.status === "Wishlist" ? "unowned" : ""}" data-id="${g.id}" data-kind="game"
     style="--band:${p.band};--band-text:${p.text};--shell:${p.shell};--accent:${p.accent};--plat:${p.chip}" aria-label="${esc(g.name)}">
     <div class="stage">${media}
       <div class="box"><div class="shell"></div>
         <div class="band"><span class="wm">${esc(p.label)}</span>${deck}${up}</div>
         <div class="art" data-kind="game" data-id="${g.id}">${art}</div>
-        <div class="hinge"></div><div class="sheen"></div>${badge}${fresh}
+        <div class="hinge"></div><div class="sheen"></div>${badge}${fresh}${typeTag}${ach}${quick}
       </div>
     </div>
     ${o.noLabel ? "" : `<div class="label"><div class="name">${esc(g.name)}</div><div class="sub">${esc(o.sub ?? subline(g))}</div></div>`}
   </button>`;
 }
+function factsOf(g) { return state.facts[g.name] || {}; }
+function achBadge(g) {
+  const f = factsOf(g);
+  if (f.complete === "Platinum" || (g.platinum && CONSOLES.has(g.platform))) return `<span class="ach plat" title="Platinum trophy">◆ PLATINUM</span>`;
+  if (f.complete || g.platinum) return `<span class="ach full" title="Every achievement">★ 100%</span>`;
+  return "";
+}
+function quickBtn(item) {
+  if (!state.canEdit) return "";
+  const kind = item.author !== undefined ? "book" : "game";
+  if (item.status === "Wishlist") return `<span class="qc own" role="button" tabindex="-1" data-qown="${item.id}" data-qkind="${kind}" title="${kind === "book" ? "I have it now" : "I own it now"}">＋</span>`;
+  if (kind === "game" && (item.status === "Completed" || item.type === "Live service")) return "";
+  if (kind === "book" && item.status === "Read") return "";
+  return `<span class="qc" role="button" tabindex="-1" data-qc="${item.id}" data-qkind="${kind}" title="${kind === "book" ? "Mark as read" : "Mark as completed"}">✓</span>`;
+}
+function hoursFromAccounts(g) { const m = factsOf(g).minutes; return m ? Math.round(m / 6) / 10 : null; }
 function subline(g) {
   if (g.status === "Completed") return g.completed ? `Finished ${daysAgoLabel(g.completed)}` : "Finished";
   if (g.status === "Wishlist") return [g.platform, g.priority].filter(Boolean).join("  ·  ");
+  if (g.type === "Live service") return [g.platform, "Live service", factsOf(g).minutes ? `${Math.round(factsOf(g).minutes / 60)} h` : ""].filter(Boolean).join("  ·  ");
   const where = g.play_on && !CONSOLES.has(g.platform) ? `${g.platform} on ${g.play_on}` : g.platform;
   return [where, g.status !== "Library" ? g.status : ""].filter(Boolean).join("  ·  ");
 }
@@ -163,11 +189,11 @@ function subline(g) {
 /* ---------- the book ---------- */
 function bookHTML(b, o = {}) {
   const cached = covers.get(coverKey(b));
-  const art = cached ? `<img alt="" src="${cached}">` : `<div class="fallback book-fallback"><div class="t">${esc(b.name)}</div><div class="d">${esc(b.author)}</div></div>`;
+  const art = cached ? `<img alt="" decoding="async" src="${cached}">` : `<div class="fallback book-fallback"><div class="t">${esc(b.name)}</div><div class="d">${esc(b.author)}</div></div>`;
   const badge = b.status === "Read" ? `<span class="badge done">✓</span>` : b.status === "Reading" ? `<span class="badge reading">Reading</span>` : b.priority === "Extreme" || b.priority === "High" ? `<span class="badge" style="color:${PRIO_COLOR[b.priority]}">${b.priority}</span>` : "";
-  return `<button class="case book" data-id="${b.id}" data-kind="book" aria-label="${esc(b.name)}">
+  return `<button class="case book ${b.status === "Wishlist" ? "unowned" : ""}" data-id="${b.id}" data-kind="book" aria-label="${esc(b.name)}">
     <div class="stage"><div class="pages"></div>
-      <div class="box"><div class="art" data-kind="book" data-id="${b.id}">${art}</div><div class="bspine"></div><div class="sheen"></div>${badge}</div>
+      <div class="box"><div class="art" data-kind="book" data-id="${b.id}">${art}</div><div class="bspine"></div><div class="sheen"></div>${badge}${o.noLabel ? "" : quickBtn(b)}</div>
     </div>
     ${o.noLabel ? "" : `<div class="label"><div class="name">${esc(b.name)}</div><div class="sub">${esc(o.sub ?? [b.author, b.series && b.number ? `${b.series} #${b.number}` : b.series].filter(Boolean).join("  ·  "))}</div></div>`}
   </button>`;
@@ -180,16 +206,20 @@ function shelves() {
   const G = state.games, year = new Date().getFullYear();
   const fresh = G.filter(g => state.updated[g.name] && owned(g) && g.status !== "Completed");
   return [
-    { title: "Continue playing", items: G.filter(g => g.status === "Playing").concat(G.filter(g => g.status === "Paused").sort(byPrio)), view: "library", preset: { status: "Playing" } },
+    { title: "Continue playing", items: G.filter(g => g.status === "Playing" && g.type !== "Live service").concat(G.filter(g => g.status === "Paused").sort(byPrio)), view: "library", preset: { status: "Playing" } },
+    { title: "Your live games", items: G.filter(g => g.type === "Live service" && g.status !== "Dropped"), view: "library", preset: { status: "Live service" } },
+    { title: "Modded playthroughs", items: G.filter(g => g.type === "Modded"), view: "library", preset: { status: "Modded" } },
     { title: "Newly updated", items: fresh, view: "library" },
     { title: "Up next", items: G.filter(g => g.status === "Library").sort(byPrio).slice(0, 24), view: "library", preset: { status: "Library" } },
     { title: "On the Steam Deck", items: G.filter(g => g.play_on === "Steam Deck" && ["Library", "Playing", "Paused"].includes(g.status)).sort(byPrio), view: "library", preset: { playOn: "Steam Deck" } },
     { title: "Upgrade these to PS5 or Switch 2", items: G.filter(g => g.upgrade && g.upgrade !== "No upgrade" && UPGRADE_TO[g.platform] && g.status !== "Completed"), view: "library" },
     { title: "Wishlist, top priority", items: G.filter(g => g.status === "Wishlist").sort(byPrio).slice(0, 24), view: "wishlist" },
+    { title: "Plan to migrate", items: G.filter(migrating), view: "library", preset: { status: "Plan to migrate" } },
     { title: `Finished in ${year}`, items: G.filter(g => g.status === "Completed" && (g.completed || "").startsWith(String(year))).sort(byDone), view: "stats" },
     { title: "Second chances", items: G.filter(g => statusOf(g) === "Second chance"), view: "played" },
   ];
 }
+function migrating(g) { return !!g.migrate_to && g.migrate_to !== g.platform && owned(g); }
 function heroGame() {
   const G = state.games;
   return G.find(g => g.id === state.focusId) || G.find(g => g.status === "Playing")
@@ -285,6 +315,12 @@ function pillsHTML(g) {
   const up = upgradeLabel(g);
   if (up) out.push(`<span class="pill ${up.startsWith("Free") ? "pill-free" : "pill-paid"}">${esc(up)}</span>`);
   if (state.updated[g.name]) out.push(`<span class="pill pill-fresh">Newly updated!</span>`);
+  if (g.type === "Live service") out.push(`<span class="pill pill-live">● Live service</span>`);
+  if (g.type === "Modded") out.push(`<span class="pill pill-mod">Modded</span>`);
+  const f = factsOf(g);
+  if (f.complete === "Platinum" || (g.platinum && CONSOLES.has(g.platform))) out.push(`<span class="pill pill-plat">◆ Platinum</span>`);
+  else if (f.complete || g.platinum) out.push(`<span class="pill pill-ach">★ 100%</span>`);
+  if (migrating(g)) out.push(`<span class="pill">Migrating to ${esc(g.migrate_to)}</span>`);
   return out.join("");
 }
 
@@ -321,8 +357,9 @@ function gameListHTML(list) {
   return `<div class="sheet-wrap"><table class="sheet"><thead><tr>${head.map(h => `<th>${h}</th>`).join("")}</tr></thead><tbody>
     ${list.map(g => {
       const p = plat(g.platform);
-      return `<tr data-id="${g.id}" data-kind="game" tabindex="0">
-        <td class="name ${g.status === "Completed" ? "done" : ""}">${esc(g.name)}${state.updated[g.name] ? ` <span class="fresh-dot" title="Newly updated">NEW</span>` : ""}</td>
+      const canCheck = state.canEdit && owned(g) && g.status !== "Completed" && g.type !== "Live service";
+      return `<tr data-id="${g.id}" data-kind="game" tabindex="0" class="${g.status === "Wishlist" ? "unowned" : ""}">
+        <td class="name ${g.status === "Completed" ? "done" : ""}">${esc(g.name)}${state.updated[g.name] ? ` <span class="fresh-dot" title="Newly updated">NEW</span>` : ""}${canCheck ? `<button class="rowcheck" data-qc="${g.id}" data-qkind="game" title="Mark as completed">✓</button>` : ""}</td>
         <td>${selectCell("games", "status", g)}</td><td>${selectCell("games", "priority", g)}</td>
         <td class="date">${g.completed ? "✓ " + g.completed : g.status === "Completed" ? "unknown" : g.dropped ? "✗ " + g.dropped : ""}</td>
         <td><span class="platpill" style="background:${p.chip};color:${p.chipText}">${esc(g.platform)}</span></td>
@@ -373,7 +410,9 @@ function filtered() {
     if (state.view === "wishlist" && g.status !== "Wishlist") return false;
     if (state.view === "played" && !["Completed", "Dropped"].includes(g.status)) return false;
     if (state.view === "library" && g.status === "Wishlist" && f.status !== "Wishlist") return false;
-    if (f.status !== "All" && statusOf(g) !== f.status && !(f.status === "Dropped" && g.status === "Dropped")) return false;
+    if (f.status === "Live service" || f.status === "Modded") { if (g.type !== f.status) return false; }
+    else if (f.status === "Plan to migrate") { if (!migrating(g) && !(groupOf(g.platform) === "Exiled" && owned(g)) && !(g.platform === "Epic Games" && owned(g))) return false; }
+    else if (f.status !== "All" && statusOf(g) !== f.status && !(f.status === "Dropped" && g.status === "Dropped")) return false;
     if (f.plats.size && !f.plats.has(groupOf(g.platform))) return false;
     if (f.playOn === "Console" && !CONSOLES.has(g.platform)) return false;
     if (["PC", "Steam Deck"].includes(f.playOn) && (g.play_on !== f.playOn || CONSOLES.has(g.platform))) return false;
@@ -395,12 +434,12 @@ const seg = (obj, name, options) => `<div class="seg" data-seg="${name}">${optio
 const modeSwitch = () => `<div class="seg mode" data-mode><button aria-pressed="${state.mode === "covers"}" data-v="covers" title="Covers">▦ Covers</button><button aria-pressed="${state.mode === "list"}" data-v="list" title="List">☰ List</button></div>`;
 function libraryHTML() {
   const f = state.filter;
-  const statuses = state.view === "wishlist" ? [] : state.view === "played" ? ["All", "Completed", "Dropped", "Second chance"] : ["All", "Library", "Playing", "Paused", "Completed", "Dropped", "Second chance", "Wishlist"];
+  const statuses = state.view === "wishlist" ? [] : state.view === "played" ? ["All", "Completed", "Dropped", "Second chance"] : ["All", "Library", "Playing", "Paused", "Completed", "Dropped", "Second chance", "Wishlist", "Live service", "Modded", "Plan to migrate"];
   const present = new Set(state.games.map(g => groupOf(g.platform)));
   const groups = [...new Set(Object.keys(PLAT).map(groupOf))].filter(p => present.has(p));
   const chips = groups.map(p => {
     const c = GROUP_STYLE[p] || PLAT[p] || PLAT_FALLBACK;
-    const label = p === "Heroic" ? "Heroic (Epic + GOG)" : p === "Switch" ? "Switch 1" : p;
+    const label = GROUP_LABEL[p] || p;
     return `<button class="chip" data-plat="${esc(p)}" aria-pressed="${f.plats.has(p)}" style="--c:${c.chip};--t:${c.chipText}"><i></i>${esc(label)}</button>`;
   }).join("");
   const list = filtered();
@@ -572,23 +611,77 @@ function bookYearsHTML() {
 
 /* ---------- detail panel ---------- */
 let panelItem = null;
+/* the case opens like the real thing: front cover swings over to show the manual, the disc sits in the tray */
+function openCaseHTML(kind, item) {
+  if (kind === "book") {
+    const cached = covers.get(coverKey(item));
+    return `<div class="opencase book">
+      <div class="leaf back"><div class="page"><div class="manual-body" id="pageRight">${bookPageHTML(item)}</div></div></div>
+      <div class="leaf front"><div class="face outside"><div class="art" data-kind="book" data-id="${item.id}">${cached ? `<img alt="" decoding="async" src="${cached}">` : ""}</div><div class="bspine"></div></div>
+        <div class="face inside"><div class="manual paper"><div class="manual-body" id="manual"><p class="muted">Opening…</p></div></div></div></div></div>`;
+  }
+  const p = plat(item.platform), cached = covers.get(coverKey(item));
+  const art = cached ? `<img alt="" decoding="async" src="${cached}">` : `<div class="fallback"><div class="t">${esc(item.name)}</div></div>`;
+  const tray = p.media === "card"
+    ? `<div class="cardslot"><div class="cart"><div class="cart-label">${cached ? `<img alt="" decoding="async" src="${cached}">` : ""}</div><span>${esc(p.label.replace("Nintendo ", ""))}</span></div></div><div class="clips"></div>`
+    : `<div class="bigdisc ${p.disc || ""}"><div class="label">${cached ? `<img alt="" decoding="async" src="${cached}">` : ""}</div><div class="hub"></div></div>`;
+  return `<div class="opencase p-${(item.platform || "x").replace(/\W+/g, "")}" style="--band:${p.band};--band-text:${p.text};--shell:${p.shell};--accent:${p.accent};--plat:${p.chip}">
+    <div class="leaf back"><div class="tray">${tray}</div></div>
+    <div class="leaf front">
+      <div class="face outside"><div class="band"><span class="wm">${esc(p.label)}</span></div><div class="art" data-kind="game" data-id="${item.id}">${art}</div><div class="hinge"></div><div class="sheen"></div></div>
+      <div class="face inside"><div class="manual"><div class="manual-body" id="manual"><p class="muted">Opening the manual…</p></div></div></div>
+    </div></div>`;
+}
+function bookPageHTML(b) {
+  return `<h4>${esc(b.name)}</h4><p class="by">${esc(b.author)}</p>${b.series ? `<p>${esc(b.series)}${b.number ? `, book ${b.number}` : ""}</p>` : ""}
+    ${b.finished ? `<p>Finished ${fmtDate(b.finished)}</p>` : ""}${b.score != null ? `<p>Your score ${scoreText(b.score)}</p>` : ""}`;
+}
+function shortDlc(g, n) {
+  const t = String(n || "").trim();
+  return t.toLowerCase().startsWith(g.name.toLowerCase()) ? (t.slice(g.name.length).replace(/^\s*[:\-–]\s*/, "") || t) : t;
+}
+function manualHTML(g, about, dlcs) {
+  const text = about?.text ? `<p class="syn">${esc(about.text)}</p>` : `<p class="muted">No description found yet.</p>`;
+  const list = (dlcs || []).filter(d => d.kind !== "upgrade").slice(0, 5);
+  const dl = list.length
+    ? `<h5>${g.dlc_owned ? "DLC included" : "DLC available"}</h5><ul>${list.map(d => `<li class="${g.dlc_owned ? "have" : ""}">${g.dlc_owned ? "✓" : "–"} ${esc(shortDlc(g, d.name))}${d.major ? ` <b>Major</b>` : ""}</li>`).join("")}</ul>`
+    : `<h5>DLC</h5><p class="muted">None found.</p>`;
+  const facts = [about?.release && `Released ${about.release}`, about?.developers?.length && about.developers.join(", ")].filter(Boolean);
+  return `<div class="mhead">${esc(g.name)}</div>${text}${dl}${facts.length ? `<p class="mfoot">${esc(facts.join(" · "))}</p>` : ""}${about?.source ? `<p class="msrc">Text from ${esc(about.source)}</p>` : ""}`;
+}
 function openPanel(kind, id, tab = "overview") {
   const item = findItem(kind, id);
   if (!item) return;
+  const same = panelItem && panelItem.kind === kind && panelItem.id === item.id;
   panelItem = { kind, id: item.id };
   hidePeek();
   const panel = $("#panel");
-  const tabs = kind === "game" ? [["overview", "Overview"], ["ratings", "Ratings"], ["dlc", "DLC"], ["wiki", "Wiki"], ["news", "News"], ["edit", "Edit"]]
+  const tabs = kind === "game" ? [["overview", "Overview"], ["ratings", "Ratings"], ["dlc", "DLC"], ...(item.type === "Live service" ? [["milestones", "Milestones"]] : []), ["wiki", "Wiki"], ["news", "News"], ["edit", "Edit"]]
     : [["overview", "Overview"], ["wiki", "About"], ["edit", "Edit"]];
-  panel.innerHTML = `<button class="icon close" aria-label="Close">✕</button>
-    <div class="top">${kind === "game" ? caseHTML(item, { noLabel: true }) : bookHTML(item, { noLabel: true })}
-      <div><h2>${esc(item.name)}</h2><div class="pills">${kind === "game" ? pillsHTML(item) : bookPills(item)}</div></div></div>
-    <div class="ptabs" role="tablist">${tabs.map(([k, l]) => `<button data-ptab="${k}" aria-selected="${k === tab}">${l}</button>`).join("")}</div>
-    <div class="pbody" id="pbody"></div>`;
-  activateArt(panel);
-  panel.classList.add("open"); panel.setAttribute("aria-hidden", "false");
-  $("#scrim").hidden = false;
-  panel.focus();
+  if (!same) {
+    try { FX.play.open(); } catch {}
+    panel.innerHTML = `<div class="cv-bg"><div class="cv-art" id="cvArt"></div></div>
+      <button class="icon close" aria-label="Close">✕</button>
+      <div class="cv-stage">${openCaseHTML(kind, item)}</div>
+      <div class="cv-info"><div class="cv-head"><h2>${esc(item.name)}</h2><div class="pills">${kind === "game" ? pillsHTML(item) : bookPills(item)}</div></div>
+        <div class="ptabs" role="tablist">${tabs.map(([k, l]) => `<button data-ptab="${k}" aria-selected="${k === tab}">${l}</button>`).join("")}</div>
+        <div class="pbody" id="pbody"></div></div>`;
+    activateArt(panel);
+    panel.classList.remove("opened");
+    panel.classList.add("open"); panel.setAttribute("aria-hidden", "false");
+    setTimeout(() => panel.classList.add("opened"), 90);
+    panel.focus();
+    const still = () => panelItem && panelItem.id === item.id && panelItem.kind === kind;
+    const setArt = uri => { const a = $("#cvArt"); if (a && still() && uri) { a.style.backgroundImage = `url("${uri}")`; a.classList.add("on"); } };
+    if (kind === "game") {
+      Promise.resolve(api?.hero(item.name)).then(uri => uri ? setArt(uri) : loadCover(item).then(setArt)).catch(() => {});
+      Promise.all([Promise.resolve(api?.about(item)).catch(() => null), Promise.resolve(api?.dlcs(item)).catch(() => [])])
+        .then(([about, dlcs]) => { const m = $("#manual"); if (m && still()) m.innerHTML = manualHTML(item, about, dlcs); });
+    } else {
+      loadCover(item).then(setArt);
+      Promise.resolve(api?.book_info(item)).then(i => { const m = $("#manual"); if (m && still()) m.innerHTML = `<div class="mhead">${esc(item.name)}</div><p class="syn">${esc(i?.google?.description || i?.wikipedia?.extract || "No description found yet.")}</p>`; }).catch(() => {});
+    }
+  }
   showPanelTab(tab);
 }
 function bookPills(b) {
@@ -622,6 +715,7 @@ function showPanelTab(tab) {
   if (tab === "ratings") { body.innerHTML = loading("Fetching scores…"); getRatings(item).then(r => { if (still()) body.innerHTML = ratingsHTML(item, r); }); }
   if (tab === "dlc") { body.innerHTML = loading("Looking for DLC…"); Promise.resolve(api?.dlcs(item)).then(d => { if (still()) body.innerHTML = dlcHTML(item, d || []); }); }
   if (tab === "wiki") { body.innerHTML = loading("Opening the wiki…"); Promise.resolve(api?.wiki(item)).then(w => { if (still()) body.innerHTML = wikiHTML(item, w); }); }
+  if (tab === "milestones") { body.innerHTML = loading("Gathering milestones…"); Promise.resolve(api?.milestones(item)).then(m => { if (still()) body.innerHTML = milestonesHTML(item, m || []); }); }
   if (tab === "news") { body.innerHTML = loading("Fetching news…"); Promise.resolve(api?.news(item)).then(n => { if (still()) body.innerHTML = newsHTML(item, n || []); }); }
   if (tab === "edit") body.innerHTML = editHTML("games", item);
 }
@@ -638,6 +732,10 @@ function gameOverviewHTML(g) {
   if (g.developer) kv.push(["Developer", g.developer]);
   if (g.publisher) kv.push(["Publisher", g.publisher]);
   if (upgradeLabel(g)) kv.push(["Upgrade", upgradeLabel(g)]);
+  const fa = factsOf(g);
+  if (fa.minutes) kv.push([`Played (${(fa.sources || []).map(s => ({ steam: "Steam", psn: "PlayStation", heroic: "Heroic", itch: "itch.io" }[s])).join(", ")})`, `${Math.round(fa.minutes / 6) / 10} h${fa.last_played ? ` · last ${typeof fa.last_played === "number" ? ago(fa.last_played) : ago(String(fa.last_played).slice(0, 10))}` : ""}`]);
+  if (fa.achievements) kv.push(["Achievements", `${fa.achievements.done} / ${fa.achievements.total}`]);
+  if (fa.trophies) kv.push(["Trophies", `${fa.trophies.progress}%${fa.trophies.platinum ? " · Platinum earned" : ""}`]);
   if (g.migrate_to) kv.push(["Migrate to", g.migrate_to]);
   const flags = [["DLC owned", g.dlc_owned], ["DLC done", g.dlc_done], ["100% / Platinum", g.platinum], ["Modded", g.modded]];
   if (g.status === "Dropped") flags.push(["Second chance", g.second_chance]);
@@ -674,12 +772,22 @@ function ratingsHTML(g, r) {
 }
 function dlcHTML(g, list) {
   if (!list.length) return `<p class="muted">No DLC found for this game.</p>`;
-  return `<p class="fine">${g.dlc_owned ? `You own DLC for this game${g.dlc_done ? " and you've finished it" : ""}.` : "You haven't marked any DLC as owned."}</p>
-    <ul class="dlcs">${list.map(d => `<li>
-      <div class="dl-main"><b>${esc(d.name)}</b><small>${[d.release, d.price].filter(Boolean).map(esc).join(" · ")}</small>${d.summary ? `<p>${esc(d.summary)}</p>` : ""}</div>
+  const row = d => `<li class="${d.major ? "major" : ""} ${d.kind === "upgrade" ? "upg" : ""}">
+      <div class="dl-art">${d.art ? `<img alt="" loading="lazy" decoding="async" src="${esc(d.art)}">` : `<span>${esc(shortDlc(g, d.name).slice(0, 2).toUpperCase())}</span>`}</div>
+      <div class="dl-main"><div class="dl-title"><b>${esc(shortDlc(g, d.name))}</b>${d.major ? `<span class="majortag">Major expansion</span>` : d.kind === "upgrade" ? `<span class="minortag">Upgrade / pass</span>` : ""}${d.coming ? `<span class="minortag soon">Coming</span>` : ""}</div>
+        <small>${[d.release, d.price].filter(Boolean).map(esc).join(" · ")}</small>${d.summary ? `<p>${esc(d.summary)}</p>` : ""}</div>
       <div class="dl-scores">${d.metacritic != null ? `<span class="mc ${mcClass(d.metacritic)}" data-url="${esc(d.metacritic_url || "")}" title="Metascore">${d.metacritic}</span>` : ""}
         ${d.steam ? `<span class="steamr" title="${esc(d.steam.label)}">${d.steam.percent}%</span>` : ""}
-        ${d.url ? `<button class="linkish" data-url="${esc(d.url)}">Store</button>` : ""}</div></li>`).join("")}</ul>`;
+        ${d.url ? `<button class="linkish" data-url="${esc(d.url)}">Store</button>` : ""}</div></li>`;
+  return `<p class="fine">${g.dlc_owned ? `You own DLC for this game${g.dlc_done ? " and you've finished it" : ""}.` : "You haven't marked any DLC as owned."}</p>
+    <ul class="dlcs">${list.map(row).join("")}</ul>`;
+}
+function milestonesHTML(g, items) {
+  if (!items.length) return `<p class="muted">No major updates found yet. Milestones come from the game's official update posts.</p>`;
+  return `<ol class="milestones">${items.map(m => `<li class="${m.upcoming ? "soon" : ""}" data-url="${esc(m.url)}">
+      <div class="ms-art">${m.thumb ? `<img alt="" loading="lazy" decoding="async" src="${esc(m.thumb)}">` : ""}</div>
+      <div class="ms-text"><div class="meta">${m.upcoming ? `<span class="ntag soon">Coming ${new Date(m.start * 1000).toLocaleDateString(undefined, { day: "numeric", month: "short" })}</span>` : `<span class="ntag major">${m.kind === "release" ? "Launch" : "Major update"}</span>`}<span>${m.date ? ago(m.date) : ""}</span></div>
+        <b>${esc(m.title)}</b>${m.summary ? `<p>${esc(m.summary)}</p>` : ""}</div></li>`).join("")}</ol>`;
 }
 function wikiHTML(g, w) {
   const wp = w?.wikipedia;
@@ -692,9 +800,13 @@ function wikiHTML(g, w) {
 function newsHTML(g, items) {
   if (!items.length) return `<p class="muted">No recent news found.</p>`;
   const cutoff = Date.now() / 1000 - 14 * 86400;
-  return `<ul class="news">${items.map(n => `<li class="${n.patch && n.date >= cutoff ? "fresh" : ""}" data-url="${esc(n.url)}">
-      <div class="meta">${n.patch ? `<span class="ntag">${n.date >= cutoff ? "Newly updated!" : "Update"}</span>` : ""}<span>${esc(n.source)}</span><span>${n.date ? ago(n.date) : ""}</span></div>
-      <b>${esc(n.title)}</b>${n.summary ? `<p>${esc(n.summary)}</p>` : ""}</li>`).join("")}</ul>`;
+  const fallback = covers.get(coverKey(g));
+  const tag = n => n.upcoming ? `<span class="ntag soon">Coming</span>` : n.kind === "major" ? `<span class="ntag major">${n.date >= cutoff ? "Newly updated! · " : ""}Milestone</span>`
+    : n.kind === "update" ? `<span class="ntag">${n.date >= cutoff ? "Newly updated!" : "Update"}</span>` : n.kind === "minor" ? `<span class="ntag minor">Hotfix</span>` : "";
+  return `<ul class="news">${items.map(n => `<li class="${n.patch && n.date >= cutoff ? "fresh" : ""} ${n.kind === "major" ? "big" : ""}" data-url="${esc(n.url)}">
+      <div class="n-thumb">${n.thumb ? `<img alt="" loading="lazy" decoding="async" src="${esc(n.thumb)}">` : fallback ? `<img alt="" class="dim" src="${fallback}">` : ""}</div>
+      <div class="n-text"><div class="meta">${tag(n)}<span>${esc(n.source)}</span><span>${n.date ? ago(n.date) : ""}</span></div>
+      <b>${esc(n.title)}</b>${n.summary ? `<p>${esc(n.summary)}</p>` : ""}</div></li>`).join("")}</ul>`;
 }
 function bookOverviewHTML(b) {
   const kv = [["Author", b.author], b.series && ["Series", `${b.series}${b.number ? `, book ${b.number}` : ""}`], b.finished && ["Finished", `${fmtDate(b.finished)} · ${daysAgoLabel(b.finished)}`], b.score != null && ["Your score", scoreText(b.score)], b.format && ["Format", b.format]].filter(Boolean);
@@ -721,8 +833,9 @@ function bookAboutHTML(b, i) {
 }
 
 /* ----- editing ----- */
-const GAME_FORM = [["status", "Status", "select"], ["priority", "Priority", "select"], ["platform", "Platform", "select"], ["play_on", "Play on", "select"],
+const GAME_FORM = [["name", "Name", "text"], ["status", "Status", "select"], ["priority", "Priority", "select"], ["platform", "Platform", "select"], ["play_on", "Play on", "select"],
   ["format", "Format", "select"], ["upgrade", "Upgrade", "select"], ["hours", "Hours", "number"], ["score", "Score (0–10)", "number"],
+  ["type", "Category", "select"], ["migrate_to", "Migrate to", "select"],
   ["genre", "Genre", "text"], ["store_link", "Store link", "text"], ["notes", "Notes", "textarea"],
   ["second_chance", "Second chance", "check"], ["dlc_owned", "DLC owned", "check"], ["dlc_done", "DLC done", "check"], ["platinum", "100% / Platinum", "check"], ["modded", "Modded", "check"]];
 const BOOK_FORM = [["name", "Title", "text"], ["author", "Author", "text"], ["series", "Series", "text"], ["number", "Number in series", "number"],
@@ -734,7 +847,7 @@ function fieldHTML(cat, [k, label, type], item) {
   if (type === "number") return `<label>${label}<input name="${k}" type="number" step="0.1" min="0" ${k === "score" ? 'max="10"' : ""} value="${v ?? ""}"></label>`;
   if (type === "textarea") return `<label class="wide">${label}<textarea name="${k}" rows="3">${esc(v || "")}</textarea></label>`;
   if (type === "check") return `<label class="check"><input name="${k}" type="checkbox" ${v ? "checked" : ""}>${label}</label>`;
-  return `<label class="${k === "notes" || k === "store_link" ? "wide" : ""}">${label}<input name="${k}" type="text" value="${esc(v ?? "")}"></label>`;
+  return `<label class="${["notes", "store_link", "name"].includes(k) ? "wide" : ""}">${label}<input name="${k}" type="text" value="${esc(v ?? "")}"></label>`;
 }
 function editHTML(cat, item) {
   if (!state.canEdit) return `<p class="muted">To edit here, connect the app to your sheet: open Settings and follow "How to connect your sheet". Until then, edit the sheet itself and the app picks up the changes on the next sync.</p>`;
@@ -742,7 +855,8 @@ function editHTML(cat, item) {
   return `<form class="editform" id="editForm" data-cat="${cat}">
     <div class="fields">${form.filter(f => f[2] !== "check").map(f => fieldHTML(cat, f, item)).join("")}</div>
     ${cat === "games" ? `<div class="checks">${form.filter(f => f[2] === "check").map(f => fieldHTML(cat, f, item)).join("")}</div>` : ""}
-    <p class="fine">Finish and drop dates, runs and "Beaten on" are filled in by the sheet itself.</p>
+    <p class="fine">Finish and drop dates, runs and "Beaten on" are filled in by the sheet itself. Renaming a game also renames its replays and fetches the cover for the new name.</p>
+    ${cat === "games" ? `<div class="row"><button type="button" class="ghost small" id="customCover">Use my own cover…</button><button type="button" class="ghost small" id="resetCover">Back to the official cover</button></div>` : ""}
     <div class="row"><span class="spacer"></span><button type="submit" class="primary">Save changes</button></div></form>`;
 }
 function readForm(form, cat, item) {
@@ -772,20 +886,24 @@ async function saveEdit(cat, item, changes, quiet) {
     toast(`Couldn't save: ${res?.error || "no connection"}`, "err");
     return;
   }
+  try { FX.play.save(); } catch {}
+  if (changes.name) { covers.delete(coverKey(before)); }
   toast(`Saved to the sheet${res.skipped?.length ? ` (the sheet fills in ${res.skipped.join(", ")} itself)` : ""}.`, "ok");
   setTimeout(() => sync(false), 1500);
 }
 function refreshPanelHead() {
   const item = findItem(panelItem.kind, panelItem.id);
   if (!item) return;
-  const top = $("#panel .top");
-  if (top) { top.innerHTML = `${panelItem.kind === "game" ? caseHTML(item, { noLabel: true }) : bookHTML(item, { noLabel: true })}<div><h2>${esc(item.name)}</h2><div class="pills">${panelItem.kind === "game" ? pillsHTML(item) : bookPills(item)}</div></div>`; activateArt(top); }
-  const tab = $("#pbody")?.dataset.tab;
-  if (tab === "overview") showPanelTab("overview");
+  const head = $("#panel .cv-head");
+  if (head) head.innerHTML = `<h2>${esc(item.name)}</h2><div class="pills">${panelItem.kind === "game" ? pillsHTML(item) : bookPills(item)}</div>`;
+  if ($("#pbody")?.dataset.tab === "overview") showPanelTab("overview");
 }
 function closePanel() {
   const panel = $("#panel");
-  panel.classList.remove("open"); panel.setAttribute("aria-hidden", "true");
+  if (!panel.classList.contains("open")) return;
+  try { FX.play.back(); } catch {}
+  panel.classList.remove("opened");
+  setTimeout(() => { panel.classList.remove("open"); panel.setAttribute("aria-hidden", "true"); }, 260);
   $("#scrim").hidden = true;
   panelItem = null;
 }
@@ -895,23 +1013,46 @@ async function installUpdate() {
 }
 
 /* ---------- settings ---------- */
-function openSettings(showHowTo) {
-  const f = $("#settingsForm");
-  f.sheet_url.value = state.settings.sheet_url || "";
+function showSettingsTab(t) {
+  document.querySelectorAll("[data-stab]").forEach(b => b.setAttribute("aria-selected", String(b.dataset.stab === t)));
+  document.querySelectorAll("[data-spane]").forEach(p => { p.hidden = p.dataset.spane !== t; });
+  if (t === "accounts") renderAccounts();
+}
+function openSettings(showHowTo, tab = "sheet") {
+  const f = $("#settingsForm"), st = state.settings;
+  f.sheet_url.value = st.sheet_url || "";
   f.sgdb_key.value = "";
-  f.refresh_minutes.value = String(state.settings.refresh_minutes || 2);
-  $("#keyState").textContent = state.settings.has_sgdb_key ? "A key is saved. Paste a new one to replace it." : "Covers for every platform, including PS5 and Switch. Without a key, covers come from Steam only.";
-  $("#connState").textContent = state.settings.connected ? "Connected. You can edit and add games from the app." : state.settings.link_kind === "csv" ? "Read-only: this is a published sheet link. Use the connection script below to edit from the app." : "Paste the Web app link from the connection script.";
-  $("#connState").className = state.settings.connected ? "ok" : "";
-  $("#settingsForm .howto").open = !!showHowTo && !state.settings.connected;
-  $("#versionText").textContent = `Version ${state.settings.version || "dev"}`;
+  f.refresh_minutes.value = String(st.refresh_minutes || 2);
+  f.sound_on.checked = st.sound_on !== false;
+  f.ambient_volume.value = st.ambient_volume ?? 0.35;
+  f.fx_volume.value = st.fx_volume ?? 0.5;
+  f.intro.checked = st.intro !== false;
+  $("#keyState").textContent = st.has_sgdb_key ? "A key is saved. Paste a new one to replace it." : "Covers for every platform, including PS5 and Switch. Without a key, covers come from Steam only.";
+  $("#connState").textContent = st.connected ? "Connected. You can edit and add from the app." : st.link_kind === "csv" ? "Read-only: this is a published sheet link. Use the connection script below to edit from the app." : "Paste the Web app link from the connection script.";
+  $("#connState").className = st.connected ? "ok" : "";
+  $("#settingsForm .howto").open = !!showHowTo && !st.connected;
+  $("#versionText").textContent = `Masterlog ${st.version || "dev"}`;
+  showSettingsTab(tab);
   $("#settings").showModal();
+}
+function soundSettings() {
+  const f = $("#settingsForm");
+  return { sound_on: f.sound_on.checked, ambient_volume: +f.ambient_volume.value, fx_volume: +f.fx_volume.value, intro: f.intro.checked };
+}
+function applySound(st = state.settings) {
+  try { FX.configure({ on: st.sound_on !== false, ambient: st.ambient_volume ?? 0.35, fx: st.fx_volume ?? 0.5 }); } catch {}
+  const on = st.sound_on !== false;
+  $("#soundBtn").innerHTML = on
+    ? `<svg viewBox="0 0 24 24" width="20" height="20"><path fill="currentColor" d="M4 9v6h4l5 4V5L8 9H4zm12.5 3a4.5 4.5 0 0 0-2.5-4v8a4.5 4.5 0 0 0 2.5-4zM14 3.2v2.1a7 7 0 0 1 0 13.4v2.1a9 9 0 0 0 0-17.6z"/></svg>`
+    : `<svg viewBox="0 0 24 24" width="20" height="20"><path fill="currentColor" d="M4 9v6h4l5 4V5L8 9H4zm12.6 3 2.7-2.7-1.3-1.3-2.7 2.7-2.7-2.7-1.3 1.3 2.7 2.7-2.7 2.7 1.3 1.3 2.7-2.7 2.7 2.7 1.3-1.3z"/></svg>`;
+  $("#soundBtn").title = on ? "Sound on" : "Sound off";
 }
 async function saveSettings() {
   const f = $("#settingsForm");
   const hadKey = state.settings.has_sgdb_key;
-  const res = await api.save_settings({ sheet_url: f.sheet_url.value.trim(), sgdb_key: f.sgdb_key.value.trim(), refresh_minutes: +f.refresh_minutes.value });
+  const res = await api.save_settings({ sheet_url: f.sheet_url.value.trim(), sgdb_key: f.sgdb_key.value.trim(), refresh_minutes: +f.refresh_minutes.value, ...soundSettings() });
   state.settings = res;
+  applySound();
   if (res.pair_error) toast(`Couldn't connect: ${res.pair_error}`, "err");
   else if (res.paired) toast(`Connected to ${typeof res.paired === "string" ? res.paired : "your sheet"}.`, "ok");
   if (!hadKey && state.settings.has_sgdb_key) { await api.clear_covers(); covers.clear(); }
@@ -924,6 +1065,106 @@ async function copyScript() {
   try { await navigator.clipboard.writeText(text); }
   catch { const t = document.createElement("textarea"); t.value = text; document.body.append(t); t.select(); document.execCommand("copy"); t.remove(); }
   toast("Script copied. Paste it into Apps Script.", "ok");
+}
+
+/* ---------- linked accounts ---------- */
+const ACCOUNTS = {
+  steam: { name: "Steam", color: "#66C0F4", fields: [["a", "Steam Web API key", "password"], ["b", "Your profile link or SteamID64", "text"]],
+    help: `<ol><li>Get a free key at <button type="button" class="linkish" data-url="https://steamcommunity.com/dev/apikey">steamcommunity.com/dev/apikey</button> (any domain name works, e.g. <i>localhost</i>).</li><li>In Steam, set <b>Profile → Edit Profile → Privacy → Game details</b> to <b>Public</b>.</li><li>Paste the key and your profile link.</li></ol>` },
+  psn: { name: "PlayStation", color: "#2E7BFF", fields: [["a", "NPSSO code", "password"]],
+    help: `<ol><li>Sign in at <button type="button" class="linkish" data-url="https://www.playstation.com/">playstation.com</button> in your browser.</li><li>In the same browser, open <button type="button" class="linkish" data-url="https://ca.account.sony.com/api/v1/ssocookie">ca.account.sony.com/api/v1/ssocookie</button>.</li><li>Copy the 64-character code after <b>"npsso"</b> and paste it here. It's like a password: don't share it.</li></ol><p class="fine">This uses Sony's unofficial mobile-app access. It can stop working if Sony changes it; your account is only read.</p>` },
+  heroic: { name: "Heroic (Epic + GOG)", color: "#9F7AEA", fields: [],
+    help: `<p class="fine">Reads Heroic's library files on this PC. No password, nothing leaves your computer. Open Heroic at least once first.</p>` },
+  itch: { name: "itch.io", color: "#FA5C5C", fields: [["a", "itch.io API key", "password"]],
+    help: `<ol><li>Create a key at <button type="button" class="linkish" data-url="https://itch.io/user/settings/api-keys">itch.io/user/settings/api-keys</button>.</li><li>Paste it here.</li></ol>` },
+  nintendo: { name: "Nintendo", color: "#E60012", soon: true },
+};
+async function renderAccounts() {
+  const box = $("#accountsBox");
+  const st = await Promise.resolve(api?.accounts_status()).catch(() => null) || {};
+  box.innerHTML = Object.entries(ACCOUNTS).map(([k, a]) => {
+    const s = st[k] || {};
+    if (a.soon) return `<div class="acct"><div class="acct-head"><span class="sw" style="background:${a.color}"></span><b>${a.name}</b><span class="st">Experimental, coming in a later update. Nintendo doesn't share libraries, so this will use the Parental Controls app's play time.</span></div></div>`;
+    const state_ = s.error ? `<span class="st err">${esc(s.error)}</span>` : s.linked ? `<span class="st ok">Linked${s.who ? ` as ${esc(s.who)}` : ""}${s.games ? ` · ${s.games} games` : ""}${s.synced ? ` · synced ${ago(s.synced)}` : ""}</span>` : `<span class="st">${k === "heroic" && !s.found ? "Heroic not found on this PC" : "Not linked"}</span>`;
+    return `<div class="acct" data-acct="${k}"><div class="acct-head"><span class="sw" style="background:${a.color}"></span><b>${a.name}</b>${state_}<span class="spacer"></span>
+      ${s.linked ? `<button type="button" class="ghost small" data-unlink="${k}">Unlink</button>` : `<button type="button" class="primary small" data-linkopen="${k}">Link</button>`}</div>
+      <div class="form" data-linkform="${k}" hidden>${a.help}${a.fields.map(([n, l, t]) => `<label>${l}<input name="acct_${k}_${n}" type="${t}" autocomplete="off"></label>`).join("")}
+        <div class="row"><span class="spacer"></span><button type="button" class="primary small" data-link="${k}">${k === "heroic" ? "Link Heroic" : `Link ${a.name}`}</button></div></div></div>`;
+  }).join("") + `<div class="row"><button type="button" class="ghost small" id="syncAccounts">Check accounts now</button><button type="button" class="ghost small" id="reviewImports">Review games not in Masterlog</button></div>`;
+}
+async function linkAccount(k) {
+  const v = n => $(`[name="acct_${k}_${n}"]`)?.value.trim() || "";
+  const btn = $(`[data-link="${k}"]`); btn.disabled = true; btn.textContent = "Linking…";
+  const res = await Promise.resolve(api?.link_account(k, v("a"), v("b"))).catch(e => ({ error: String(e) }));
+  btn.disabled = false;
+  if (!res || res.error) { toast(res?.error || "Couldn't link.", "err"); btn.textContent = "Try again"; return; }
+  try { FX.play.notify(); } catch {}
+  toast(`${ACCOUNTS[k].name} linked${res.who ? ` as ${res.who}` : ""}${res.games ? `. Found ${res.games} games` : ""}. Matching them to your list…`, "ok");
+  renderAccounts();
+  pollAccounts(true);
+}
+let accountsPoll = null, importOffered = false, platSynced = new Set();
+function pollAccounts(fast) {
+  clearTimeout(accountsPoll);
+  const run = async () => {
+    const d = await Promise.resolve(api?.account_data()).catch(() => null);
+    if (d) {
+      const before = JSON.stringify(state.facts);
+      state.facts = d.facts || {}; state.candidates = d.candidates || [];
+      if (before !== JSON.stringify(state.facts) && !document.activeElement?.closest?.("#editForm")) { render(); if (panelItem) refreshPanelHead(); }
+      if (d.unreviewed?.length && state.candidates.length && !importOffered && state.canEdit) { importOffered = true; openImport(d.unreviewed); }
+      if (d.new?.length && state.canEdit) autoAdd(d.new);
+      syncTrophies();
+    }
+    accountsPoll = setTimeout(run, d?.running || fast ? 4000 : 120000);
+  };
+  accountsPoll = setTimeout(run, fast ? 2500 : 0);
+}
+async function autoAdd(items) {
+  const res = await Promise.resolve(api?.import_games(items.map(c => ({ name: c.name, platform: c.platform, store_link: c.url })))).catch(() => null);
+  if (!res?.added?.length) return;
+  const srcs = [...new Set(items.map(c => ({ steam: "Steam", psn: "PlayStation", heroic: "Heroic", itch: "itch.io" }[c.source])))];
+  const n = res.added.length;
+  try { FX.play.notify(); } catch {}
+  toast(n === 1 ? `New arrival! ${res.added[0]} just landed in your library from ${srcs.join(" and ")}.`
+    : `New arrivals! ${n} games from ${srcs.join(" and ")} just landed in your library: ${res.added.slice(0, 3).join(", ")}${n > 3 ? ` and ${n - 3} more` : ""}.`, "party");
+  sync(true);
+}
+async function syncTrophies() {
+  // tick the sheet's 100% / Plat box when Steam or PlayStation says you've done it all
+  if (!state.canEdit) return;
+  const todo = state.games.filter(g => factsOf(g).complete && !g.platinum && !platSynced.has(g.name)).slice(0, 8);
+  for (const g of todo) {
+    platSynced.add(g.name);
+    await Promise.resolve(api?.edit("games", g.row, g.name, { platinum: true })).catch(() => null);
+    g.platinum = true;
+  }
+  if (todo.length) { render(); toast(todo.length === 1 ? `${todo[0].name}: every achievement unlocked. Badge earned!` : `${todo.length} games just earned their 100% badge.`, "party"); }
+}
+function openImport(sources) {
+  const list = state.candidates.filter(c => !sources || sources.includes(c.source));
+  if (!list.length) return toast("Everything on your accounts is already in Masterlog.", "ok");
+  const label = { steam: "Steam", psn: "PlayStation", heroic: "Heroic", itch: "itch.io" };
+  list.sort((a, b) => (b.minutes || 0) - (a.minutes || 0) || a.name.localeCompare(b.name));
+  $("#importForm").innerHTML = `<h2>Found ${list.length} game${list.length === 1 ? "" : "s"} that aren't in Masterlog yet</h2>
+    <p class="fine">Ticked ones are games you've actually played. Untick anything you don't want (free giveaways, tools). Skipped games won't be offered again, but you can review them any time in Settings → Accounts.</p>
+    <div class="row"><button type="button" class="linkish" id="impAll">Select all</button><button type="button" class="linkish" id="impNone">Select none</button></div>
+    <div class="importlist">${list.map((c, i) => `<label><input type="checkbox" name="imp" value="${i}" ${c.minutes > 0 || c.source === "psn" ? "checked" : ""}>
+      <span>${esc(c.name)}</span><small>${esc(c.platform)} · ${label[c.source]}</small><small>${c.minutes ? `${Math.round(c.minutes / 6) / 10} h` : "not played"}</small></label>`).join("")}</div>
+    <div class="row"><span class="spacer"></span><button value="skip" class="ghost">Skip these</button><button value="add" class="primary">Add selected</button></div>`;
+  $("#importForm")._list = list;
+  $("#importDialog").showModal();
+}
+async function submitImport(form, action) {
+  if (action === "skip") { await api?.accounts_seen(); return toast("Got it. They won't be offered again.", "ok"); }
+  const chosen = [...form.querySelectorAll("[name=imp]:checked")].map(x => form._list[+x.value]);
+  if (!chosen.length) { await api?.accounts_seen(); return; }
+  toast(`Adding ${chosen.length} game${chosen.length === 1 ? "" : "s"}…`);
+  const res = await Promise.resolve(api?.import_games(chosen.map(c => ({ name: c.name, platform: c.platform, store_link: c.url })))).catch(e => ({ error: String(e) }));
+  if (!res || res.error) return toast(res?.error || "Couldn't add them.", "err");
+  try { FX.play.notify(); } catch {}
+  toast(`Welcome aboard: ${res.added.length} game${res.added.length === 1 ? "" : "s"} added to your library.${res.failed.length ? ` ${res.failed.length} couldn't be added.` : ""}`, "party");
+  sync(true);
 }
 
 /* ---------- clock ---------- */
@@ -965,7 +1206,10 @@ function towers() {
   resize(); addEventListener("resize", resize);
   if (reduce) { draw(0); return; }
   let last = 0;
-  const loop = t => { if (t - last > 50) { draw(t); last = t; } requestAnimationFrame(loop); };
+  const loop = t => {
+    if (t - last > 50 && !document.hidden && !$("#panel").classList.contains("open")) { draw(t); last = t; }
+    requestAnimationFrame(loop);
+  };
   requestAnimationFrame(loop);
 }
 
@@ -979,6 +1223,25 @@ function bindGlobal() {
   $("#updateBtn").addEventListener("click", installUpdate);
   $("#checkUpdates").addEventListener("click", () => checkForUpdate(true));
   $("#copyScript").addEventListener("click", copyScript);
+  document.querySelectorAll("[data-stab]").forEach(b => b.addEventListener("click", () => showSettingsTab(b.dataset.stab)));
+  $("#settingsForm").addEventListener("input", e => { if (["sound_on", "ambient_volume", "fx_volume"].includes(e.target.name)) applySound({ ...state.settings, ...soundSettings() }); });
+  $("#accountsBox").addEventListener("click", e => {
+    const o = e.target.closest("[data-linkopen]"); if (o) { const f = $(`[data-linkform="${o.dataset.linkopen}"]`); f.hidden = !f.hidden; return; }
+    const l = e.target.closest("[data-link]"); if (l) return linkAccount(l.dataset.link);
+    const u = e.target.closest("[data-unlink]"); if (u) return Promise.resolve(api?.unlink_account(u.dataset.unlink)).then(() => { renderAccounts(); toast("Unlinked. Its saved key was deleted from this PC.", "ok"); });
+    if (e.target.closest("#syncAccounts")) { api?.accounts_sync(); pollAccounts(true); return toast("Checking your accounts…"); }
+    if (e.target.closest("#reviewImports")) { $("#settings").close(); return openImport(null); }
+  });
+  $("#importForm").addEventListener("submit", e => submitImport(e.target, e.submitter?.value));
+  $("#importForm").addEventListener("click", e => {
+    if (e.target.id === "impAll") e.target.form.querySelectorAll("[name=imp]").forEach(x => { x.checked = true; });
+    if (e.target.id === "impNone") e.target.form.querySelectorAll("[name=imp]").forEach(x => { x.checked = false; });
+  });
+  $("#soundBtn").addEventListener("click", () => {
+    const on = state.settings.sound_on === false;
+    state.settings.sound_on = on; api?.set_pref("sound_on", on); applySound();
+    toast(on ? "Sound on." : "Sound off.");
+  });
   $("#scrim").addEventListener("click", closePanel);
   $("#settingsForm").addEventListener("submit", e => { if (e.submitter?.value === "save") saveSettings(); });
   $("#addForm").addEventListener("submit", e => { if (e.submitter?.value === "add") submitAdd(e.target); });
@@ -986,6 +1249,8 @@ function bindGlobal() {
 
   const view = $("#view"), panel = $("#panel");
   view.addEventListener("click", e => {
+    const qc = e.target.closest("[data-qc], [data-qown]");
+    if (qc) { e.stopPropagation(); return quickMark(qc); }
     if (e.target.closest("select, input, option")) return;
     const c = e.target.closest(".case"); if (c && !c.closest(".hero")) return openPanel(c.dataset.kind, c.dataset.id);
     const tr = e.target.closest("tr[data-id]"); if (tr) return openPanel(tr.dataset.kind, tr.dataset.id);
@@ -1036,6 +1301,15 @@ function bindGlobal() {
   };
   view.addEventListener("mouseover", hover);
   view.addEventListener("focusin", hover);
+  document.addEventListener("mouseover", e => {
+    const t = e.target.closest?.(".case, .tab, .catalog, .chip, .primary, .ghost, .seg button, .ptabs button, .qs");
+    if (t && t !== document.lastHoverTarget) { document.lastHoverTarget = t; try { FX.play.hover(); } catch {} }
+  });
+  document.addEventListener("click", e => {
+    if (e.target.closest(".case, [data-qc], [data-qown], .close")) return;
+    if (e.target.closest(".tab, .catalog, .ptabs button, .stabs button")) { try { FX.play.tab(); } catch {} return; }
+    if (e.target.closest("button, .chip, a, [data-url]")) { try { FX.play.click(); } catch {} }
+  }, true);
   view.addEventListener("mouseover", e => {
     const tr = e.target.closest?.("tr[data-id]");
     if (!tr) return;
@@ -1059,6 +1333,8 @@ function bindGlobal() {
     if (q) { const item = findItem(panelItem.kind, panelItem.id); if (item && item.status !== q.dataset.quick) saveEdit(panelItem.kind === "book" ? "books" : "games", item, { status: q.dataset.quick }); return; }
     const o = e.target.closest("[data-open]"); if (o) return openPanel(o.dataset.kind || "game", o.dataset.open);
     if (e.target.closest("#logRun")) return runForm();
+    if (e.target.closest("#customCover")) return customCover(true);
+    if (e.target.closest("#resetCover")) return customCover(false);
   });
   panel.addEventListener("submit", e => {
     e.preventDefault();
@@ -1077,6 +1353,31 @@ function bindGlobal() {
   });
   document.addEventListener("visibilitychange", () => { if (!document.hidden) sync(false); });
   pollPad();
+}
+async function quickMark(btn) {
+  const kind = btn.dataset.qkind, item = findItem(kind, btn.dataset.qc || btn.dataset.qown);
+  if (!item) return;
+  const caseEl = btn.closest(".case");
+  if (btn.dataset.qown) {
+    try { FX.play.click(); } catch {}
+    return saveEdit(kind === "book" ? "books" : "games", item, { status: kind === "book" ? "To read" : "Library" });
+  }
+  try { FX.play.check(); } catch {}
+  caseEl?.classList.add("popped");
+  const changes = kind === "book" ? { status: "Read" } : { status: "Completed" };
+  if (kind === "game" && item.hours == null) { const h = hoursFromAccounts(item); if (h) changes.hours = h; }
+  await saveEdit(kind === "book" ? "books" : "games", item, changes, true);
+  toast(kind === "book" ? `Finished ${item.name}. Nice read!` : `${item.name} completed${changes.hours ? ` in ${changes.hours} h` : ""}. GG!`, "ok");
+}
+async function customCover(set) {
+  const g = findItem(panelItem.kind, panelItem.id);
+  if (!g) return;
+  const res = await Promise.resolve(set ? api?.set_cover(g.name) : api?.clear_cover(g.name)).catch(e => ({ error: String(e) }));
+  if (res && res.error) return toast(res.error, "err");
+  if (set && !res) return;
+  covers.set(coverKey(g), res || null);
+  render(); openPanel(panelItem.kind, panelItem.id, "edit");
+  toast(set ? "Cover updated." : "Back to the official cover.", "ok");
 }
 function runForm() {
   const box = $("#runForm"), g = findItem("game", panelItem.id);
@@ -1129,7 +1430,7 @@ function move(dir) {
     const score = main + cross * 2.5;
     if (score < bestScore) { bestScore = score; best = el; }
   }
-  if (best) { best.focus(); best.scrollIntoView({ block: "nearest", inline: "nearest", behavior: "smooth" }); }
+  if (best) { best.focus(); best.scrollIntoView({ block: "nearest", inline: "nearest", behavior: "smooth" }); try { FX.play.move(); } catch {} }
 }
 function pollPad() {
   const held = {};
@@ -1155,9 +1456,13 @@ function pollPad() {
 /* ---------- start ---------- */
 async function start() {
   api = window.pywebview?.api || null;
-  bindGlobal(); towers(); tick(); setInterval(tick, 15000);
-  if (!api) { render(); return; }
+  bindGlobal(); tick(); setInterval(tick, 15000);
+  if (!api) { $("#intro")?.remove(); towers(); render(); return; }
   state.settings = await api.get_settings();
+  applySound();
+  if (state.settings.intro !== false && !window.SKIP_INTRO) await new Promise(r => playIntro(r));
+  else $("#intro")?.remove();
+  towers();
   state.mode = state.settings.view_mode === "list" ? "list" : "covers";
   const cached = await api.cached();
   if (cached?.games?.length) applyData(cached);
@@ -1166,6 +1471,7 @@ async function start() {
   setTimeout(() => checkForUpdate(false), 4000);
   setInterval(() => checkForUpdate(false), 6 * 3600 * 1000);
   setInterval(refreshUpdated, 5 * 60 * 1000);
+  pollAccounts(false);
 }
 if (window.pywebview?.api) start();
 else window.addEventListener("pywebviewready", start, { once: true });

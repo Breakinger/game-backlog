@@ -26,6 +26,12 @@ for g in games:
     if g["name"] == "Baldur's Gate 3": g["status"] = "Playing"; g["play_on"] = "Steam Deck"
     if g["name"] == "Hades": g["play_on"] = "Steam Deck"
     if g["name"] == "Starfield": g["second_chance"] = True
+    g.setdefault("type", "")
+    if g["name"] in ("Mass Effect Legendary Edition",): g["platform"] = "EA"
+games += [dict(games[0], id=len(games)+i, row=300+i, name=n, status="Playing", type="Live service", platform="Steam", play_on="PC", completed=None, score=None, hours=None, hours_text="", genre="Shooter") for i, n in enumerate(["Warframe", "Deadlock", "The Finals"])]
+games.append(dict(games[0], id=len(games), row=310, name="Skyrim: Lorerim", status="Playing", type="Modded", platform="Steam", play_on="PC", completed=None, score=None))
+for g in games:
+    if g["name"] in ("Assassin's Creed II", "Watch_Dogs"): g["migrate_to"] = "Steam"
 plays_csv = "Game,Run #,Platform,Play on,Modded,With DLC,100% / Plat,✓ Finished,Finished on,Hours,Notes\nThe Witcher 3: Wild Hunt,Run 2,PS4,,FALSE,FALSE,FALSE,TRUE,unknown date,,First run\nElden Ring,Run 2,,,FALSE,FALSE,FALSE,TRUE,✓  2024-03-02,,Replay\n"
 ph, pr = sheet._table(list(csv.reader(io.StringIO(plays_csv))))
 plays = sheet.parse_playthroughs(ph, pr)

@@ -1,4 +1,4 @@
-name: Build GameBacklog.exe
+name: Build Masterlog
 
 on:
   push:
@@ -28,22 +28,23 @@ jobs:
         run: echo "VERSION = \"1.0.${{ github.run_number }}\"" > app/version.py
 
       - name: Check the app imports
-        run: python -c "import sys; sys.path.insert(0, 'app'); import sheet, art, info, updater, main, version; print('imports ok', version.VERSION)"
+        run: python -c "import sys; sys.path.insert(0, 'app'); import sheet, art, info, updater, vault, accounts, main, version; print('imports ok', version.VERSION)"
 
       - name: Build the exe
-        run: pyinstaller --noconfirm --onefile --windowed --name GameBacklog --icon assets/icon.ico --add-data "app/ui;ui" --paths app app/main.py
+        run: pyinstaller --noconfirm --onefile --windowed --name Masterlog --icon assets/icon.ico --add-data "app/ui;ui" --paths app app/main.py
 
       - name: Upload build
         uses: actions/upload-artifact@v4
         with:
-          name: GameBacklog
-          path: dist/GameBacklog.exe
+          name: Masterlog
+          path: dist/Masterlog.exe
 
       - name: Publish release
         shell: bash
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
-          gh release create "v1.0.${{ github.run_number }}" dist/GameBacklog.exe \
-            --title "Game Backlog v1.0.${{ github.run_number }}" \
-            --notes "Already have the app? Click Update in its top bar. New here? Download GameBacklog.exe below and run it; no install needed. If Windows SmartScreen warns you, click More info, then Run anyway (the app isn't signed)."
+          cp dist/Masterlog.exe dist/GameBacklog.exe   # older builds update themselves from this name
+          gh release create "v1.0.${{ github.run_number }}" dist/Masterlog.exe dist/GameBacklog.exe \
+            --title "Masterlog v1.0.${{ github.run_number }}" \
+            --notes "Already have the app? Click Update in its top bar. New here? Download Masterlog.exe below and run it; no install needed. If Windows SmartScreen warns you, click More info, then Run anyway (the app isn't signed)."

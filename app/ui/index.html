@@ -3,20 +3,25 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>Game Backlog</title>
+<title>Masterlog</title>
 <link rel="stylesheet" href="style.css">
 </head>
 <body data-catalog="games">
+<div id="intro" class="intro"><canvas></canvas><div class="intro-name"><span>MASTERLOG</span><small>games · books · everything you've played</small></div></div>
 <canvas id="towers" aria-hidden="true"></canvas>
 
 <header class="bar">
-  <div class="catalogs" role="tablist" aria-label="Catalog">
-    <button class="catalog" data-catalog="games" role="tab">Games</button>
-    <button class="catalog" data-catalog="books" role="tab">Books</button>
+  <div class="brandbox">
+    <div class="wordmark">MASTERLOG</div>
+    <div class="catalogs" role="tablist" aria-label="Catalog">
+      <button class="catalog" data-catalog="games" role="tab">Games</button>
+      <button class="catalog" data-catalog="books" role="tab">Books</button>
+    </div>
   </div>
   <nav class="tabs" role="tablist" id="tabs"></nav>
   <div class="status">
     <button class="update-btn" id="updateBtn" hidden></button>
+    <button class="icon" id="soundBtn" title="Sound" aria-label="Sound"></button>
     <button class="icon" id="addBtn" title="Add" aria-label="Add">
       <svg viewBox="0 0 24 24" width="20" height="20"><path fill="currentColor" d="M11 5h2v6h6v2h-6v6h-2v-6H5v-2h6z"/></svg>
     </button>
@@ -31,7 +36,7 @@
 <div id="banner" class="banner" hidden></div>
 <main id="view"></main>
 
-<aside id="panel" class="panel" aria-hidden="true" tabindex="-1"></aside>
+<section id="panel" class="caseview" aria-hidden="true" tabindex="-1"></section>
 <div id="scrim" class="scrim" hidden></div>
 <div id="peek" class="peek" aria-hidden="true"><img alt=""></div>
 <div id="toast" class="toast" role="status" hidden></div>
@@ -39,35 +44,61 @@
 <dialog id="settings" class="settings">
   <form method="dialog" id="settingsForm">
     <h2>Settings</h2>
-    <label>Sheet connection
-      <input name="sheet_url" type="url" placeholder="https://script.google.com/macros/s/…/exec">
-      <small id="connState"></small>
-    </label>
-    <details class="howto">
-      <summary>How to connect your sheet (one time, about 2 minutes)</summary>
-      <ol>
-        <li>In your Google Sheet, open <b>Extensions → Apps Script</b>.</li>
-        <li>Delete what's in the editor, paste the connection script, and press <b>Save</b>. <button type="button" class="linkish" id="copyScript">Copy the script</button></li>
-        <li>Press <b>Deploy → New deployment</b>, pick type <b>Web app</b>, set <b>Execute as: Me</b> and <b>Who has access: Anyone</b>, then <b>Deploy</b>.</li>
-        <li>Google asks you to authorize. If it says the app isn't verified, choose <b>Advanced → Go to (unsafe)</b>. It's your own script.</li>
-        <li>Copy the <b>Web app</b> link and paste it above. The sheet stays private: the app pairs with the script and keeps a secret key on this PC.</li>
-      </ol>
-    </details>
-    <label>SteamGridDB API key
-      <input name="sgdb_key" type="password" autocomplete="off" placeholder="Leave empty to keep the saved key">
-      <small id="keyState">Covers for every platform. Without a key, covers come from Steam only.</small>
-    </label>
-    <label>Check the sheet for changes every
-      <select name="refresh_minutes">
-        <option value="1">1 minute</option><option value="2">2 minutes</option><option value="5">5 minutes</option>
-        <option value="10">10 minutes</option><option value="30">30 minutes</option>
-      </select>
-    </label>
-    <div class="row version-row"><span id="versionText"></span><button type="button" class="ghost small" id="checkUpdates">Check for updates</button></div>
+    <div class="stabs" role="tablist">
+      <button type="button" data-stab="sheet" aria-selected="true">Sheet</button>
+      <button type="button" data-stab="accounts">Accounts</button>
+      <button type="button" data-stab="sound">Sound &amp; look</button>
+      <button type="button" data-stab="about">About</button>
+    </div>
+
+    <div class="spane" data-spane="sheet">
+      <label>Sheet connection
+        <input name="sheet_url" type="url" placeholder="https://script.google.com/macros/s/…/exec">
+        <small id="connState"></small>
+      </label>
+      <details class="howto">
+        <summary>How to connect your sheet (one time, about 2 minutes)</summary>
+        <ol>
+          <li>In your Google Sheet, open <b>Extensions → Apps Script</b>.</li>
+          <li>Delete what's in the editor, paste the connection script, and press <b>Save</b>. <button type="button" class="linkish" id="copyScript">Copy the script</button></li>
+          <li>Press <b>Deploy → New deployment</b>, pick type <b>Web app</b>, set <b>Execute as: Me</b> and <b>Who has access: Anyone</b>, then <b>Deploy</b>.</li>
+          <li>Google asks you to authorize. If it says the app isn't verified, choose <b>Advanced → Go to (unsafe)</b>. It's your own script.</li>
+          <li>Copy the <b>Web app</b> link and paste it above. The sheet stays private: the app pairs with the script and keeps a secret key on this PC.</li>
+        </ol>
+      </details>
+      <label>SteamGridDB API key
+        <input name="sgdb_key" type="password" autocomplete="off" placeholder="Leave empty to keep the saved key">
+        <small id="keyState">Covers for every platform. Without a key, covers come from Steam only.</small>
+      </label>
+      <label>Check the sheet for changes every
+        <select name="refresh_minutes">
+          <option value="1">1 minute</option><option value="2">2 minutes</option><option value="5">5 minutes</option>
+          <option value="10">10 minutes</option><option value="30">30 minutes</option>
+        </select>
+      </label>
+    </div>
+
+    <div class="spane" data-spane="accounts" hidden>
+      <p class="fine">Linked accounts add new games on their own, track hours, and award 100% and Platinum badges. Everything is read-only, and keys are encrypted with Windows' own protection on this PC. They never go to the sheet or anywhere else.</p>
+      <div id="accountsBox"></div>
+    </div>
+
+    <div class="spane" data-spane="sound" hidden>
+      <label class="check"><input type="checkbox" name="sound_on"> Sound</label>
+      <label>Ambience <input type="range" name="ambient_volume" min="0" max="1" step="0.05"></label>
+      <label>Clicks and chimes <input type="range" name="fx_volume" min="0" max="1" step="0.05"></label>
+      <label class="check"><input type="checkbox" name="intro"> Play the startup animation</label>
+      <p class="fine">Ambience pauses when Masterlog isn't the window you're using.</p>
+    </div>
+
+    <div class="spane" data-spane="about" hidden>
+      <div class="row version-row"><span id="versionText"></span><button type="button" class="ghost small" id="checkUpdates">Check for updates</button></div>
+      <div class="row"><button type="button" class="ghost" id="clearCovers">Download covers again</button></div>
+    </div>
+
     <div class="row">
-      <button type="button" class="ghost" id="clearCovers">Download covers again</button>
       <span class="spacer"></span>
-      <button value="cancel" class="ghost">Cancel</button>
+      <button value="cancel" class="ghost">Close</button>
       <button value="save" class="primary" id="saveSettings">Save</button>
     </div>
   </form>
@@ -77,6 +108,11 @@
   <form method="dialog" id="addForm"></form>
 </dialog>
 
+<dialog id="importDialog" class="settings wide">
+  <form method="dialog" id="importForm"></form>
+</dialog>
+
+<script src="fx.js"></script>
 <script src="app.js"></script>
 </body>
 </html>
