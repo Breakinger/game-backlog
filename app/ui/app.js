@@ -279,9 +279,27 @@ function rankingHTML() {
       <div class="rk-act"><button class="icon" data-rkmove="${i}:-1" title="Move up" aria-label="Move up">▲</button><button class="icon" data-rkmove="${i}:1" title="Move down" aria-label="Move down">▼</button>
         ${g ? `<button class="ghost small" data-open="${g.id}" data-kind="game">Open</button>` : ""}<button class="icon" data-rkdel="${i}" title="Remove from Top 100" aria-label="Remove">✕</button></div></li>`;
   };
-  return `<section class="ranking"><header class="deals-head"><div><h1>Top 100</h1><p class="muted">Drag to reorder (or use the arrows). The top 10 are your all-time favourites and get gold stars on their covers.${state.rankingLocal ? " Saved on this PC until you update the connection script (Settings)." : " Saved to the Ranking tab in your sheet."}</p></div>
-    <div class="deals-actions"><input class="search" id="rankAdd" list="rankAddList" placeholder="Add a game to the ranking"><datalist id="rankAddList">${state.games.filter(g => !rankOf(g)).map(g => `<option value="${esc(g.name)}">`).join("")}</datalist></div></header>
-    <ol class="rklist" id="rkList">${list.map(row).join("")}</ol></section>`;
+  const cell = (n, i) => {
+    const g = rankedGame(n), fav = i < 10;
+    const inner = g ? caseHTML(g, { sub: `${plat(g.platform).label} · ${statusOf(g)}` })
+      : `<div class="vcase"><div class="art virtual" data-vname="${esc(n)}"><span>${esc(n)}</span></div><div class="label"><div class="name">${esc(n)}</div><div class="sub">Not in your library</div></div></div>`;
+    return `<div class="rkcell ${fav ? "fav" : ""}" draggable="true" data-ri="${i}"><span class="rkbadge">${fav ? "★ " : ""}${i + 1}</span>${inner}</div>`;
+  };
+  const body = state.mode === "list" ? `<ol class="rklist" id="rkList">${list.map(row).join("")}</ol>`
+    : `<div class="grid rkgrid">${list.map(cell).join("")}</div>`;
+  return `<section class="ranking ${state.mode === "list" ? "" : "wide"}"><header class="deals-head"><div><h1>Top 100</h1><p class="muted">Drag to reorder (or use the arrows). The top 10 are your all-time favourites and get gold stars on their covers.${state.rankingLocal ? " Saved on this PC until you update the connection script (Settings)." : " Saved to the Ranking tab in your sheet."}</p></div>
+    <div class="deals-actions">${modeSwitch()}${scaleSlider()}<input class="search" id="rankAdd" list="rankAddList" placeholder="Add a game to the ranking"><datalist id="rankAddList">${state.games.filter(g => !rankOf(g)).map(g => `<option value="${esc(g.name)}">`).join("")}</datalist></div></header>
+    ${body}</section>`;
+}
+/* put a game at a place in the Top 100: everything from that place down moves one step */
+function placeInRanking(g, pos) {
+  const L = state.ranking || (state.ranking = []), k = rankKey(g.name), at = L.findIndex(n => rankKey(n) === k);
+  const cur = at >= 0 ? at + 1 : 0;
+  if ((pos || 0) === cur) return false;
+  const name = at >= 0 ? L.splice(at, 1)[0] : g.name;
+  if (pos > 0) L.splice(Math.min(pos - 1, L.length), 0, name);
+  saveRanking(pos > 0 ? `${g.name} is now #${Math.min(pos, L.length)} in your Top 100.` : `${g.name} left your Top 100.`);
+  return true;
 }
 function saveRanking(msg) {
   rankDirty = true; rankIndex = null;
@@ -1109,6 +1127,8 @@ function editHTML(cat, item) {
     <div class="fields">${form.filter(f => f[2] !== "check").map(f => fieldHTML(cat, f, item)).join("")}</div>
     ${cat === "games" ? `<div class="checks">${form.filter(f => f[2] === "check").map(f => fieldHTML(cat, f, item)).join("")}</div>` : ""}
     <p class="fine">Finish and drop dates, runs and "Beaten on" are filled in by the sheet itself. Renaming a game also renames its replays and fetches the cover for the new name.</p>
+    ${cat === "games" ? `<label class="rankfield">Top 100 place <input type="number" name="top_rank" min="1" max="${(state.ranking || []).length + 1}" value="${rankOf(item) || ""}" placeholder="Not ranked">
+      <small>Type 55 and it goes to #55; #55 and everything below it move down one. Clear it to take the game out.</small></label>` : ""}
     ${cat === "games" ? `<div class="row"><button type="button" class="ghost small" data-coverpick>Change cover…</button><button type="button" class="ghost small" data-refresh>Refresh info</button></div>` : ""}
     <div class="row"><span class="spacer"></span><button type="submit" class="primary">Save changes</button></div></form>`;
 }
@@ -1694,11 +1714,11 @@ function bindGlobal() {
   document.addEventListener("click", e => { const u = e.target.closest("[data-url]"); if (u && u.dataset.url && !(u.matches(".nitem.spoiler"))) api?.open(u.dataset.url); });
   // dragging rows in the Top 100
   let dragFrom = null;
-  view.addEventListener("dragstart", e => { const li = e.target.closest?.(".rk"); if (!li) return; dragFrom = +li.dataset.ri; li.classList.add("dragging"); e.dataTransfer.effectAllowed = "move"; });
-  view.addEventListener("dragover", e => { const li = e.target.closest?.(".rk"); if (dragFrom == null || !li) return; e.preventDefault(); view.querySelectorAll(".rk.over").forEach(x => x.classList.remove("over")); li.classList.add("over"); });
-  view.addEventListener("dragend", () => { dragFrom = null; view.querySelectorAll(".rk.dragging, .rk.over").forEach(x => x.classList.remove("dragging", "over")); });
+  view.addEventListener("dragstart", e => { const li = e.target.closest?.(".rk, .rkcell"); if (!li) return; dragFrom = +li.dataset.ri; li.classList.add("dragging"); e.dataTransfer.effectAllowed = "move"; });
+  view.addEventListener("dragover", e => { const li = e.target.closest?.(".rk, .rkcell"); if (dragFrom == null || !li) return; e.preventDefault(); view.querySelectorAll(".over").forEach(x => x.classList.remove("over")); li.classList.add("over"); });
+  view.addEventListener("dragend", () => { dragFrom = null; view.querySelectorAll(".dragging, .over").forEach(x => x.classList.remove("dragging", "over")); });
   view.addEventListener("drop", e => {
-    const li = e.target.closest?.(".rk"); if (dragFrom == null || !li) return;
+    const li = e.target.closest?.(".rk, .rkcell"); if (dragFrom == null || !li) return;
     e.preventDefault();
     const to = +li.dataset.ri, item = state.ranking.splice(dragFrom, 1)[0];
     state.ranking.splice(to, 0, item); dragFrom = null;
@@ -1789,7 +1809,13 @@ function bindGlobal() {
   panel.addEventListener("submit", e => {
     e.preventDefault();
     const item = findItem(panelItem.kind, panelItem.id);
-    if (e.target.id === "editForm") saveEdit(e.target.dataset.cat, item, readForm(e.target, e.target.dataset.cat, item));
+    if (e.target.id === "editForm") {
+      const rf = e.target.elements.top_rank, cat = e.target.dataset.cat;
+      const changes = readForm(e.target, cat, item);
+      const ranked = rf && cat === "games" ? placeInRanking(item, rf.value === "" ? 0 : Math.max(1, Math.round(+rf.value))) : false;
+      if (Object.keys(changes).length) saveEdit(cat, item, changes);
+      else if (!ranked) toast("Nothing changed.");
+    }
     if (e.target.id === "runFormEl") submitRun(e.target, item);
   });
 
