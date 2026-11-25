@@ -38,7 +38,7 @@ button { font: inherit; color: inherit; }
 /* ---------- top bar ---------- */
 .bar {
   position: relative; z-index: 5;
-  display: grid; grid-template-columns: 260px 1fr auto; align-items: center;
+  display: grid; grid-template-columns: auto 1fr auto; gap: 18px; align-items: center;
   height: 72px; padding: 0 32px;
   border-bottom: 1px solid var(--line);
   background: linear-gradient(180deg, rgba(6, 12, 31, .7), rgba(6, 12, 31, .2));
@@ -758,3 +758,6 @@ body.bigpic .grid { --case-w: 170px; }
 .sale-card .primary { margin-right: 8px; }
 @keyframes salepop { from { transform: scale(.7); opacity: 0; } to { transform: scale(1); opacity: 1; } }
 @media (prefers-reduced-motion: reduce) { .saleevent .rain { display: none; } .sale-card { animation: none; } }
+.catalog { font-size: 21px; padding: 4px 8px; letter-spacing: .08em; }
+.tab { white-space: nowrap; padding-left: 12px; padding-right: 12px; }
+.tabs { min-width: 0; overflow: hidden; }
