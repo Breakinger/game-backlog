@@ -1,0 +1,46 @@
+name: Build GameBacklog.exe
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+
+      - name: Check the app imports
+        run: python -c "import sys; sys.path.insert(0, 'app'); import sheet, art, main; print('imports ok')"
+
+      - name: Build the exe
+        run: pyinstaller --noconfirm --onefile --windowed --name GameBacklog --icon assets/icon.ico --add-data "app/ui;ui" --paths app app/main.py
+
+      - name: Upload build
+        uses: actions/upload-artifact@v4
+        with:
+          name: GameBacklog
+          path: dist/GameBacklog.exe
+
+      - name: Publish release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: v1.0.${{ github.run_number }}
+          name: Game Backlog v1.0.${{ github.run_number }}
+          body: |
+            Download **GameBacklog.exe** below and run it. No install needed.
+            Windows may show a SmartScreen warning because the app isn't signed: click **More info → Run anyway**.
+          files: dist/GameBacklog.exe

@@ -1,0 +1,65 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Game Backlog</title>
+<link rel="stylesheet" href="../app/ui/style.css">
+</head>
+<body>
+<canvas id="towers" aria-hidden="true"></canvas>
+
+<header class="bar">
+  <div class="brand">Backlog</div>
+  <nav class="tabs" role="tablist">
+    <button class="tab" data-view="home" role="tab">Home</button>
+    <button class="tab" data-view="library" role="tab">Library</button>
+    <button class="tab" data-view="wishlist" role="tab">Wishlist</button>
+    <button class="tab" data-view="played" role="tab">Played</button>
+    <button class="tab" data-view="stats" role="tab">Your years</button>
+  </nav>
+  <div class="status">
+    <button class="sync" id="syncBtn" title="Sync now"><span class="dot"></span><span id="syncText">Connecting…</span></button>
+    <button class="icon" id="settingsBtn" title="Settings" aria-label="Settings">
+      <svg viewBox="0 0 24 24" width="20" height="20"><path fill="currentColor" d="M19.4 13a7.6 7.6 0 0 0 0-2l2-1.6-2-3.4-2.4 1a7 7 0 0 0-1.7-1L15 3.5h-4l-.4 2.5a7 7 0 0 0-1.7 1l-2.4-1-2 3.4L6.6 11a7.6 7.6 0 0 0 0 2l-2 1.6 2 3.4 2.4-1a7 7 0 0 0 1.7 1l.4 2.5h4l.4-2.5a7 7 0 0 0 1.7-1l2.4 1 2-3.4zM13 15.5a3.5 3.5 0 1 1 0-7 3.5 3.5 0 0 1 0 7z" transform="translate(-1 0)"/></svg>
+    </button>
+    <div class="clock"><span id="time">--:--</span><span id="date"></span></div>
+  </div>
+</header>
+
+<div id="banner" class="banner" hidden></div>
+<main id="view"></main>
+
+<aside id="panel" class="panel" aria-hidden="true" tabindex="-1"></aside>
+<div id="scrim" class="scrim" hidden></div>
+
+<dialog id="settings" class="settings">
+  <form method="dialog" id="settingsForm">
+    <h2>Settings</h2>
+    <label>Sheet link
+      <input name="sheet_url" type="url" placeholder="https://docs.google.com/spreadsheets/…" required>
+      <small>Paste the link from <em>File → Share → Publish to web</em> (Entire document, Comma-separated values). A normal sheet link also works if the sheet is shared with "Anyone with the link".</small>
+    </label>
+    <label>SteamGridDB API key
+      <input name="sgdb_key" type="password" autocomplete="off" placeholder="Leave empty to keep the saved key">
+      <small id="keyState">Covers for every platform. Without a key, covers come from Steam only.</small>
+    </label>
+    <label>Check the sheet for changes every
+      <select name="refresh_minutes">
+        <option value="1">1 minute</option><option value="2">2 minutes</option><option value="5">5 minutes</option>
+        <option value="10">10 minutes</option><option value="30">30 minutes</option>
+      </select>
+    </label>
+    <div class="row">
+      <button type="button" class="ghost" id="openSheet">Open the sheet</button>
+      <button type="button" class="ghost" id="clearCovers">Download covers again</button>
+      <span class="spacer"></span>
+      <button value="cancel" class="ghost">Cancel</button>
+      <button value="save" class="primary" id="saveSettings">Save</button>
+    </div>
+  </form>
+</dialog>
+
+<script src="mock.js"></script><script src="../app/ui/app.js"></script>
+</body>
+</html>
