@@ -13,6 +13,9 @@ import http.server
 import igdb
 import info
 import secrets
+import youtube
+import feeds
+import deals
 import socketserver
 import sheet
 import updater
@@ -42,9 +45,28 @@ def resource(rel):
 
 DEFAULTS = {"sheet_url": sheet.DEFAULT_SHEET, "sheet_key": "", "sgdb_key": "", "refresh_minutes": 2,
             "view_mode": "covers", "sound_on": True, "ambient_volume": 0.35, "fx_volume": 0.5, "intro": True,
-            "heroic_linked": False, "big_picture": False}
-PREFS = ("view_mode", "refresh_minutes", "sound_on", "ambient_volume", "fx_volume", "intro", "big_picture")
-PRIVATE = ("sgdb_key", "sheet_key")
+            "heroic_linked": False, "big_picture": False, "ambience_path": "", "steam_cc": "GE", "ps_locale": "en-us",
+            "money": "native", "auto_names": True}
+PREFS = ("view_mode", "refresh_minutes", "sound_on", "ambient_volume", "fx_volume", "intro", "big_picture",
+         "steam_cc", "ps_locale", "money", "auto_names")
+PRIVATE = ("sgdb_key", "sheet_key", "ambience_path")
+AUDIO_TYPES = {".mp3": "audio/mpeg", ".ogg": "audio/ogg", ".opus": "audio/ogg", ".m4a": "audio/mp4", ".aac": "audio/aac",
+               ".wav": "audio/wav", ".flac": "audio/flac", ".webm": "audio/webm"}
+COPY_LIMIT = 60 * 1024 * 1024  # smaller files are copied next to the settings, so moving the original doesn't break it
+
+
+def audio_marks(path):
+    """Intro and loop marks stored in the file's tags as MASTERLOG_LOOP=<intro end>,<loop end>,<crossfade>."""
+    import re
+    try:
+        with open(path, "rb") as f:
+            head = f.read(256 * 1024)
+        m = re.search(rb"MASTERLOG_LOOP=([\d.]+),([\d.]+),([\d.]+)", head)
+        if m:
+            return {"intro_end": float(m.group(1)), "loop_end": float(m.group(2)), "xfade": float(m.group(3))}
+    except OSError:
+        pass
+    return {"intro_end": 0, "loop_end": 0, "xfade": 3}
 
 
 class Api:
@@ -67,6 +89,11 @@ class Api:
         self._igdb = igdb.IGDB(self._vault)
         self._art.igdb = self._igdb
         self._info = info.Info(self._dir, self._art, self._igdb)
+        self._info.youtube_key = lambda: (self._vault.get("youtube") or {}).get("key")
+        self._feeds = feeds.Feeds()
+        self._deals = deals.Deals(self._art, self._dir)
+        self._renamed = []   # official-title renames done in the background, for the page to announce
+        threading.Thread(target=self._deals_loop, daemon=True).start()
         self._accounts = accounts.Accounts(self._dir, self._vault, self._settings)
         threading.Thread(target=self._account_loop, daemon=True).start()
         self._updater = updater.Updater()
@@ -78,8 +105,55 @@ class Api:
     def _serve_covers(self):
         """Covers go to the page as local file URLs, not as huge inline strings: much lighter on memory."""
         folder, token = self._art.dir, secrets.token_urlsafe(16)
+        app = self
 
         class Handler(http.server.SimpleHTTPRequestHandler):
+            def do_GET(self):
+                if self.path.split("?", 1)[0] == f"/{token}/~ambience":
+                    return self._ambience()
+                return super().do_GET()
+
+            def _ambience(self):
+                path = app._ambience_file()
+                if not path:
+                    return self.send_error(404)
+                size = os.path.getsize(path)
+                start, end = 0, size - 1
+                rng = self.headers.get("Range", "")
+                if rng.startswith("bytes="):
+                    a, _, b = rng[6:].split(",")[0].partition("-")
+                    try:
+                        if a:
+                            start, end = int(a), (int(b) if b else size - 1)
+                        elif b:
+                            start = max(0, size - int(b))
+                    except ValueError:
+                        start, end = 0, size - 1
+                    end = min(end, size - 1)
+                    if start > end:
+                        self.send_response(416); self.send_header("Content-Range", f"bytes */{size}"); self.end_headers(); return
+                    self.send_response(206); self.send_header("Content-Range", f"bytes {start}-{end}/{size}")
+                else:
+                    self.send_response(200)
+                self.send_header("Content-Type", AUDIO_TYPES.get(os.path.splitext(path)[1].lower(), "application/octet-stream"))
+                self.send_header("Accept-Ranges", "bytes")
+                self.send_header("Content-Length", str(end - start + 1))
+                self.send_header("Cache-Control", "no-cache")
+                self.send_header("Access-Control-Allow-Origin", "*")
+                http.server.BaseHTTPRequestHandler.end_headers(self)
+                try:
+                    with open(path, "rb") as f:
+                        f.seek(start)
+                        left = end - start + 1
+                        while left > 0:
+                            chunk = f.read(min(256 * 1024, left))
+                            if not chunk:
+                                break
+                            self.wfile.write(chunk)
+                            left -= len(chunk)
+                except (BrokenPipeError, ConnectionResetError, ConnectionAbortedError):
+                    pass
+
             def __init__(self, *a, **k):
                 super().__init__(*a, directory=folder, **k)
 
@@ -104,6 +178,7 @@ class Api:
             srv = Server(("127.0.0.1", 0), Handler)
             threading.Thread(target=srv.serve_forever, daemon=True).start()
             self._art.url_base = f"http://127.0.0.1:{srv.server_address[1]}/{token}/"
+            self._ambience_url = self._art.url_base + "~ambience"
         except Exception:
             self._art.url_base = None  # fall back to inline images
 
@@ -112,9 +187,11 @@ class Api:
         s = {k: v for k, v in self._settings.items() if k not in PRIVATE}
         s["has_sgdb_key"] = bool(self._settings.get("sgdb_key"))
         s["has_igdb"] = self._igdb.configured()
+        s["has_youtube"] = self._vault.has("youtube")
         s["connected"] = bool(sheet.is_script_link(self._settings.get("sheet_url")) and self._settings.get("sheet_key"))
         s["link_kind"] = "script" if sheet.is_script_link(self._settings.get("sheet_url")) else ("csv" if self._settings.get("sheet_url") else "")
         s["data_dir"] = self._dir
+        s["ambience"] = self._ambience_info()
         s["version"] = VERSION
         return s
 
@@ -145,9 +222,15 @@ class Api:
                     result["paired"] = out.get("title") or True
                 except Exception as e:
                     result["pair_error"] = str(e)
+        region = (self._settings.get("steam_cc"), self._settings.get("ps_locale"))
         for k in ("sgdb_key",) + PREFS:
             if k in new:
                 self._settings[k] = new[k]
+        if region != (self._settings.get("steam_cc"), self._settings.get("ps_locale")):
+            self._deals.state["t"] = 0      # new region: fetch prices again
+            for e in self._deals.state.get("games", {}).values():
+                e.pop("ps", None)
+                e.pop("steam_ends", None)
         self._art.sgdb_key = self._settings.get("sgdb_key", "")
         self._write_settings()
         s = self.get_settings()
@@ -226,11 +309,24 @@ class Api:
             return {"error": str(e)}
 
     # ----- art, info & links -----
-    def cover(self, name):
+    def cover(self, name, platform=""):
         try:
-            return self._art.cover(name)
+            return self._art.cover(name, platform or "", self._cover_hints(name))
         except Exception:
             return None
+
+    def cover_options(self, name, platform="", query=""):
+        """Covers to choose from in the app: official store art first, then IGDB and SteamGridDB."""
+        try:
+            return {"items": self._art.candidates(name, platform or "", self._cover_hints(name), (query or "").strip() or None)}
+        except Exception as e:
+            return {"items": [], "error": str(e)}
+
+    def pick_cover(self, name, url):
+        try:
+            return {"uri": self._art.set_from_url(name, url)}
+        except Exception as e:
+            return {"error": str(e)}
 
     def book_cover(self, title, author=""):
         try:
@@ -267,6 +363,52 @@ class Api:
         except Exception as e:
             return {"error": str(e)}
 
+    # ----- ambience track -----
+    def _ambience_file(self):
+        p = self._settings.get("ambience_path") or ""
+        return p if p and os.path.isfile(p) else None
+
+    def _ambience_info(self):
+        p = self._ambience_file()
+        if not p or not getattr(self, "_ambience_url", None):
+            return None
+        marks = audio_marks(p)
+        return {"url": f"{self._ambience_url}?v={int(os.path.getmtime(p))}", "name": self._settings.get("ambience_name") or os.path.basename(p), **marks}
+
+    def choose_ambience(self):
+        import shutil
+        import webview
+        paths = self._window.create_file_dialog(webview.OPEN_DIALOG, file_types=("Audio (*.mp3;*.ogg;*.opus;*.m4a;*.aac;*.wav;*.flac;*.webm)",))
+        if not paths:
+            return None
+        src = paths[0]
+        ext = os.path.splitext(src)[1].lower()
+        if ext not in AUDIO_TYPES:
+            return {"error": "That isn't an audio file Masterlog can play."}
+        try:
+            dest = src
+            if os.path.getsize(src) <= COPY_LIMIT:
+                os.makedirs(os.path.join(self._dir, "audio"), exist_ok=True)
+                for old in os.listdir(os.path.join(self._dir, "audio")):
+                    if old.startswith("ambience."):
+                        os.remove(os.path.join(self._dir, "audio", old))
+                dest = os.path.join(self._dir, "audio", "ambience" + ext)
+                shutil.copyfile(src, dest)
+            self._settings["ambience_path"] = dest
+            self._settings["ambience_name"] = os.path.basename(src)
+            self._write_settings()
+        except OSError as e:
+            return {"error": f"Couldn't use that file: {e}"}
+        info_ = self._ambience_info()
+        if info_:
+            info_["name"] = os.path.basename(src)
+        return {"ambience": info_}
+
+    def clear_ambience(self):
+        self._settings["ambience_path"] = ""
+        self._write_settings()
+        return {"ambience": None}
+
     def clear_cover(self, name):
         self._art.clear_custom(name)
         return self.cover(name)
@@ -277,10 +419,23 @@ class Api:
         return data.get("games") or []
 
     def _facts(self):
+        """What your linked accounts say about each sheet game. Kept for a minute: covers ask for it a lot."""
+        c = getattr(self, "_facts_cache", None)
+        if c and time.time() - c[0] < 60:
+            return c[1]
         try:
-            return self._accounts.match(self._sheet_games())["facts"]
+            facts = self._accounts.match(self._sheet_games())["facts"]
         except Exception:
-            return {}
+            facts = {}
+        for name, f in facts.items():
+            if f.get("appid"):
+                self._art.remember_appid(name, f["appid"])
+        self._facts_cache = (time.time(), facts)
+        return facts
+
+    def _cover_hints(self, name):
+        f = self._facts().get(name) or {}
+        return {"appid": f.get("appid"), "ps_art": f.get("ps_art")}
 
     def accounts_status(self):
         return self._accounts.status()
@@ -371,6 +526,111 @@ class Api:
             self._vault.set("igdb", None)
             return {"error": str(e) or "Couldn't connect to IGDB."}
 
+    # ----- deals, prices and official titles -----
+    def _deals_inputs(self):
+        games = self._sheet_games()
+        wish = [g for g in games if g.get("status") == "Wishlist"]
+        owned = [g for g in games if g.get("status") in ("Playing", "Paused", "Library", "Completed", "Live service")]
+        return wish, owned
+
+    def _dlc_cached(self, game):
+        e = self._info.cache.data.get("dlcs", {}).get(info.Info._key(game))
+        return (e or {}).get("v") or []
+
+    def _run_deals(self):
+        wish, owned = self._deals_inputs()
+        if not wish and not owned:
+            return
+        self._deals.refresh(wish, owned, self._settings.get("steam_cc") or "GE", self._settings.get("ps_locale") or "en-us", self._dlc_cached)
+        self._apply_renames()
+
+    def _deals_loop(self):
+        time.sleep(25)
+        while True:
+            try:
+                if time.time() - (self._deals.state.get("t") or 0) > 3 * 3600:
+                    self._run_deals()
+            except Exception:
+                pass
+            time.sleep(20 * 60)
+
+    def _apply_renames(self):
+        """Wishlist games that got their official full title: renamed in the sheet (with undo in the app)."""
+        props = self._deals.state.get("renames") or {}
+        if not props or not self._settings.get("auto_names", True):
+            return
+        client = self._script()
+        if not client:
+            return
+        wish = {g["name"]: g for g in self._sheet_games() if g.get("status") == "Wishlist"}
+        for old, hit in list(props.items()):
+            g = wish.get(old)
+            if not g or hit.get("done") or hit.get("undone"):
+                continue
+            r = self.edit("games", g.get("row"), old, {"name": hit["name"]})
+            if r and not r.get("error"):
+                hit["done"] = time.time()
+                self._renamed.append({"old": old, "new": hit["name"], "source": hit["source"], "row": g.get("row")})
+                g2 = self._deals.state["games"].pop(old, None)
+                if g2:
+                    self._deals.state["games"][hit["name"]] = g2
+        self._deals._remember()
+
+    def deals(self, force=False):
+        wish, _ = self._deals_inputs()
+        if force or (not self._deals.running and time.time() - (self._deals.state.get("t") or 0) > 3 * 3600):
+            threading.Thread(target=self._run_deals, daemon=True).start()
+        snap = self._deals.snapshot([g["name"] for g in wish])
+        snap["links"] = {g["name"]: deals.physical_links(g["name"], g.get("platform")) for g in wish
+                         if g.get("platform") in deals.PHYSICAL_LABEL}
+        snap["running"] = self._deals.running or force
+        return snap
+
+    def apply_rename(self, old):
+        hit = (self._deals.state.get("renames") or {}).get(old)
+        g = next((g for g in self._sheet_games() if g["name"] == old), None)
+        if not hit or not g:
+            return {"error": "That suggestion is gone."}
+        r = self.edit("games", g.get("row"), old, {"name": hit["name"]})
+        if r and not r.get("error"):
+            hit["done"] = time.time()
+            self._deals._remember()
+        return r
+
+    def renamed(self):
+        """Renames done since the page last asked."""
+        out, self._renamed = self._renamed, []
+        return out
+
+    def undo_rename(self, old, new, row):
+        props = self._deals.state.get("renames") or {}
+        if old in props:
+            props[old]["undone"] = time.time()
+        self._deals._remember()
+        return self.edit("games", row, new, {"name": old})
+
+    # ----- News catalog -----
+    def news_section(self, name):
+        if name == "yours":
+            games = [g for g in self._sheet_games() if g.get("status") in
+                     ("Playing", "Paused", "Library", "Live service", "Wishlist", "Completed") or g.get("type") == "Live service"]
+            games.sort(key=lambda g: (g.get("status") not in ("Playing", "Live service"), g.get("status") == "Completed"))
+            return _safe(self._info.your_news, games) or {"items": [], "pending": 0}
+        return _safe(self._feeds.section, name) or {"items": [], "errors": ["Couldn't load the news."]}
+
+    def set_youtube_key(self, key):
+        """Optional: the official YouTube Data API instead of reading YouTube's search page."""
+        key = (key or "").strip()
+        if not key:
+            self._vault.set("youtube", None)
+            return {"ok": True, "removed": True}
+        try:
+            youtube.search_api("Masterlog test trailer", key, 1)
+        except Exception as e:
+            return {"error": f"YouTube didn't accept that key ({e})."}
+        self._vault.set("youtube", {"key": key})
+        return {"ok": True}
+
     def milestones(self, game):
         return _safe(self._info.milestones, game) or []
 
@@ -455,7 +715,8 @@ def main():
         fullscreen=bool(api._settings.get("big_picture")),
     )
     api._fullscreen = bool(api._settings.get("big_picture"))
-    webview.start(gui="edgechromium" if sys.platform == "win32" else None)
+    # served over http://127.0.0.1 rather than file://, so embedded YouTube trailers know where they're playing
+    webview.start(gui="edgechromium" if sys.platform == "win32" else None, http_server=True)
 
 
 if __name__ == "__main__":

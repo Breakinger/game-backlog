@@ -1,8 +1,8 @@
-/* Masterlog sound and startup. Everything here is synthesized in the browser: no audio files. */
+/* Masterlog sound and startup. Interface sounds are synthesized; the ambience is an audio file you choose. */
 "use strict";
 
 const FX = (() => {
-  let ctx = null, master = null, ambBus = null, fxBus = null, reverb = null, amb = null;
+  let ctx = null, master = null, fxBus = null, reverb = null;
   const cfg = { on: true, ambient: 0.35, fx: 0.5 };
   let focused = document.hasFocus() && !document.hidden;
   let lastHover = 0;
@@ -15,7 +15,6 @@ const FX = (() => {
     master = ctx.createGain(); master.gain.value = 1; master.connect(ctx.destination);
     reverb = ctx.createConvolver(); reverb.buffer = impulse(4.5, 2.6);
     const wet = ctx.createGain(); wet.gain.value = 0.55; reverb.connect(wet); wet.connect(master);
-    ambBus = ctx.createGain(); ambBus.gain.value = 0; ambBus.connect(master); ambBus.connect(reverb);
     fxBus = ctx.createGain(); fxBus.gain.value = cfg.fx; fxBus.connect(master);
     const fxWet = ctx.createGain(); fxWet.gain.value = 0.25; fxBus.connect(fxWet); fxWet.connect(reverb);
     return ctx;
@@ -35,101 +34,78 @@ const FX = (() => {
     return buf;
   }
 
-  /* ---- the ambient bed: waves rolling onto a beach, a warm pad, and the odd soft chime ---- */
-  function pinkBuffer(seconds) {
-    const len = ctx.sampleRate * seconds, buf = ctx.createBuffer(2, len, ctx.sampleRate);
-    for (let c = 0; c < 2; c++) {
-      const d = buf.getChannelData(c);
-      let b0 = 0, b1 = 0, b2 = 0, b3 = 0, b4 = 0, b5 = 0, b6 = 0;
-      for (let i = 0; i < len; i++) {
-        const w = Math.random() * 2 - 1;
-        b0 = 0.99886 * b0 + w * 0.0555179; b1 = 0.99332 * b1 + w * 0.0750759; b2 = 0.969 * b2 + w * 0.153852;
-        b3 = 0.8665 * b3 + w * 0.3104856; b4 = 0.55 * b4 + w * 0.5329522; b5 = -0.7616 * b5 - w * 0.016898;
-        d[i] = (b0 + b1 + b2 + b3 + b4 + b5 + b6 + w * 0.5362) * 0.11; b6 = w * 0.115926;
+  /* ---- the ambience: your own audio file, intro once, then a seamless crossfaded loop ----
+     Two <audio> players take turns: shortly before the loop end the other one starts at the loop start and
+     they crossfade, so there is never a gap or a click. Files are streamed from disk, not decoded into memory. */
+  let track = null;          // { url, intro_end, loop_end, xfade }
+  const players = [], amb = { on: false, cur: 0, level: 0, target: 0, fading: null, xf: null, timer: null };
+  function player(i) {
+    if (!players[i]) { const a = new Audio(); a.preload = "auto"; a.volume = 0; players[i] = a; }
+    return players[i];
+  }
+  function loopPoints(a) {
+    const d = a.duration || 0, x = Math.max(0.5, track.xfade || 3);
+    const start = track.intro_end || 0;
+    const end = track.loop_end && track.loop_end < d ? track.loop_end : Math.max(start + 5, d - x - 0.2);
+    return { start, end, x };
+  }
+  function vol(a, v) { a.volume = Math.max(0, Math.min(1, v)); }
+  function tick() {
+    if (!track) return;
+    // fade the whole bed toward its target (focus, mute, video playing, volume slider)
+    const step = 0.06;
+    amb.level += Math.sign(amb.target - amb.level) * Math.min(step * Math.max(0.15, cfg.ambient), Math.abs(amb.target - amb.level));
+    const a = player(amb.cur), b = player(1 - amb.cur);
+    if (amb.xf) {
+      const k = Math.min(1, (performance.now() - amb.xf.t0) / (amb.xf.x * 1000));
+      vol(a, amb.level * Math.cos(k * Math.PI / 2)); vol(b, amb.level * Math.sin(k * Math.PI / 2));
+      if (k >= 1) { a.pause(); amb.cur = 1 - amb.cur; amb.xf = null; }
+    } else {
+      vol(a, amb.level);
+      const lp = a.duration ? loopPoints(a) : null;
+      if (lp && !a.paused && a.currentTime >= lp.end) {
+        b.src === a.src || (b.src = a.src);
+        b.currentTime = lp.start; vol(b, 0);
+        b.play().catch(() => {});
+        amb.xf = { t0: performance.now(), x: lp.x };
       }
     }
-    return buf;
+    // nothing audible: pause, so the app uses no CPU on sound in the background
+    if (amb.level <= 0.001 && amb.target === 0) { players.forEach(p => p && !p.paused && p.pause()); amb.xf = null; }
   }
-  let surf = null;
-  function wave() {
-    if (!ctx || !amb) return;
-    const t = ctx.currentTime + 0.05;
-    const swell = 2.6 + Math.random() * 1.6, wash = 5.5 + Math.random() * 3, size = 0.6 + Math.random() * 0.5;
-    const src = ctx.createBufferSource(); src.buffer = surf; src.loop = true;
-    src.loopStart = Math.random() * 4; src.playbackRate.value = 0.9 + Math.random() * 0.2;
-    // the body of the wave: a low rumble that opens up as it breaks, then hisses back down the sand
-    const lp = ctx.createBiquadFilter(); lp.type = "lowpass"; lp.Q.value = 0.4;
-    lp.frequency.setValueAtTime(220, t); lp.frequency.linearRampToValueAtTime(900 + 500 * size, t + swell); lp.frequency.exponentialRampToValueAtTime(260, t + swell + wash);
-    const g = ctx.createGain();
-    g.gain.setValueAtTime(0.0001, t); g.gain.exponentialRampToValueAtTime(0.16 * size, t + swell);
-    g.gain.setTargetAtTime(0.0001, t + swell + 0.2, wash / 3.2);
-    // foam: a soft high fizz only at the moment it breaks
-    const hp = ctx.createBiquadFilter(); hp.type = "bandpass"; hp.frequency.value = 3200; hp.Q.value = 0.5;
-    const fg = ctx.createGain();
-    fg.gain.setValueAtTime(0.0001, t + swell * 0.85); fg.gain.exponentialRampToValueAtTime(0.03 * size, t + swell + 0.4);
-    fg.gain.setTargetAtTime(0.0001, t + swell + 0.6, wash / 4);
-    const pan = ctx.createStereoPanner ? ctx.createStereoPanner() : null;
-    if (pan) pan.pan.value = Math.random() * 1.2 - 0.6;
-    const out = pan || ambBus;
-    src.connect(lp); lp.connect(g); g.connect(out);
-    src.connect(hp); hp.connect(fg); fg.connect(out);
-    if (pan) pan.connect(ambBus);
-    src.start(t, src.loopStart); src.stop(t + swell + wash + 1.5);
-  }
-  const CHORDS = [[146.83, 220, 277.18, 329.63, 369.99], [123.47, 185, 246.94, 293.66, 369.99], [98, 146.83, 246.94, 293.66, 369.99], [110, 164.81, 246.94, 329.63, 415.3]];
-  let chordIx = 0, padVoices = [];
-  function pad() {
-    if (!ctx || !amb) return;
-    const t = ctx.currentTime, notes = CHORDS[chordIx++ % CHORDS.length];
-    padVoices.forEach(v => { v.g.gain.setTargetAtTime(0.0001, t, 2.2); v.o.stop(t + 9); });
-    padVoices = notes.map((f, i) => {
-      const o = ctx.createOscillator(); o.type = i === 0 ? "sine" : "triangle"; o.frequency.value = f; o.detune.value = (Math.random() - 0.5) * 8;
-      const lp = ctx.createBiquadFilter(); lp.type = "lowpass"; lp.frequency.value = 900;
-      const g = ctx.createGain(); g.gain.value = 0.0001;
-      g.gain.setTargetAtTime([0.05, 0.022, 0.016, 0.013, 0.01][i], t, 2.8);
-      o.connect(lp); lp.connect(g); g.connect(ambBus); o.start(t);
-      return { o, g };
-    });
-  }
-  function startAmbient() {
-    if (!init() || amb) return;
-    surf = pinkBuffer(10);
-    amb = { timers: [] };
-    pad(); wave();
-    const loop = () => { if (!amb) return; if (audible()) wave(); amb.timers[0] = setTimeout(loop, 7500 + Math.random() * 5000); };
-    amb.timers[0] = setTimeout(loop, 5200);
-    amb.timers[1] = setInterval(() => audible() && pad(), 14000);
-    amb.timers[2] = setInterval(bell, 6000);
-    applyLevels(1.6);
-  }
-  function bell() {
-    if (!ctx || !amb || !audible() || Math.random() < 0.45) return;
-    const chord = CHORDS[(chordIx + CHORDS.length - 1) % CHORDS.length];
-    const f = chord[1 + Math.floor(Math.random() * 4)] * (Math.random() < 0.6 ? 4 : 2);
-    const t = ctx.currentTime, o = ctx.createOscillator(), g = ctx.createGain();
-    o.type = "sine"; o.frequency.value = f;
-    g.gain.setValueAtTime(0, t); g.gain.linearRampToValueAtTime(0.022, t + 0.06); g.gain.exponentialRampToValueAtTime(0.0001, t + 4.5);
-    o.connect(g); g.connect(ambBus); o.start(t); o.stop(t + 4.7);
+  function startAmbient(fromIntro = false) {
+    if (!track || !cfg.on) return;
+    const a = player(amb.cur);
+    if (a.src !== track.url) { a.src = track.url; amb.started = false; }
+    if (!amb.started) {
+      amb.started = true;
+      const seek = () => { a.currentTime = fromIntro ? 0 : (track.intro_end || 0); };
+      if (a.readyState >= 1) seek(); else a.addEventListener("loadedmetadata", seek, { once: true });
+    }
+    amb.on = true;
+    if (!amb.timer) amb.timer = setInterval(tick, 50);
+    applyLevels();
   }
   let ducked = false;
   function audible() { return cfg.on && focused && !ducked; }
   function duck(on) { ducked = on; applyLevels(0.6); }
-  function applyLevels(fade = 0.8) {
+  function applyLevels() {
+    if (track && amb.on) {
+      amb.target = audible() ? cfg.ambient * 0.9 : 0;
+      if (amb.target > 0) { const a = player(amb.cur); if (a.paused) a.play().catch(() => {}); }
+    }
     if (!ctx) return;
-    const t = ctx.currentTime;
-    ambBus.gain.cancelScheduledValues(t);
-    ambBus.gain.setTargetAtTime(audible() ? cfg.ambient * 0.9 : 0, t, fade / 3);
-    fxBus.gain.setTargetAtTime(cfg.on ? cfg.fx : 0, t, 0.05);
-    if (audible() && ctx.state === "suspended") ctx.resume();
-    if (!audible()) setTimeout(() => { if (!audible() && ctx.state === "running") ctx.suspend(); }, fade * 1000 + 200);
+    fxBus.gain.setTargetAtTime(cfg.on ? cfg.fx : 0, ctx.currentTime, 0.05);
+    if (cfg.on && focused && ctx.state === "suspended") ctx.resume();
+    if (!(cfg.on && focused)) setTimeout(() => { if (!(cfg.on && focused) && ctx.state === "running") ctx.suspend(); }, 500);
   }
-  function setFocus(on) { focused = on; applyLevels(on ? 1.2 : 0.5); }
+  function setFocus(on) { focused = on; applyLevels(); }
   addEventListener("blur", () => setFocus(false));
   addEventListener("focus", () => setFocus(!document.hidden));
   document.addEventListener("visibilitychange", () => setFocus(!document.hidden && document.hasFocus()));
-  // browsers only allow sound after the first click or key press
-  const unlock = () => { if (cfg.on) { startAmbient(); applyLevels(); } };
-  addEventListener("pointerdown", unlock, { once: false, passive: true });
+  // in case the system holds sound back until the first click or key press
+  const unlock = () => { if (cfg.on) { init(); if (track && !amb.on) startAmbient(false); applyLevels(); } };
+  addEventListener("pointerdown", unlock, { passive: true });
   addEventListener("keydown", unlock, { passive: true });
 
   /* ---- interface sounds ---- */
@@ -175,11 +151,23 @@ const FX = (() => {
   };
 
   function configure(next) {
+    if ("track" in next) {
+      const t = next.track || null;
+      if ((t && t.url) !== (track && track.url)) { players.forEach(p => { p.pause(); p.removeAttribute("src"); p.load(); }); amb.started = false; amb.xf = null; amb.cur = 0; amb.level = 0; }
+      track = t; delete next.track;
+      if (!track) amb.on = false;
+    }
     Object.assign(cfg, next);
-    if (cfg.on && ctx) startAmbient();
+    if (cfg.on && track && amb.on) startAmbient(false);
     applyLevels();
   }
-  return { play, configure, duck, get cfg() { return { ...cfg }; } };
+  /* startup: the file's own intro if it has one, otherwise a short synthesized chime */
+  function intro() {
+    if (track && track.intro_end > 0 && cfg.on) { amb.level = cfg.ambient * 0.9; startAmbient(true); return true; }
+    play.boot();
+    return false;
+  }
+  return { play, configure, duck, intro, startAmbient, hasTrack: () => !!track, get cfg() { return { ...cfg }; } };
 })();
 
 /* ---------- startup: drifting dust, then glowing block towers on a dark floor, the camera circling, the name ---------- */
@@ -197,7 +185,8 @@ function playIntro(done) {
       h: .4 + Math.pow(Math.random(), 1.6) * 3.4, delay: Math.random() * .5, hue: 215 + Math.random() * 25 });
   }
   const dust = Array.from({ length: 160 }, () => ({ x: (Math.random() - .5) * 16, y: Math.random() * 5, z: (Math.random() - .5) * 16, v: .1 + Math.random() * .3 }));
-  const start = performance.now(), TOTAL = 7000;
+  const start = performance.now();
+  let TOTAL = 7000;
   let raf, finished = false;
   const finish = () => {
     if (finished) return; finished = true;
@@ -206,7 +195,9 @@ function playIntro(done) {
     setTimeout(() => { el.remove(); done(); }, 800);
   };
   addEventListener("keydown", finish); el.addEventListener("pointerdown", finish);
-  try { FX.play.boot(); } catch {}
+  let ownIntro = false;
+  try { ownIntro = FX.intro(); } catch {}
+  if (ownIntro) TOTAL = 9500;  // your intro rings longer; the menu ambience carries on from it
   const ease = x => x < 0 ? 0 : x > 1 ? 1 : 1 - Math.pow(1 - x, 3);
   const frame = now => {
     const t = Math.min(1, (now - start) / TOTAL);

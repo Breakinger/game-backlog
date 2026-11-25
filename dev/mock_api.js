@@ -40,6 +40,27 @@
     link_account: async () => wait({ who: "test", games: 10 }), unlink_account: async () => ({}),
     update_check: async () => ({ current: "1.0.4", latest: "1.0.5", available: true, can_install: true, page: "x" }),
     update_progress: async () => ({ state: "downloading", done: 5, total: 10 }), update_apply: async () => ({ ok: true }),
+    news_section: async sec => wait({ errors: sec === "breaking" ? ["Bloomberg: URLError"] : [], pending: 0, items: Array.from({ length: 14 }, (_, k) => ({
+      title: sec === "leaks" ? ["Insider: Next Assassin's Creed set in Japan's Edo period, reveal planned for spring", "Rumour: Hollow Knight Silksong DLC listed on retailer", "Ratings board lists unannounced remaster for PS5 and Switch 2"][k % 3]
+        : sec === "marvel" ? ["Set photos tease a familiar face returning", "Runtime for the next DCU film reportedly confirmed"][k % 2]
+        : sec === "yours" ? ["Update 1.12 \"Ember\" is out", "Hotfix 1.12.1", "Season 9 roadmap"][k % 3]
+        : ["Valve announces Steam Winter Sale dates", "The year's best RPGs, ranked", "Studio behind a hit indie announces its next game", "Inside the making of a cult classic"][k % 4],
+      url: "x", date: Date.now() / 1000 - k * 5400 - 600, source: sec === "breaking" ? ["IGN", "PC Gamer", "Kotaku", "Eurogamer", "Jason Schreier", "Steam"][k % 6] : sec === "marvel" ? (k % 2 ? "r/DCULeaks" : "r/MarvelStudiosSpoilers") : sec === "yours" ? "Steam" : "r/GamingLeaksAndRumours",
+      summary: k % 2 ? "" : "A longer summary of the story, the way the outlet's feed describes it, cut to a few lines so the page stays calm.",
+      thumb: k % 3 === 2 ? null : art("news " + sec + k, k), flair: sec === "leaks" ? ["Rumour", "Leak", "Confirmed"][k % 3] : "", spoiler: sec === "marvel" && k % 3 === 0,
+      comments: sec === "leaks" || sec === "marvel" ? 40 + k * 7 : null, game: sec === "yours" ? ["Warframe", "Baldur's Gate 3", "Cyberpunk 2077"][k % 3] : undefined, kind: sec === "yours" ? ["major", "minor", "news"][k % 3] : undefined })) }),
+    deals: async () => { const W = window.MOCK.games.filter(g => g.status === "Wishlist"); const games = {};
+      W.forEach((g, k) => { games[g.name] = { appid: 100 + k, steam: k % 4 === 3 ? null : { currency: "USD", initial: 59.99, final: k % 3 === 0 ? 23.99 : 59.99, discount: k % 3 === 0 ? 60 : 0 }, steam_ends: k % 3 === 0 ? Date.now() / 1000 + 3 * 86400 + 4000 : null,
+        stores: { deals: [{ store: "Fanatical", price: k % 3 === 0 ? 21.49 : 44.99, retail: 59.99, savings: k % 3 === 0 ? 64 : 25, url: "x" }, { store: "GOG", price: 59.99, retail: 59.99, savings: 0, url: "x" }], low: 17.99 },
+        release: k % 5 === 1 ? { coming: true, ts: Date.now() / 1000 + (k + 3) * 86400, text: "Dec 2026" } : { coming: false } }; });
+      return wait({ games, subs: [{ game: W[0]?.name || "Game", owned: false, title: `[Amazon] ${W[0]?.name} (PS5) $29.99`, url: "x", date: Date.now() / 1000 - 7200, source: "r/PS5Deals", domain: "amazon.com", link: "x", thumb: null }],
+        dlc: [{ game: "Elden Ring", name: "Shadow of the Erdtree", art: art("Erdtree", 3), url: "x", major: true, price: { currency: "USD", final: 23.99, discount: 40 } }],
+        rates: { rates: { USD: 2.5922, EUR: 2.8343, GEL: 1 }, date: "2026-11-25T00:00:00Z", source: "National Bank of Georgia" },
+        sale: window.MOCK_SALE ? { id: "winter-2026", name: "Steam Winter Sale", start: Date.now() / 1000 - 3600, end: Date.now() / 1000 + 18 * 86400, live: true } : { id: "winter-2026", name: "Steam Winter Sale", start: Date.now() / 1000 + 22 * 86400, end: Date.now() / 1000 + 40 * 86400, live: false },
+        renames: { "The Elder Scrolls VI": { name: "The Elder Scrolls VI: Sentinel", source: "Steam" } }, links: {}, running: false }); },
+    renamed: async () => [], undo_rename: async () => ({}), apply_rename: async () => ({ ok: true }),
+    cover_options: async (n) => wait({ items: [{ url: art(n + " steam", 1), thumb: art(n + " steam", 1), source: "Steam", note: "official library cover" }, { url: art(n + " ps", 2), thumb: art(n + " ps", 2), source: "PlayStation Store", note: "official" }, { url: art(n + " igdb", 3), thumb: art(n + " igdb", 3), source: "IGDB", note: "box art" }].concat([4,5,6,7,8].map(k => ({ url: art(n + k, k), thumb: art(n + k, k), source: "SteamGridDB", note: "fan" }))) }),
+    pick_cover: async (n) => wait({ uri: art(n + " picked", 5) }), choose_ambience: async () => null, clear_ambience: async () => ({ ambience: null }), set_youtube_key: async () => ({ ok: true }),
     connection_script: async () => "// script", clear_covers: async () => true, open: async () => true, open_sheet: async () => true,
   } };
 })();

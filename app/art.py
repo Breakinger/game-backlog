@@ -1,5 +1,5 @@
-"""Cover art and store links. Covers come from SteamGridDB (if you set a key) or Steam's library art,
-and are cached on disk so each one is downloaded once."""
+"""Cover art and store links. Covers come from the official store art first (Steam's library cover, the PlayStation
+Store's portrait cover), then IGDB's box art, then SteamGridDB, and are cached on disk so each is downloaded once."""
 import base64
 import difflib
 import json
@@ -23,6 +23,45 @@ def _norm(s):
 
 def similar(a, b):
     return difflib.SequenceMatcher(None, _norm(a), _norm(b)).ratio()
+
+
+ROMAN = {"i": 1, "ii": 2, "iii": 3, "iv": 4, "v": 5, "vi": 6, "vii": 7, "viii": 8, "ix": 9, "x": 10, "xi": 11, "xii": 12,
+         "xiii": 13, "xiv": 14, "xv": 15, "xvi": 16}
+
+
+def numerals(s):
+    """The sequel numbers in a title: 'Red Dead Redemption 2' -> {2}, 'Final Fantasy VII' -> {7}."""
+    out = set()
+    for tok in _norm(s).split():
+        if tok.isdigit():
+            out.add(int(tok))
+        elif tok in ROMAN and tok not in ("i", "x", "v"):  # lone I, V and X are too often words or letters
+            out.add(ROMAN[tok])
+    return out
+
+
+def same_title(a, b, threshold=0.86):
+    """True when two names are the same game: close enough, and the sequel numbers agree, so
+    'Baldur's Gate 3' never matches 'Baldur's Gate' and 'Red Dead Redemption 2' never matches the first one."""
+    na, nb = _norm(a), _norm(b)
+    if na == nb:
+        return True
+    if numerals(a) != numerals(b):
+        return False
+    short, long_ = sorted((na, nb), key=len)
+    if long_.startswith(short + " ") and set(long_[len(short):].split()) <= EDITION_WORDS:
+        return True
+    return difflib.SequenceMatcher(None, na, nb).ratio() >= threshold
+
+
+EDITION_WORDS = {"intergrade", "deluxe", "complete", "enhanced", "ultimate", "gold", "premium", "directors", "director", "s",
+                 "cut", "anniversary", "hd", "standard", "digital", "for", "ps4", "ps5", "nintendo", "switch", "2", "pc"}
+COVER_VERSION = 2  # raising this re-downloads every cover you didn't pick yourself
+PC_PLATFORMS = {"Steam", "GOG", "Epic Games", "EA", "EA App", "Ubisoft Connect", "PC (Other)", "itch.io", "Emulation", ""}
+PS_PLATFORMS = {"PS5", "PS4", "PS2"}
+NINTENDO = {"Switch 2", "Switch"}
+USER_CHOSEN = ("custom", "picked")
+STEAM_CDN = "https://shared.akamai.steamstatic.com/store_item_assets/"
 
 
 def _get(url, headers=None, timeout=15):
@@ -70,9 +109,9 @@ class Art:
         try:
             q = urllib.parse.quote(name)
             body, _ = _get(f"https://store.steampowered.com/api/storesearch/?term={q}&l=english&cc=US")
-            items = json.loads(body).get("items", [])
-            best = max(items, key=lambda it: similar(name, it.get("name", "")), default=None)
-            if best and similar(name, best.get("name", "")) >= 0.72:
+            items = [it for it in json.loads(body).get("items", []) if same_title(name, it.get("name", ""), 0.8)]
+            best = max(items, key=lambda it: (_norm(it.get("name", "")) == key, similar(name, it.get("name", ""))), default=None)
+            if best:
                 appid = int(best["id"])
         except Exception:
             return None  # network problem: don't cache
@@ -80,81 +119,231 @@ class Art:
         self._save()
         return appid
 
-    # ---------- covers ----------
-    def _sgdb(self, name):
-        if not self.sgdb_key:
-            return None
+    def remember_appid(self, name, appid):
+        """An exact Steam ID from your linked account beats any search."""
+        key = _norm(name)
+        if appid and self.appids.get(key) != int(appid):
+            self.appids[key] = int(appid)
+            self._save()
+
+    # ---------- where covers come from ----------
+    def _sgdb_game(self, name, appid=None):
+        """SteamGridDB's entry for this exact game: by Steam ID when known, otherwise a careful name match."""
         auth = {"Authorization": f"Bearer {self.sgdb_key}"}
-        q = urllib.parse.quote(name)
-        body, _ = _get(f"https://www.steamgriddb.com/api/v2/search/autocomplete/{q}", auth)
-        games = json.loads(body).get("data", [])
+        if appid:
+            try:
+                body, _ = _get(f"https://www.steamgriddb.com/api/v2/games/steam/{appid}", auth)
+                g = json.loads(body).get("data")
+                if g:
+                    return g
+            except Exception:
+                pass
+        body, _ = _get(f"https://www.steamgriddb.com/api/v2/search/autocomplete/{urllib.parse.quote(name)}", auth)
+        games = [g for g in json.loads(body).get("data", [])[:8] if same_title(name, g.get("name", ""))]
         if not games:
             return None
-        best = max(games[:5], key=lambda g: similar(name, g.get("name", "")))
-        body, _ = _get(f"https://www.steamgriddb.com/api/v2/grids/game/{best['id']}?dimensions=600x900,342x482,660x930&types=static&nsfw=false", auth)
-        grids = json.loads(body).get("data", [])
-        if not grids:
-            return None
-        grids.sort(key=lambda g: -(g.get("score") or 0))
-        img, _ = _get(grids[0]["url"], timeout=25)
-        return img
+        # same name, several games (Deadlock 1996 vs Deadlock 2024): the exact, verified, newest one
+        return max(games, key=lambda g: (_norm(g.get("name", "")) == _norm(name), bool(g.get("verified")), g.get("release_date") or 0))
 
-    def _steam_art(self, name):
-        appid = self.steam_appid(name)
-        if not appid:
-            return None
-        for url in (f"https://shared.akamai.steamstatic.com/store_item_assets/steam/apps/{appid}/library_600x900.jpg",
-                    f"https://cdn.cloudflare.steamstatic.com/steam/apps/{appid}/library_600x900.jpg"):
+    def sgdb_grids(self, name, appid=None, limit=1):
+        if not self.sgdb_key:
+            return []
+        g = self._sgdb_game(name, appid)
+        if not g:
+            return []
+        auth = {"Authorization": f"Bearer {self.sgdb_key}"}
+        body, _ = _get(f"https://www.steamgriddb.com/api/v2/grids/game/{g['id']}?dimensions=600x900,342x482,660x930&types=static&nsfw=false&humor=false", auth)
+        grids = sorted(json.loads(body).get("data", []), key=lambda x: -(x.get("score") or 0))
+        return [{"url": x["url"], "thumb": x.get("thumb") or x["url"], "source": "SteamGridDB", "note": (x.get("author") or {}).get("name", "")}
+                for x in grids[:limit]]
+
+    def steam_cover_urls(self, appid):
+        """Steam's official library cover (the portrait art in your Steam library), newest asset paths first."""
+        urls = []
+        try:
+            req = json.dumps({"ids": [{"appid": int(appid)}], "context": {"language": "english", "country_code": "US"},
+                              "data_request": {"include_assets": True}})
+            body, _ = _get("https://api.steampowered.com/IStoreBrowseService/GetItems/v1/?input_json=" + urllib.parse.quote(req))
+            item = ((json.loads(body).get("response") or {}).get("store_items") or [{}])[0]
+            a = item.get("assets") or {}
+            fmt = a.get("asset_url_format")
+            if fmt:
+                for k in ("library_capsule_2x", "library_capsule"):
+                    if a.get(k):
+                        urls.append(STEAM_CDN + fmt.replace("${FILENAME}", a[k]))
+        except Exception:
+            pass
+        for f in ("library_600x900_2x.jpg", "library_600x900.jpg"):
+            urls.append(f"{STEAM_CDN}steam/apps/{appid}/{f}")
+        urls.append(f"https://cdn.cloudflare.steamstatic.com/steam/apps/{appid}/library_600x900.jpg")
+        return urls
+
+    def _first_image(self, urls, min_bytes=4000):
+        for url in urls:
             try:
-                img, ctype = _get(url)
-                if img and "image" in ctype:
+                img, ctype = _get(url, timeout=25)
+                if img and "image" in ctype and len(img) >= min_bytes:
                     return img
             except Exception:
                 continue
         return None
 
-    def cover(self, name):
-        """Returns a data: URI for the game's cover, or None."""
+    def igdb_cover_url(self, name):
+        if not (self.igdb and self.igdb.configured()):
+            return None
+        g = self.igdb.game(name)
+        if g and g.get("cover") and same_title(name, g.get("name", name), 0.8):
+            return self.igdb.img(g["cover"]["image_id"], "t_cover_big_2x")
+        return None
+
+    def ps_cover_urls(self, name, platform="PS5"):
+        """The PlayStation Store's own portrait cover for the game."""
+        loc = "en-us"
+        html_, _ = _get(f"https://store.playstation.com/{loc}/search/{urllib.parse.quote(name)}", {"Accept-Language": "en-US"}, timeout=20)
+        html_ = html_.decode("utf-8", "replace")
+        out = []
+        for m in re.finditer(r'/(?:en-us)/concept/(\d+)', html_):
+            cid = m.group(1)
+            if any(cid in u for u in out):
+                continue
+            page, _ = _get(f"https://store.playstation.com/{loc}/concept/{cid}", timeout=20)
+            page = page.decode("utf-8", "replace")
+            title = re.search(r"<title>([^<|]+)", page)
+            t = title.group(1).replace("&amp;", "&").strip() if title else ""
+            if not t or not same_title(name, re.sub(r"\s*(PS4|PS5|PS4 & PS5|PS5 & PS4)\s*$", "", t), 0.8):
+                continue
+            for role in ("PORTRAIT_BANNER", "GAMEHUB_COVER_ART"):
+                mm = re.search(r'"role"\s*:\s*"' + role + r'"[^}]*?"url"\s*:\s*"(https://image\.api\.playstation\.com[^"]+)"', page) or \
+                     re.search(r'"url"\s*:\s*"(https://image\.api\.playstation\.com[^"]+)"[^}]*?"role"\s*:\s*"' + role + '"', page)
+                if mm:
+                    out.append(mm.group(1) + "?w=720")
+            if out:
+                break
+            if len(out) > 3:
+                break
+        return out
+
+    def _official(self, name, platform, hints):
+        """Official art for the platform you own it on. Returns (image bytes, source) or (None, None)."""
+        appid = hints.get("appid") or (self.steam_appid(name) if platform in PC_PLATFORMS or platform in PS_PLATFORMS | NINTENDO else None)
+        order = []
+        if platform in PS_PLATFORMS:
+            if hints.get("ps_art"):
+                order.append(("psn", lambda: [hints["ps_art"]]))
+            if platform != "PS2":
+                order.append(("psstore", lambda: self.ps_cover_urls(name, platform)))
+            order.append(("igdb", lambda: [self.igdb_cover_url(name)]))
+        elif platform in NINTENDO:
+            order.append(("igdb", lambda: [self.igdb_cover_url(name)]))
+        else:
+            if appid:
+                order.append(("steam", lambda: self.steam_cover_urls(appid)))
+            order.append(("igdb", lambda: [self.igdb_cover_url(name)]))
+        order.append(("sgdb", lambda: [x["url"] for x in self.sgdb_grids(name, appid)]))
+        if appid and platform not in PC_PLATFORMS:
+            order.append(("steam", lambda: self.steam_cover_urls(appid)))
+        for src, urls in order:
+            try:
+                img = self._first_image([u for u in urls() if u])
+            except Exception:
+                img = None
+            if img:
+                return img, src
+        return None, None
+
+    def candidates(self, name, platform="", hints=None, query=None):
+        """Every cover we can find for the picker, official ones first."""
+        hints = hints or {}
+        q = query or name
+        appid = hints.get("appid") if not query else None
+        appid = appid or self.steam_appid(q)
+        out, seen = [], set()
+
+        def add(url, source, note=""):
+            if url and url not in seen:
+                seen.add(url)
+                out.append({"url": url, "thumb": url, "source": source, "note": note})
+        if hints.get("ps_art") and not query:
+            add(hints["ps_art"], "PlayStation", "your library")
+        if appid:
+            urls = self.steam_cover_urls(appid)
+            ok = self._first_image(urls[:3])
+            if ok:
+                # find which one worked so the picker shows the official file itself
+                for u in urls[:3]:
+                    try:
+                        img, ct = _get(u)
+                        if "image" in ct and len(img) > 4000:
+                            add(u, "Steam", "official library cover")
+                            break
+                    except Exception:
+                        continue
+        if platform in PS_PLATFORMS or not platform:
+            try:
+                for u in self.ps_cover_urls(q, platform)[:2]:
+                    add(u, "PlayStation Store", "official")
+            except Exception:
+                pass
+        try:
+            add(self.igdb_cover_url(q), "IGDB", "box art")
+        except Exception:
+            pass
+        try:
+            for x in self.sgdb_grids(q, appid, limit=30):
+                add(x["url"], "SteamGridDB", x["note"])
+        except Exception:
+            pass
+        return out
+
+    def set_from_url(self, name, url):
+        """Save a cover picked in the app. Only images over https, at most 25 MB."""
+        if not url.startswith("https://"):
+            raise ValueError("Only https images can be used.")
+        img, ctype = _get(url, timeout=30)
+        if "image" not in ctype or len(img) > 25 * 1024 * 1024 or len(img) < 1000:
+            raise ValueError("That link isn't a usable image.")
+        key = _norm(name)
+        old = self.index.get(key, {}).get("file")
+        if old:
+            try:
+                os.remove(os.path.join(self.dir, old))
+            except OSError:
+                pass
+        return self._store(key, img, "picked", suffix="-picked")
+
+    def cover(self, name, platform="", hints=None):
+        """A URL (or data: URI) for the game's cover, or None. Your own picks are never replaced."""
+        hints = hints or {}
         key = _norm(name)
         entry = self.index.get(key)
         if entry:
             fname = entry.get("file")
-            if fname and os.path.exists(os.path.join(self.dir, fname)):
+            have = fname and os.path.exists(os.path.join(self.dir, fname))
+            current = entry.get("v", 1) >= COVER_VERSION and entry.get("plat", "") == (platform or "")
+            if have and (entry.get("src") in USER_CHOSEN or current):
                 return self._data_uri(os.path.join(self.dir, fname))
-            igdb_new = self.igdb and self.igdb.configured() and "igdb" not in (entry.get("src") or "")
-            if not fname and time.time() - entry.get("t", 0) < MISS_RETRY_DAYS * 86400 and not (self.sgdb_key and not (entry.get("src") or "").startswith("sgdb")) and not igdb_new:
+            if not fname and current and time.time() - entry.get("t", 0) < MISS_RETRY_DAYS * 86400:
                 return None
-        img, src = None, None
-        try:
-            img = self._sgdb(name)
-            src = "sgdb" if img else None
-        except Exception:
-            img = None
+        img, src = self._official(name, platform or "", hints)
         if not img:
-            try:
-                img = self._steam_art(name)
-                src = "steam" if img else None
-            except Exception:
-                img = None
-        if not img and self.igdb and self.igdb.configured():
-            try:
-                g = self.igdb.game(name)
-                if g and g.get("cover"):
-                    img, _ = _get(self.igdb.img(g["cover"]["image_id"], "t_cover_big_2x"), timeout=25)
-                    src = "igdb"
-            except Exception:
-                img = None
-        if not img:
-            self.index[key] = {"file": "", "t": time.time(), "src": ("sgdb" if self.sgdb_key else "none") + ("+igdb" if self.igdb and self.igdb.configured() else "")}
+            if entry and entry.get("file") and os.path.exists(os.path.join(self.dir, entry["file"])):
+                # nothing better found: keep the old one, but don't keep searching on every start
+                entry.update({"v": COVER_VERSION, "plat": platform or "", "t": time.time()})
+                self._save()
+                return self._data_uri(os.path.join(self.dir, entry["file"]))
+            self.index[key] = {"file": "", "t": time.time(), "src": "none", "v": COVER_VERSION, "plat": platform or ""}
             self._save()
             return None
-        ext = ".png" if img[:4] == b"\x89PNG" else ".webp" if img[8:12] == b"WEBP" else ".jpg"
-        fname = re.sub(r"[^a-z0-9]+", "-", key)[:60].strip("-") + ext
-        with open(os.path.join(self.dir, fname), "wb") as f:
-            f.write(img)
-        self.index[key] = {"file": fname, "t": time.time(), "src": src}
+        old = (entry or {}).get("file")
+        uri = self._store(key, img, src)
+        if old and old != self.index[key]["file"]:
+            try:
+                os.remove(os.path.join(self.dir, old))
+            except OSError:
+                pass
+        self.index[key].update({"v": COVER_VERSION, "plat": platform or ""})
         self._save()
-        return self._data_uri(os.path.join(self.dir, fname))
+        return uri
 
     # ---------- book covers ----------
     def book_cover(self, title, author=""):
@@ -223,7 +412,7 @@ class Art:
             return f"data:{mime};base64," + base64.b64encode(f.read()).decode()
 
     def clear(self):
-        keep = {e.get("file") for e in self.index.values() if e.get("src") == "custom"}
+        keep = {e.get("file") for e in self.index.values() if e.get("src") in USER_CHOSEN}
         for f in os.listdir(self.dir):
             if f in keep:
                 continue
@@ -231,7 +420,7 @@ class Art:
                 os.remove(os.path.join(self.dir, f))
             except OSError:
                 pass
-        self.index = {k: e for k, e in self.index.items() if e.get("src") == "custom"}
+        self.index = {k: e for k, e in self.index.items() if e.get("src") in USER_CHOSEN}
         self._save()
 
     # ---------- your own covers (modlists, fan art) ----------
@@ -252,7 +441,7 @@ class Art:
 
     def rename_custom(self, old, new):
         e = self.index.get(_norm(old))
-        if e and e.get("src") == "custom":
+        if e and e.get("src") in USER_CHOSEN:
             self.index[_norm(new)] = self.index.pop(_norm(old))
             self._save()
 
@@ -270,7 +459,7 @@ class Art:
     def hero(self, name):
         key = "hero|" + _norm(name)
         entry = self.index.get(key)
-        if entry:
+        if entry and entry.get("v", 1) >= COVER_VERSION:
             fname = entry.get("file")
             if fname and os.path.exists(os.path.join(self.dir, fname)):
                 return self._data_uri(os.path.join(self.dir, fname))
@@ -280,10 +469,8 @@ class Art:
         if self.sgdb_key:
             try:
                 auth = {"Authorization": f"Bearer {self.sgdb_key}"}
-                body, _ = _get(f"https://www.steamgriddb.com/api/v2/search/autocomplete/{urllib.parse.quote(name)}", auth)
-                games = json.loads(body).get("data", [])
-                if games:
-                    best = max(games[:5], key=lambda g: similar(name, g.get("name", "")))
+                best = self._sgdb_game(name, self.steam_appid(name))
+                if best:
                     body, _ = _get(f"https://www.steamgriddb.com/api/v2/heroes/game/{best['id']}?types=static&nsfw=false", auth)
                     heroes = sorted(json.loads(body).get("data", []), key=lambda g: -(g.get("score") or 0))
                     if heroes:
@@ -314,7 +501,10 @@ class Art:
                     src = "igdb"
             except Exception:
                 img = None
-        return self._store(key, img, src)
+        uri = self._store(key, img, src)
+        self.index[key]["v"] = COVER_VERSION
+        self._save()
+        return uri
 
 
 OWNED = {"Library", "Playing", "Paused", "Completed", "Dropped"}

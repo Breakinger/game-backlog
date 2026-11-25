@@ -14,7 +14,7 @@ import urllib.error
 import urllib.parse
 import urllib.request
 
-from art import similar, _norm
+from art import similar, same_title, _norm
 
 UA = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) Masterlog/1.0"
 JUNK = re.compile(r"dedicated server|soundtrack|\bost\b|\bsdk\b|benchmark|playtest|\bdemo\b|test server|editor|mod tools|artbook|wallpaper", re.I)
@@ -153,6 +153,16 @@ def _duration_minutes(iso):
         return 0
     d, h, mi, _ = (float(x or 0) for x in m.groups())
     return int(d * 1440 + h * 60 + mi)
+
+
+def _ps_art(title):
+    """The portrait cover Sony shows for a game in your library, if it has one."""
+    images = ((title.get("concept") or {}).get("media") or {}).get("images") or (title.get("media") or {}).get("images") or []
+    for kind in ("PORTRAIT_BANNER", "GAMEHUB_COVER_ART"):
+        for im in images:
+            if im.get("type") == kind and im.get("url"):
+                return im["url"]
+    return None
 
 
 def _clean_ps_name(n):
@@ -371,13 +381,13 @@ class Accounts:
                 plat = "PS5" if "PS5" in (t.get("trophyTitlePlatform") or "") else "PS4"
                 earned, defined = t.get("earnedTrophies") or {}, t.get("definedTrophies") or {}
                 p = played.pop(_norm(name), {})
-                out.append({"id": f"psn:{t.get('npCommunicationId')}", "name": name, "platform": plat,
+                out.append({"id": f"psn:{t.get('npCommunicationId')}", "name": name, "platform": plat, "art": _ps_art(p),
                             "minutes": _duration_minutes(p.get("playDuration")), "last_played": p.get("lastPlayedDateTime") or t.get("lastUpdatedDateTime"),
                             "trophies": {"progress": t.get("progress", 0), "platinum": bool(earned.get("platinum")), "has_platinum": bool(defined.get("platinum"))},
                             "complete": bool(earned.get("platinum")) or t.get("progress") == 100})
             for t in played.values():  # played but no trophy list
                 name = _clean_ps_name(t.get("name"))
-                out.append({"id": f"psn:{t.get('titleId')}", "name": name, "platform": "PS5" if "ps5" in (t.get("category") or "") else "PS4",
+                out.append({"id": f"psn:{t.get('titleId')}", "name": name, "platform": "PS5" if "ps5" in (t.get("category") or "") else "PS4", "art": _ps_art(t),
                             "minutes": _duration_minutes(t.get("playDuration")), "last_played": t.get("lastPlayedDateTime"), "complete": False})
             return out
         if src == "heroic":
@@ -425,7 +435,7 @@ class Accounts:
                 key = _norm(a["name"])
                 best, score = None, 0
                 for k, g in index:
-                    s = 1.0 if k == key else similar(a["name"], g["name"])
+                    s = 1.0 if k == key else (similar(a["name"], g["name"]) if same_title(a["name"], g["name"], MATCH) else 0)
                     if s > score:
                         best, score = g, s
                 if best and score >= MATCH:
@@ -444,6 +454,8 @@ class Accounts:
                         f["heroic"] = {"runner": a["runner"], "app": a["app"]}
                     if src == "steam":
                         f["appid"] = a.get("appid")
+                    if a.get("art"):
+                        f["ps_art"] = a["art"]
                 else:
                     c = dict(a, source=src)
                     candidates.append(c)

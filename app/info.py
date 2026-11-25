@@ -13,11 +13,12 @@ import xml.etree.ElementTree as ET
 from email.utils import parsedate_to_datetime
 
 from art import similar, _norm
+import youtube
 
 BROWSER_UA = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/130.0 Safari/537.36"
 MC = "https://backend.metacritic.com"
 DAY = 86400
-TTL = {"about": 30 * DAY, "media": 7 * DAY, "ratings": 3 * DAY, "dlcs": 7 * DAY, "wiki": 30 * DAY, "news": 6 * 3600, "updated": 12 * 3600, "book": 30 * DAY}
+TTL = {"about": 30 * DAY, "media": 7 * DAY, "ratings": 3 * DAY, "dlcs": 7 * DAY, "wiki": 30 * DAY, "news": 6 * 3600, "trailers": 14 * DAY, "updated": 12 * 3600, "book": 30 * DAY}
 NEW_UPDATE_DAYS = 14
 PATCH_RE = re.compile(r"\b(patch|update|hotfix|hot-fix|version\s*\d|v\d+\.\d+|release notes)\b", re.I)
 JUNK_DLC_RE = re.compile(r"soundtrack|\bost\b|art ?book|wallpaper|avatar|theme|\bskin|costume|outfit|cosmetic|bonus content|digital extras|pre-?order", re.I)
@@ -273,6 +274,7 @@ class Info:
         self.art = art
         self.igdb = igdb
         self.pool = cf.ThreadPoolExecutor(max_workers=6)
+        self.youtube_key = lambda: None  # the app sets this when you add a YouTube API key
         self._updates_running = False
 
     @staticmethod
@@ -437,40 +439,57 @@ class Info:
 
     # ----- screenshots and trailers -----
     def media(self, game):
+        """Screenshots from Steam (or IGDB), and trailers from YouTube matched to the ones Steam lists,
+        so they play right in the app."""
         key = self._key(game)
         hit = self.cache.get("media", key)
-        if hit is not None:
+        if hit is not None and hit.get("v") == 2:
             return hit
-        shots, videos = [], []
+        shots, steam_videos, names, owners, igdb_ids = [], [], [], [], []
         appid = self._appid(game)
         if appid:
             try:
                 d = steam_details(appid)
+                owners = (d.get("developers") or []) + (d.get("publishers") or [])
                 for m in d.get("movies") or []:
                     mp4, webm = m.get("mp4") or {}, m.get("webm") or {}
-                    videos.append({"name": m.get("name"), "thumb": m.get("thumbnail"),
-                                   "mp4": mp4.get("max") or mp4.get("480"), "webm": webm.get("max") or webm.get("480"),
-                                   "hls": m.get("hls_h264"), "dash": m.get("dash_h264"),
-                                   "page": f"https://store.steampowered.com/app/{appid}"})
+                    names.append(m.get("name") or "")
+                    steam_videos.append({"name": m.get("name"), "thumb": m.get("thumbnail"),
+                                         "mp4": mp4.get("max") or mp4.get("480"), "webm": webm.get("max") or webm.get("480"),
+                                         "hls": m.get("hls_h264"), "page": f"https://store.steampowered.com/app/{appid}"})
                 for sh in d.get("screenshots") or []:
                     shots.append({"thumb": sh.get("path_thumbnail"), "full": sh.get("path_full")})
             except Exception:
                 pass
-        if (not shots or not videos) and self.igdb:
+        if self.igdb:
             try:
                 ig = self.igdb.game(game.get("name", "")) or {}
+                igdb_ids = [v["video_id"] for v in ig.get("videos") or [] if v.get("video_id")]
                 if not shots:
                     for sh in (ig.get("screenshots") or []) + (ig.get("artworks") or []):
                         shots.append({"thumb": self.igdb.img(sh["image_id"], "t_screenshot_med"), "full": self.igdb.img(sh["image_id"], "t_1080p")})
-                if not videos:
-                    for v in ig.get("videos") or []:
-                        videos.append({"name": v.get("name"), "youtube": v["video_id"], "thumb": f"https://i.ytimg.com/vi/{v['video_id']}/hqdefault.jpg"})
             except Exception:
                 pass
-        out = {"shots": shots[:20], "videos": videos[:8]}
+        videos = self.trailers(game, names, owners or [game.get("developer"), game.get("publisher")], igdb_ids)
+        if not videos:
+            videos = steam_videos  # can't be matched on YouTube: offer Steam's own (they open on Steam if they can't play here)
+        out = {"shots": shots[:20], "videos": videos[:8], "v": 2}
         if shots or videos:
             self.cache.put("media", key, out)
         return out
+
+    def trailers(self, game, steam_names=(), owners=(), igdb_ids=()):
+        key = self._key(game)
+        hit = self.cache.get("trailers", key)
+        if hit is not None:
+            return hit
+        try:
+            vids = youtube.trailers(game.get("name", ""), steam_names, [o for o in owners if o], igdb_ids, self.youtube_key())
+        except Exception:
+            return []
+        if vids:
+            self.cache.put("trailers", key, vids)
+        return vids
 
     # ----- wiki -----
     def wiki(self, game):
@@ -516,6 +535,35 @@ class Info:
         self.cache.put("news", key, items)
         self._remember_update(game, items)
         return items
+
+    # ----- the News catalog's "Your games" -----
+    def your_news(self, games, days=45):
+        """Updates and news for the games you own or want, newest first. Uses what's already fetched and
+        quietly refreshes the rest in the background, so opening the tab is instant."""
+        out, stale = [], []
+        cutoff = time.time() - days * DAY
+        for g in games:
+            e = self.cache.data.get("news", {}).get(self._key(g))
+            if not e or time.time() - e["t"] >= TTL["news"]:
+                stale.append(g)
+            for i in (e or {}).get("v") or []:
+                if (i.get("date") or 0) >= cutoff:
+                    out.append(dict(i, game=g.get("name"), status=g.get("status")))
+        if stale and not getattr(self, "_news_running", False):
+            self._news_running = True
+            def warm():
+                try:
+                    for g in stale[:80]:
+                        try:
+                            self.news(g)
+                        except Exception:
+                            pass
+                        time.sleep(0.8)
+                finally:
+                    self._news_running = False
+            threading.Thread(target=warm, daemon=True).start()
+        out.sort(key=lambda i: -(i.get("start") if i.get("upcoming") else i.get("date") or 0))
+        return {"items": out[:200], "pending": len(stale)}
 
     # ----- milestones for live-service games -----
     def milestones(self, game):

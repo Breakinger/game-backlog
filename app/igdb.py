@@ -7,7 +7,7 @@ import urllib.error
 import urllib.parse
 import urllib.request
 
-from art import similar
+from art import similar, same_title, _norm
 
 IMG = "https://images.igdb.com/igdb/image/upload/{size}/{id}.jpg"
 
@@ -62,11 +62,18 @@ class IGDB:
         rows = self._query("games", f'search "{safe}"; fields name,summary,storyline,first_release_date,cover.image_id,'
                                     f'screenshots.image_id,artworks.image_id,videos.video_id,videos.name,platforms.abbreviation,'
                                     f'involved_companies.company.name,involved_companies.developer; limit 8;')
-        best = max(rows, key=lambda r: similar(name, r.get("name", "")), default=None) if rows else None
-        if best and similar(name, best.get("name", "")) < 0.7:
-            best = None
+        # the same game only: never the sequel or the original ('Red Dead Redemption 2' vs 'Red Dead Redemption')
+        rows = [r for r in rows or [] if same_title(name, r.get("name", ""), 0.8)]
+        best = max(rows, key=lambda r: (_norm(r.get("name", "")) == _norm(name), similar(name, r.get("name", ""))), default=None)
         self.cache[key] = best
         return best
+
+    def search(self, name, limit=10):
+        """Raw search results (names and release dates), used to spot a game's official full title."""
+        if not self.configured():
+            return []
+        safe = name.replace('"', "")
+        return self._query("games", f'search "{safe}"; fields name,first_release_date,category,version_parent; limit {limit};')
 
     @staticmethod
     def img(image_id, size="t_1080p"):

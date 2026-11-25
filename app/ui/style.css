@@ -632,3 +632,129 @@ details.more summary { cursor: pointer; color: #7FB2FF; margin-bottom: 10px; }
 /* Big Picture: a touch larger for the couch */
 body.bigpic { font-size: 16px; }
 body.bigpic .grid { --case-w: 170px; }
+
+.ambpick{display:flex;align-items:center;gap:10px;padding:10px 12px;border:1px solid rgba(140,170,255,.18);border-radius:8px;background:rgba(10,20,48,.5);margin-bottom:10px}
+.ambpick>div{flex:1;display:flex;flex-direction:column;gap:2px;min-width:0}
+.ambpick span{color:var(--muted,#8F9BB3);font-size:12.5px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+
+/* cover picker */
+.opencase .art{position:relative}
+.artedit{position:absolute;right:8px;top:8px;z-index:3;width:30px;height:30px;border-radius:50%;border:1px solid rgba(255,255,255,.25);background:rgba(6,12,30,.72);color:#E8EEFF;display:grid;place-items:center;opacity:0;transition:opacity .2s;cursor:pointer}
+.opencase .art:hover .artedit,.artedit:focus-visible{opacity:1}
+.coverpick form{width:min(980px,92vw)}
+.covergrid{display:grid;grid-template-columns:repeat(auto-fill,minmax(128px,1fr));gap:12px;max-height:58vh;overflow-y:auto;padding:4px 2px 10px;margin:10px 0}
+.covercand{position:relative;padding:0;border:2px solid transparent;border-radius:6px;background:#0A1430;aspect-ratio:2/3;overflow:hidden;cursor:pointer;transition:transform .15s,border-color .15s}
+.covercand img{width:100%;height:100%;object-fit:cover;display:block}
+.covercand:hover,.covercand:focus-visible{border-color:#7FA6FF;transform:translateY(-2px)}
+.covercand.busy{opacity:.5;pointer-events:none}
+.covercand .src{position:absolute;left:6px;bottom:6px;font-size:11px;padding:2px 6px;border-radius:4px;background:rgba(6,12,30,.82);color:#C9D1DC}
+.covercand .src.official{background:#2B5BD7;color:#fff}
+.coverpick .row input[type=search]{flex:1}
+
+.g-main{position:relative}
+.g-main iframe{width:100%;height:100%;border:0;display:block}
+.g-yt{position:absolute;right:10px;bottom:10px;opacity:0;transition:opacity .2s}
+.g-main:hover .g-yt{opacity:.92}
+
+/* ---------- News: a front page. Georgia headlines (ships with Windows) against the console type ---------- */
+.catalog { position: relative; }
+.newsdot { position: absolute; top: 6px; right: 4px; width: 7px; height: 7px; border-radius: 50%; background: var(--warn); box-shadow: 0 0 8px var(--warn); }
+.news { padding: 26px 40px 60px; max-width: 1500px; margin: 0 auto; }
+.news-head { display: flex; align-items: flex-end; justify-content: space-between; gap: 20px; border-bottom: 2px solid var(--line-strong); padding-bottom: 14px; margin-bottom: 14px; }
+.news-head h1 { font-family: Georgia, "Times New Roman", serif; font-weight: 700; font-size: 38px; letter-spacing: -.01em; margin: 0 0 4px; }
+.news-head p { margin: 0; max-width: 70ch; }
+.news-filter { display: flex; flex-wrap: wrap; gap: 8px; margin-bottom: 18px; }
+.news-filter .chip.on { background: var(--glass); color: var(--base); border-color: var(--glass); }
+.news-loading, .news-empty { padding: 40px 0; display: flex; gap: 10px; align-items: center; }
+.nerr { color: var(--warn); margin: 0 0 12px; }
+.news-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(330px, 1fr)); gap: 22px 26px; }
+.nitem { display: flex; flex-direction: column; cursor: pointer; border-radius: 8px; outline: none; content-visibility: auto; contain-intrinsic-size: 330px 320px; }
+.nitem .nthumb { aspect-ratio: 16/9; border-radius: 6px; overflow: hidden; background: linear-gradient(135deg, var(--fog), var(--deep)); position: relative; }
+.nitem .nthumb img { width: 100%; height: 100%; object-fit: cover; display: block; transition: transform .35s ease, filter .35s; }
+.nitem .nthumb.none img { display: none; }
+.nitem .nthumb.none span, .nitem .nthumb span { position: absolute; inset: 0; display: grid; place-items: center; color: var(--muted); font-family: Georgia, serif; font-size: 22px; font-style: italic; }
+.nitem .nthumb:not(.none) span { display: none; }
+.nitem:hover .nthumb img, .nitem:focus-visible .nthumb img { transform: scale(1.03); }
+.nitem:focus-visible { box-shadow: 0 0 0 2px var(--focus); }
+.ntext { padding: 10px 2px 0; }
+.nitem h3 { font-family: Georgia, "Times New Roman", serif; font-weight: 700; font-size: 18px; line-height: 1.28; margin: 6px 0 6px; color: var(--glass); }
+.nitem:hover h3 { text-decoration: underline; text-decoration-thickness: 1px; text-underline-offset: 3px; }
+.nitem p { margin: 0 0 8px; color: var(--silver); font-size: 14px; line-height: 1.5; display: -webkit-box; -webkit-line-clamp: 3; -webkit-box-orient: vertical; overflow: hidden; }
+.nmeta { display: flex; flex-wrap: wrap; gap: 4px 12px; color: var(--muted); font-size: 12.5px; }
+.nsrc { color: var(--silver); font-weight: 600; }
+.ntags { display: flex; flex-wrap: wrap; gap: 6px; min-height: 0; }
+.ntags:empty { display: none; }
+.ntags span { font-size: 11.5px; padding: 2px 7px; border-radius: 4px; background: rgba(255,255,255,.07); color: var(--silver); }
+.ntags .nnew { background: var(--warn); color: #1A1200; font-weight: 700; }
+.ntags .ngame { background: rgba(74,140,255,.18); color: #BFD3FF; }
+.ntags .k-major, .ntags .k-release { background: #2B5BD7; color: #fff; }
+.ntags .k-update { background: rgba(91,211,138,.18); color: var(--ok); }
+.ntags .k-minor { background: rgba(255,255,255,.07); }
+.ntags .sp { background: rgba(255,107,107,.18); color: #FFB3B3; }
+.nitem.lead { grid-column: 1 / -1; display: grid; grid-template-columns: minmax(0, 1.6fr) minmax(0, 1fr); gap: 28px; align-items: center; padding-bottom: 22px; border-bottom: 1px solid var(--line-strong); }
+.nitem.lead h3 { font-size: 34px; line-height: 1.15; letter-spacing: -.01em; }
+.nitem.lead p { -webkit-line-clamp: 6; font-size: 16px; }
+.nitem.spoiler .nthumb img { filter: blur(22px) brightness(.6); }
+.nitem.spoiler h3, .nitem.spoiler p { filter: blur(6px); user-select: none; }
+@media (max-width: 1100px) { .nitem.lead { grid-template-columns: 1fr; } .news { padding: 20px; } }
+@media (prefers-reduced-motion: reduce) { .nitem .nthumb img { transition: none; } }
+
+/* ---------- Deals ---------- */
+.pricetag { position: absolute; left: 6px; bottom: 6px; z-index: 3; display: inline-flex; gap: 5px; align-items: center; padding: 3px 7px; border-radius: 4px;
+  font-size: 12px; font-weight: 700; background: rgba(6, 12, 31, .86); color: var(--glass); box-shadow: 0 2px 8px rgba(0,0,0,.4); filter: none; }
+.pricetag.sale b { background: #4C6B22; color: #BEEE11; padding: 0 4px; border-radius: 3px; }
+.pricetag.soon { background: rgba(74, 140, 255, .9); color: #fff; }
+.case.unowned .pricetag { filter: none; }
+.dealcard .pricetag { display: none; }
+.deals { padding: 26px 40px 60px; max-width: 1500px; margin: 0 auto; }
+.deals-head { display: flex; align-items: flex-end; justify-content: space-between; gap: 20px; border-bottom: 2px solid var(--line-strong); padding-bottom: 14px; margin-bottom: 18px; }
+.deals-head h1 { font-size: 34px; margin: 0 0 4px; }
+.deals-head p { margin: 0; max-width: 80ch; }
+.deals-actions { display: flex; gap: 10px; align-items: center; flex-shrink: 0; }
+.salebanner { display: flex; align-items: center; justify-content: space-between; gap: 16px; padding: 16px 20px; border-radius: 10px; margin-bottom: 22px;
+  background: linear-gradient(100deg, rgba(43, 91, 215, .35), rgba(22, 36, 79, .6)); border: 1px solid rgba(127, 166, 255, .3); }
+.salebanner div { display: flex; flex-direction: column; gap: 2px; }
+.salebanner b { font-size: 18px; }
+.salebanner span { color: var(--silver); }
+.salebanner.live { background: linear-gradient(100deg, #4C6B22, #1E3B5C); border-color: #BEEE11; }
+.dsec { margin: 8px 0 34px; }
+.dsec h2 { font-size: 22px; margin: 0 0 4px; }
+.dsec > p { margin: 0 0 14px; }
+.dgrid { display: grid; grid-template-columns: repeat(auto-fill, minmax(380px, 1fr)); gap: 18px; }
+.dealcard { display: grid; grid-template-columns: 120px 1fr; gap: 16px; padding: 14px; border-radius: 10px; background: rgba(255,255,255,.035); border: 1px solid var(--line); }
+.dealcard .case { --case-w: 120px; pointer-events: auto; }
+.dealcard .dbody h3 { margin: 0; font-size: 17px; }
+.dealcard .dbody p { margin: 2px 0 10px; font-size: 13px; }
+.dealcard .best { display: flex; flex-wrap: wrap; align-items: baseline; gap: 6px 10px; cursor: pointer; padding: 8px 10px; border-radius: 6px; background: rgba(6,12,31,.55); }
+.dealcard .best .store { width: 100%; font-size: 12px; color: var(--muted); }
+.dealcard .best .now { font-size: 22px; font-weight: 700; display: inline-flex; gap: 8px; align-items: center; }
+.dealcard .best .now b, .alts i, .dlcsale i { background: #4C6B22; color: #BEEE11; font-style: normal; padding: 1px 6px; border-radius: 3px; font-size: 14px; }
+.dealcard .best s { color: var(--muted); }
+.dealcard .ends, .dealcard .low { display: block; margin-top: 6px; font-size: 13px; color: var(--warn); }
+.dealcard .low { color: var(--muted); }
+.alts { list-style: none; margin: 10px 0 6px; padding: 0; font-size: 13px; }
+.alts li { display: flex; justify-content: space-between; padding: 4px 0; border-top: 1px solid var(--line); cursor: pointer; }
+.alts li:hover { color: var(--glass); text-decoration: underline; }
+.dlcsale { list-style: none; padding: 0; margin: 0; display: grid; grid-template-columns: repeat(auto-fill, minmax(420px, 1fr)); gap: 10px; }
+.dlcsale li { display: grid; grid-template-columns: 120px 1fr auto; gap: 12px; align-items: center; padding: 8px; border-radius: 8px; background: rgba(255,255,255,.035); cursor: pointer; }
+.dlcsale img { width: 120px; aspect-ratio: 460/215; object-fit: cover; border-radius: 4px; }
+.dlcsale small { display: block; color: var(--muted); }
+.renames { list-style: none; padding: 0; margin: 0; display: grid; gap: 8px; }
+.toast-act { margin-left: 10px; background: none; border: 1px solid currentColor; color: inherit; border-radius: 4px; padding: 2px 10px; cursor: pointer; font: inherit; }
+
+/* the big sale: price tags rain down, then the name */
+.saleevent { position: fixed; inset: 0; z-index: 200; display: grid; place-items: center; background: radial-gradient(circle at 50% 40%, rgba(76,107,34,.55), rgba(3,8,20,.94) 70%); opacity: 0; transition: opacity .5s; }
+.saleevent.in { opacity: 1; }
+.saleevent.out { opacity: 0; }
+.saleevent .rain { position: absolute; inset: 0; overflow: hidden; pointer-events: none; }
+.saleevent .rain i { position: absolute; top: -60px; left: var(--x); font-style: normal; font-weight: 800; font-size: calc(22px * var(--s)); color: #BEEE11; background: #4C6B22;
+  padding: 4px 10px; border-radius: 4px; transform: rotate(var(--r)); animation: tagfall 3.4s cubic-bezier(.3,.1,.4,1) var(--d) both; box-shadow: 0 6px 18px rgba(0,0,0,.4); }
+@keyframes tagfall { 0% { transform: translateY(0) rotate(var(--r)); opacity: 0; } 10% { opacity: 1; } 100% { transform: translateY(110vh) rotate(calc(var(--r) * -1)); opacity: .9; } }
+.sale-card { position: relative; text-align: center; padding: 40px 56px; border-radius: 16px; background: rgba(6,12,31,.82); border: 1px solid rgba(190,238,17,.45);
+  animation: salepop .8s cubic-bezier(.2,1.4,.4,1) .5s both; }
+.sale-card small { color: #BEEE11; font-size: 15px; letter-spacing: .04em; }
+.sale-card h1 { font-size: clamp(40px, 6vw, 84px); margin: 6px 0 10px; line-height: 1; }
+.sale-card p { color: var(--silver); margin: 0 0 22px; }
+.sale-card .primary { margin-right: 8px; }
+@keyframes salepop { from { transform: scale(.7); opacity: 0; } to { transform: scale(1); opacity: 1; } }
+@media (prefers-reduced-motion: reduce) { .saleevent .rain { display: none; } .sale-card { animation: none; } }

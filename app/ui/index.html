@@ -16,6 +16,7 @@
     <div class="catalogs" role="tablist" aria-label="Catalog">
       <button class="catalog" data-catalog="games" role="tab">Games</button>
       <button class="catalog" data-catalog="books" role="tab">Books</button>
+      <button class="catalog" data-catalog="news" role="tab">News<i class="newsdot" id="newsDot" hidden></i></button>
     </div>
   </div>
   <nav class="tabs" role="tablist" id="tabs"></nav>
@@ -50,6 +51,7 @@
     <div class="stabs" role="tablist">
       <button type="button" data-stab="sheet" aria-selected="true">Sheet &amp; sources</button>
       <button type="button" data-stab="accounts">Accounts</button>
+      <button type="button" data-stab="deals">Deals &amp; regions</button>
       <button type="button" data-stab="sound">Sound &amp; look</button>
       <button type="button" data-stab="about">About</button>
     </div>
@@ -83,6 +85,7 @@
       </details>
       <label>IGDB Client ID <input name="igdb_id" type="text" autocomplete="off" placeholder="Leave empty to keep what's saved"></label>
       <label>IGDB Client secret <input name="igdb_secret" type="password" autocomplete="off" placeholder="Leave empty to keep what's saved"><small id="igdbState"></small></label>
+      <label>YouTube API key (optional) <input name="youtube_key" type="password" autocomplete="off" placeholder="Leave empty to keep what's saved"><small id="ytState"></small></label>
       <label>Check the sheet for changes every
         <select name="refresh_minutes">
           <option value="1">1 minute</option><option value="2">2 minutes</option><option value="5">5 minutes</option>
@@ -96,13 +99,33 @@
       <div id="accountsBox"></div>
     </div>
 
+    <div class="spane" data-spane="deals" hidden>
+      <label>Steam store region
+        <select name="steam_cc">
+          <option value="GE">Georgia (Steam's U.S. dollar region)</option><option value="US">United States</option><option value="TR">Türkiye (U.S. dollar region)</option>
+          <option value="UA">Ukraine</option><option value="AM">Armenia</option><option value="AZ">Azerbaijan</option><option value="KZ">Kazakhstan</option>
+          <option value="PL">Poland</option><option value="DE">Germany</option><option value="GB">United Kingdom</option>
+        </select></label>
+      <label>PlayStation Store region (the one your PlayStation account uses)
+        <select name="ps_locale">
+          <option value="en-us">United States (USD)</option><option value="en-tr">Türkiye (TRY)</option><option value="en-ua">Ukraine (UAH)</option>
+          <option value="en-pl">Poland (PLN)</option><option value="en-gb">United Kingdom (GBP)</option><option value="de-de">Germany (EUR)</option>
+          <option value="en-cy">Cyprus (EUR)</option><option value="en-ae">United Arab Emirates (USD)</option><option value="en-in">India (INR)</option>
+        </select></label>
+      <label class="check"><input type="checkbox" name="money_gel"> Show prices in Georgian lari (₾), at the National Bank of Georgia's daily rate</label>
+      <label class="check"><input type="checkbox" name="auto_names"> Rename wishlist games to their official full title when a store lists it (you can undo each one)</label>
+      <p class="fine">Prices are checked every few hours and when you open Deals. The Steam Winter Sale and Summer Sale get a little celebration when they start.</p>
+    </div>
+
     <div class="spane" data-spane="sound" hidden>
       <label class="check"><input type="checkbox" name="sound_on"> Sound</label>
+      <div class="ambpick"><div><b>Ambience track</b><span id="ambState">None chosen.</span></div>
+        <button type="button" class="ghost small" id="ambChoose">Choose file…</button><button type="button" class="ghost small" id="ambClear" hidden>Remove</button></div>
       <label>Ambience <input type="range" name="ambient_volume" min="0" max="1" step="0.05"></label>
       <label>Clicks and chimes <input type="range" name="fx_volume" min="0" max="1" step="0.05"></label>
       <label class="check"><input type="checkbox" name="intro"> Play the startup animation</label>
       <label class="check"><input type="checkbox" name="big_picture"> Start in Big Picture mode (borderless fullscreen; F11 or the controller's Start button toggles it)</label>
-      <p class="fine">Ambience pauses when Masterlog isn't the window you're using.</p>
+      <p class="fine">Pick an audio file on this PC (MP3, OGG, M4A, WAV). If it carries intro and loop marks, the intro plays at startup and the rest loops seamlessly. The file stays on this PC. Ambience pauses when Masterlog isn't the window you're using.</p>
     </div>
 
     <div class="spane" data-spane="about" hidden>
@@ -120,6 +143,15 @@
 
 <dialog id="addDialog" class="settings">
   <form method="dialog" id="addForm"></form>
+</dialog>
+
+<dialog id="coverDialog" class="settings wide coverpick">
+  <form method="dialog" id="coverForm">
+    <h2 id="coverTitle">Change cover</h2>
+    <div class="row"><input id="coverQuery" type="search" placeholder="Search a different name" aria-label="Search covers by name"><button type="button" class="ghost small" id="coverSearch">Search</button></div>
+    <div id="coverGrid" class="covergrid" role="list"></div>
+    <div class="row"><button type="button" class="ghost small" id="coverFile">Use a file from this PC…</button><button type="button" class="ghost small" id="coverAuto">Back to automatic</button><span class="spacer"></span><button class="ghost" value="close">Close</button></div>
+  </form>
 </dialog>
 
 <dialog id="importDialog" class="settings wide">

@@ -38,8 +38,9 @@ const FALLBACK_OPTIONS = {
   books: { status: ["To read", "Reading", "Read", "Dropped", "Wishlist"], priority: ["Extreme", "High", "Medium", "Low"], format: ["Physical", "eBook", "Audiobook"] },
 };
 const TABS = {
-  games: [["home", "Home"], ["library", "Library"], ["wishlist", "Wishlist"], ["played", "Completed"], ["stats", "Your years"]],
+  games: [["home", "Home"], ["library", "Library"], ["wishlist", "Wishlist"], ["deals", "Deals"], ["played", "Completed"], ["stats", "Your years"]],
   books: [["shelf", "Shelf"], ["books", "All books"], ["bookyears", "Read"]],
+  news: [["leaks", "Leaks & rumours"], ["breaking", "Breaking news"], ["yours", "Your games"], ["marvel", "Marvel & DC"]],
 };
 
 const state = {
@@ -89,11 +90,16 @@ function daysAgoLabel(iso) {
   if (days === 1) return "yesterday";
   return ago(d);
 }
-function toast(text, kind = "") {
+function toast(text, kind = "", action = null) {
   if (kind === "err") { try { FX.play.error(); } catch {} }
   const t = $("#toast");
   t.textContent = text; t.className = `toast ${kind}`; t.hidden = false;
-  clearTimeout(toast.t); toast.t = setTimeout(() => { t.hidden = true; }, 3200);
+  if (action) {
+    const b = document.createElement("button"); b.type = "button"; b.className = "toast-act"; b.textContent = action.label;
+    b.addEventListener("click", () => { t.hidden = true; action.run(); }, { once: true });
+    t.append(" ", b);
+  }
+  clearTimeout(toast.t); toast.t = setTimeout(() => { t.hidden = true; }, action ? 12000 : 3200);
 }
 
 /* ---------- covers ---------- */
@@ -111,7 +117,7 @@ function pumpCovers() {
   while (coverActive < 4 && coverQueue.length) {
     const { item, res } = coverQueue.shift();
     coverActive++;
-    const call = !api ? null : item.author !== undefined ? api.book_cover(item.name, item.author) : api.cover(item.name);
+    const call = !api ? null : item.author !== undefined ? api.book_cover(item.name, item.author) : api.cover(item.name, item.platform || "");
     Promise.resolve(call).catch(() => null).then(uri => { coverActive--; res(uri); pumpCovers(); });
   }
 }
@@ -156,7 +162,7 @@ function caseHTML(g, o = {}) {
       <div class="box"><div class="shell"></div>
         <div class="band"><span class="wm">${esc(p.label)}</span>${deck}${up}</div>
         <div class="art" data-kind="game" data-id="${g.id}">${art}</div>
-        <div class="hinge"></div><div class="sheen"></div>${badge}${fresh}${typeTag}${ach}${quick}
+        <div class="hinge"></div><div class="sheen"></div>${badge}${fresh}${typeTag}${ach}${quick}${g.status === "Wishlist" ? priceTag(g) : ""}
       </div>
     </div>
     ${o.noLabel ? "" : `<div class="label"><div class="name">${esc(g.name)}</div><div class="sub">${esc(o.sub ?? subline(g))}</div></div>`}
@@ -236,10 +242,12 @@ function render() {
   renderTabs();
   const v = $("#view");
   hidePeek();
+  if (state.catalog === "news") { v.innerHTML = newsShellHTML(state.view); loadNews(state.view); return; }
   const empty = isBooks() ? !state.books.length && !state.games.length : !state.games.length;
   if (empty) { v.innerHTML = welcomeHTML(); bindWelcome(); return; }
   if (state.view === "home") v.innerHTML = homeHTML();
   else if (state.view === "stats") v.innerHTML = yearsHTML();
+  else if (state.view === "deals") { v.innerHTML = dealsHTML(); activateArt(v); loadDeals(false); return; }
   else if (state.view === "shelf") v.innerHTML = bookShelfHTML();
   else if (state.view === "books") v.innerHTML = bookLibraryHTML();
   else if (state.view === "bookyears") v.innerHTML = bookYearsHTML();
@@ -628,7 +636,7 @@ function openCaseHTML(kind, item) {
   return `<div class="opencase p-${(item.platform || "x").replace(/\W+/g, "")}" style="--band:${p.band};--band-text:${p.text};--shell:${p.shell};--accent:${p.accent};--plat:${p.chip}">
     <div class="leaf back"><div class="tray">${tray}</div></div>
     <div class="leaf front">
-      <div class="face outside"><div class="band"><span class="wm">${esc(p.label)}</span></div><div class="art" data-kind="game" data-id="${item.id}">${art}</div><div class="hinge"></div><div class="sheen"></div></div>
+      <div class="face outside"><div class="band"><span class="wm">${esc(p.label)}</span></div><div class="art" data-kind="game" data-id="${item.id}">${art}<button type="button" class="artedit" data-coverpick title="Change cover" aria-label="Change cover"><svg viewBox="0 0 24 24" width="16" height="16"><path fill="currentColor" d="M4 5h11l2 2h3v12H4zm2 2v10h12V9h-2l-2-2zm2 8 3-4 2 3 1.5-2 2.5 3z"/></svg></button></div><div class="hinge"></div><div class="sheen"></div></div>
       <div class="face inside"><div class="manual"><div class="manual-body" id="manual"><p class="muted">Opening the manual…</p></div></div></div>
     </div></div>`;
 }
@@ -692,8 +700,10 @@ function bookPills(b) {
   if (b.format) out.push(`<span class="pill">${esc(b.format)}</span>`);
   return out.join("");
 }
+let currentPanelTab = "overview";
 function showPanelTab(tab) {
   if (!panelItem) return;
+  currentPanelTab = tab;
   const item = findItem(panelItem.kind, panelItem.id);
   if (!item) return closePanel();
   document.querySelectorAll("[data-ptab]").forEach(b => b.setAttribute("aria-selected", String(b.dataset.ptab === tab)));
@@ -773,7 +783,12 @@ function showGallery(i, play) {
   try { FX.duck(false); } catch {}
   if (it.video && play) {
     try { FX.duck(true); } catch {}
-    if (it.youtube) { main.innerHTML = `<iframe src="https://www.youtube-nocookie.com/embed/${encodeURIComponent(it.youtube)}?autoplay=1&rel=0" allow="autoplay; encrypted-media; fullscreen" allowfullscreen></iframe>`; return; }
+    if (it.youtube) {
+      const id = encodeURIComponent(it.youtube), origin = encodeURIComponent(location.origin);
+      main.innerHTML = `<iframe title="${esc(it.name || "Trailer")}" src="https://www.youtube-nocookie.com/embed/${id}?autoplay=1&rel=0&modestbranding=1&playsinline=1&iv_load_policy=3&origin=${origin}" referrerpolicy="strict-origin-when-cross-origin" allow="autoplay; encrypted-media; fullscreen; picture-in-picture" allowfullscreen></iframe>
+        <button class="g-yt ghost small" data-url="https://www.youtube.com/watch?v=${id}">Open on YouTube</button>`;
+      return;
+    }
     const src = it.webm || it.mp4 || it.hls;
     main.innerHTML = `<video controls autoplay playsinline poster="${esc(it.thumb)}">${it.webm ? `<source src="${esc(it.webm)}" type="video/webm">` : ""}${it.mp4 ? `<source src="${esc(it.mp4)}" type="video/mp4">` : ""}${!it.webm && !it.mp4 && it.hls ? `<source src="${esc(it.hls)}" type="application/x-mpegURL">` : ""}</video>`;
     const v = main.querySelector("video");
@@ -890,7 +905,7 @@ function editHTML(cat, item) {
     <div class="fields">${form.filter(f => f[2] !== "check").map(f => fieldHTML(cat, f, item)).join("")}</div>
     ${cat === "games" ? `<div class="checks">${form.filter(f => f[2] === "check").map(f => fieldHTML(cat, f, item)).join("")}</div>` : ""}
     <p class="fine">Finish and drop dates, runs and "Beaten on" are filled in by the sheet itself. Renaming a game also renames its replays and fetches the cover for the new name.</p>
-    ${cat === "games" ? `<div class="row"><button type="button" class="ghost small" id="customCover">Use my own cover…</button><button type="button" class="ghost small" id="resetCover">Back to the official cover</button></div>` : ""}
+    ${cat === "games" ? `<div class="row"><button type="button" class="ghost small" data-coverpick>Change cover…</button></div>` : ""}
     <div class="row"><span class="spacer"></span><button type="submit" class="primary">Save changes</button></div></form>`;
 }
 function readForm(form, cat, item) {
@@ -1064,8 +1079,16 @@ function openSettings(showHowTo, tab = "sheet") {
   f.fx_volume.value = st.fx_volume ?? 0.5;
   f.intro.checked = st.intro !== false;
   f.big_picture.checked = !!st.big_picture;
+  f.steam_cc.value = st.steam_cc || "GE";
+  f.ps_locale.value = st.ps_locale || "en-us";
+  f.money_gel.checked = st.money === "GEL";
+  f.auto_names.checked = st.auto_names !== false;
+  ambienceState();
   $("#igdbState").textContent = st.has_igdb ? "IGDB is connected. Paste new values to replace them." : "Not connected.";
   $("#igdbState").className = st.has_igdb ? "ok" : "";
+  f.youtube_key.value = "";
+  $("#ytState").textContent = st.has_youtube ? "Using the official YouTube API. Type a single space and Save to remove it." : "Not needed: trailers are found on YouTube without it. A key (Google Cloud → YouTube Data API v3) just makes the search official.";
+  $("#ytState").className = st.has_youtube ? "ok" : "";
   $("#keyState").textContent = st.has_sgdb_key ? "A key is saved. Paste a new one to replace it." : "Covers for every platform, including PS5 and Switch. Without a key, covers come from Steam only.";
   $("#connState").textContent = st.connected ? "Connected. You can edit and add from the app." : st.link_kind === "csv" ? "Read-only: this is a published sheet link. Use the connection script below to edit from the app." : "Paste the Web app link from the connection script.";
   $("#connState").className = st.connected ? "ok" : "";
@@ -1074,12 +1097,27 @@ function openSettings(showHowTo, tab = "sheet") {
   showSettingsTab(tab);
   $("#settings").showModal();
 }
+function ambienceState() {
+  const a = state.settings.ambience;
+  $("#ambState").textContent = a ? `${a.name}${a.intro_end ? ` · intro ${a.intro_end.toFixed(1)} s, then a seamless loop` : " · loops"}` : "None chosen. Without one, Masterlog stays quiet between clicks.";
+  $("#ambClear").hidden = !a;
+}
+async function chooseAmbience(clear) {
+  const r = clear ? await api.clear_ambience() : await api.choose_ambience();
+  if (!r) return;
+  if (r.error) return toast(r.error, "err");
+  state.settings.ambience = r.ambience || null;
+  ambienceState(); applySound();
+  try { FX.startAmbient(false); } catch {}
+  toast(clear ? "Ambience removed." : "Ambience set.", "ok");
+}
 function soundSettings() {
   const f = $("#settingsForm");
-  return { sound_on: f.sound_on.checked, ambient_volume: +f.ambient_volume.value, fx_volume: +f.fx_volume.value, intro: f.intro.checked, big_picture: f.big_picture.checked };
+  return { sound_on: f.sound_on.checked, ambient_volume: +f.ambient_volume.value, fx_volume: +f.fx_volume.value, intro: f.intro.checked, big_picture: f.big_picture.checked,
+    steam_cc: f.steam_cc.value, ps_locale: f.ps_locale.value, money: f.money_gel.checked ? "GEL" : "native", auto_names: f.auto_names.checked };
 }
 function applySound(st = state.settings) {
-  try { FX.configure({ on: st.sound_on !== false, ambient: st.ambient_volume ?? 0.35, fx: st.fx_volume ?? 0.5 }); } catch {}
+  try { FX.configure({ on: st.sound_on !== false, ambient: st.ambient_volume ?? 0.35, fx: st.fx_volume ?? 0.5, track: st.ambience || null }); } catch {}
   const on = st.sound_on !== false;
   $("#soundBtn").innerHTML = on
     ? `<svg viewBox="0 0 24 24" width="20" height="20"><path fill="currentColor" d="M4 9v6h4l5 4V5L8 9H4zm12.5 3a4.5 4.5 0 0 0-2.5-4v8a4.5 4.5 0 0 0 2.5-4zM14 3.2v2.1a7 7 0 0 1 0 13.4v2.1a9 9 0 0 0 0-17.6z"/></svg>`
@@ -1101,6 +1139,13 @@ async function saveSettings() {
     if (r.error) toast(r.error, "err");
     else { toast("IGDB connected. Missing covers will fill in as you browse.", "ok"); covers.forEach((v, k) => { if (!v) covers.delete(k); }); state.settings.has_igdb = true; render(); }
     f.igdb_id.value = ""; f.igdb_secret.value = "";
+  }
+  const yk = f.youtube_key.value;
+  if (yk) {
+    const r = await api.set_youtube_key(yk);
+    if (r.error) toast(r.error, "err");
+    else { state.settings.has_youtube = !r.removed; toast(r.removed ? "YouTube key removed." : "YouTube API connected.", "ok"); }
+    f.youtube_key.value = "";
   }
   scheduleRefresh();
   sync(true);
@@ -1268,6 +1313,13 @@ function bindGlobal() {
   $("#addBtn").addEventListener("click", () => openAdd(isBooks() ? "books" : "games"));
   $("#updateBtn").addEventListener("click", installUpdate);
   $("#checkUpdates").addEventListener("click", () => checkForUpdate(true));
+  $("#ambChoose").addEventListener("click", () => chooseAmbience(false));
+  $("#coverGrid").addEventListener("click", e => { const b = e.target.closest("[data-cand]"); if (b) pickCover(+b.dataset.cand); });
+  $("#coverSearch").addEventListener("click", () => openCoverPicker($("#coverQuery").value.trim()));
+  $("#coverQuery").addEventListener("keydown", e => { if (e.key === "Enter") { e.preventDefault(); openCoverPicker($("#coverQuery").value.trim()); } });
+  $("#coverFile").addEventListener("click", () => customCover(true));
+  $("#coverAuto").addEventListener("click", () => customCover(false));
+  $("#ambClear").addEventListener("click", () => chooseAmbience(true));
   $("#copyScript").addEventListener("click", copyScript);
   document.querySelectorAll("[data-stab]").forEach(b => b.addEventListener("click", () => showSettingsTab(b.dataset.stab)));
   $("#settingsForm").addEventListener("input", e => { if (["sound_on", "ambient_volume", "fx_volume"].includes(e.target.name)) applySound({ ...state.settings, ...soundSettings() }); });
@@ -1320,7 +1372,7 @@ function bindGlobal() {
     const add = e.target.closest("[data-add]"); if (add) return openAdd(add.dataset.add);
     const open = e.target.closest("[data-open]"); if (open) return openPanel(open.dataset.kind || "game", open.dataset.open);
   });
-  document.addEventListener("click", e => { const u = e.target.closest("[data-url]"); if (u && u.dataset.url) api?.open(u.dataset.url); });
+  document.addEventListener("click", e => { const u = e.target.closest("[data-url]"); if (u && u.dataset.url && !(u.matches(".nitem.spoiler"))) api?.open(u.dataset.url); });
   view.addEventListener("change", e => {
     if (e.target.id === "prio") { state.filter.prio = e.target.value; render(); }
     if (e.target.id === "sort") { state.filter.sort = e.target.value; render(); }
@@ -1373,6 +1425,17 @@ function bindGlobal() {
   });
   view.addEventListener("scroll", hidePeek, { passive: true });
 
+  view.addEventListener("click", e => {
+    const ns = e.target.closest("[data-nsrc]"); if (ns) { newsState.source[state.view] = ns.dataset.nsrc; return paintNews(state.view); }
+    if (e.target.closest("#newsRefresh")) return loadNews(state.view, true);
+    if (e.target.closest("#dealsRefresh")) return loadDeals(true);
+    if (e.target.closest("#replaySale")) return maybeSaleEvent(true);
+    const mon = e.target.closest("[data-money]");
+    if (mon) { state.settings.money = mon.dataset.money; api?.set_pref("money", mon.dataset.money); $("#view").innerHTML = dealsHTML(); activateArt($("#view")); return; }
+    const rn = e.target.closest("[data-rename]");
+    if (rn) { rn.disabled = true; return api?.apply_rename(rn.dataset.rename).then(r => { toast(r?.error || "Renamed.", r?.error ? "err" : "ok"); dealState.data && delete dealState.data.renames[rn.dataset.rename]; sync(true); }); }
+    const sp = e.target.closest(".nitem.spoiler"); if (sp) { setTimeout(() => sp.classList.remove("spoiler"), 0); }
+  });
   panel.addEventListener("click", e => {
     if (e.target.closest(".close")) return closePanel();
     const t = e.target.closest("[data-ptab]"); if (t) return showPanelTab(t.dataset.ptab);
@@ -1382,8 +1445,7 @@ function bindGlobal() {
     if (e.target.closest("#logRun")) return runForm();
     const gt = e.target.closest("[data-g]"); if (gt) return showGallery(+gt.dataset.g, galleryItems[+gt.dataset.g]?.video);
     const gp = e.target.closest("[data-gplay]"); if (gp) return showGallery(+gp.dataset.gplay, true);
-    if (e.target.closest("#customCover")) return customCover(true);
-    if (e.target.closest("#resetCover")) return customCover(false);
+    if (e.target.closest("[data-coverpick]")) { e.stopPropagation(); return openCoverPicker(); }
   });
   panel.addEventListener("submit", e => {
     e.preventDefault();
@@ -1419,15 +1481,51 @@ async function quickMark(btn) {
   await saveEdit(kind === "book" ? "books" : "games", item, changes, true);
   toast(kind === "book" ? `Finished ${item.name}. Nice read!` : `${item.name} completed${changes.hours ? ` in ${changes.hours} h` : ""}. GG!`, "ok");
 }
+/* ---------- choosing a cover inside the app ---------- */
+let coverFor = null;
+async function openCoverPicker(query = "") {
+  const g = coverFor && query ? coverFor : findItem(panelItem.kind, panelItem.id);
+  if (!g || !api) return;
+  coverFor = g;
+  $("#coverTitle").textContent = `Cover for ${g.name}`;
+  $("#coverQuery").value = query || "";
+  $("#coverQuery").placeholder = `Search a different name than "${g.name}"`;
+  const grid = $("#coverGrid");
+  grid.innerHTML = `<div class="g-empty"><span class="spinner"></span> Looking in Steam, PlayStation Store, IGDB and SteamGridDB…</div>`;
+  if (!$("#coverDialog").open) $("#coverDialog").showModal();
+  const r = await api.cover_options(g.name, g.platform || "", query).catch(e => ({ items: [], error: String(e) }));
+  if (coverFor !== g) return;
+  const items = r.items || [];
+  grid.innerHTML = items.length
+    ? items.map((c, i) => `<button type="button" class="covercand" role="listitem" data-cand="${i}" title="${esc(c.source)}${c.note ? ` · ${esc(c.note)}` : ""}"><img alt="" loading="lazy" decoding="async" src="${esc(c.thumb)}"><span class="src ${c.source === "SteamGridDB" ? "" : "official"}">${esc(c.source)}</span></button>`).join("")
+    : `<p class="muted">No covers found${r.error ? ` (${esc(r.error)})` : ""}. Try a different name, or add a SteamGridDB key or IGDB in Settings for more choices.</p>`;
+  grid._items = items;
+}
+async function pickCover(i) {
+  const g = coverFor, c = $("#coverGrid")._items?.[i];
+  if (!g || !c) return;
+  const btn = document.querySelector(`[data-cand="${i}"]`); btn?.classList.add("busy");
+  const r = await api.pick_cover(g.name, c.url).catch(e => ({ error: String(e) }));
+  btn?.classList.remove("busy");
+  if (r.error) return toast(r.error, "err");
+  coverChanged(g, r.uri, `New cover from ${c.source}.`);
+}
 async function customCover(set) {
-  const g = findItem(panelItem.kind, panelItem.id);
+  const g = coverFor || findItem(panelItem.kind, panelItem.id);
   if (!g) return;
   const res = await Promise.resolve(set ? api?.set_cover(g.name) : api?.clear_cover(g.name)).catch(e => ({ error: String(e) }));
   if (res && res.error) return toast(res.error, "err");
   if (set && !res) return;
-  covers.set(coverKey(g), res || null);
-  render(); openPanel(panelItem.kind, panelItem.id, "edit");
-  toast(set ? "Cover updated." : "Back to the official cover.", "ok");
+  if (!set) { covers.delete(coverKey(g)); const uri = await api.cover(g.name, g.platform || ""); return coverChanged(g, uri, "Back to the automatic cover."); }
+  coverChanged(g, res, "Cover updated.");
+}
+function coverChanged(g, uri, msg) {
+  covers.set(coverKey(g), uri || null);
+  if (uri && panelItem?.kind === "game" && panelItem.id === g.id) $("#panel").querySelectorAll(".opencase img").forEach(img => { img.src = uri; });
+  if ($("#coverDialog").open) $("#coverDialog").close();
+  try { FX.play.save(); } catch {}
+  render();
+  toast(msg, "ok");
 }
 function runForm() {
   const box = $("#runForm"), g = findItem("game", panelItem.id);
@@ -1457,8 +1555,9 @@ async function toggleBigPicture() {
 }
 function switchCatalog(cat) {
   if (cat === state.catalog) return;
+  if (cat === "news") $("#newsDot").hidden = true;
   state.catalog = cat;
-  state.view = cat === "books" ? "shelf" : "home";
+  state.view = cat === "books" ? "shelf" : cat === "news" ? "leaks" : "home";
   state.focusId = null;
   closePanel(); render(); $("#view").scrollTop = 0;
 }
@@ -1509,6 +1608,231 @@ function pollPad() {
   requestAnimationFrame(step);
 }
 
+/* ---------- Deals, prices and countdowns ---------- */
+const dealState = { data: null, loading: false, t: 0 };
+const PS_CUR = { "en-us": "USD", "en-gb": "GBP", "en-tr": "TRY", "tr-tr": "TRY", "en-ua": "UAH", "uk-ua": "UAH", "en-pl": "PLN", "pl-pl": "PLN",
+  "de-de": "EUR", "en-ie": "EUR", "en-cy": "EUR", "en-gr": "EUR", "en-in": "INR", "en-ca": "CAD", "en-au": "AUD", "ru-ru": "RUB", "en-ae": "USD" };
+function num(str) {
+  const t = String(str || "").replace(/[^\d.,]/g, "");
+  if (!t) return null;
+  const lastC = t.lastIndexOf(","), lastD = t.lastIndexOf(".");
+  const dec = lastC > lastD && t.length - lastC <= 3 ? "," : ".";
+  const v = parseFloat(dec === "," ? t.replace(/\./g, "").replace(",", ".") : t.replace(/,/g, ""));
+  return isNaN(v) ? null : v;
+}
+function money(amount, cur) {
+  if (amount == null) return "";
+  const rates = dealState.data?.rates?.rates || {};
+  if (state.settings.money === "GEL" && rates[cur]) return `₾${(amount * rates[cur]).toFixed(2)}`;
+  if (amount === 0) return "Free";
+  try { return new Intl.NumberFormat("en-US", { style: "currency", currency: cur || "USD", maximumFractionDigits: 2 }).format(amount); }
+  catch { return `${amount.toFixed(2)} ${cur || ""}`; }
+}
+function inGEL(amount, cur) { const r = dealState.data?.rates?.rates || {}; return amount == null ? null : r[cur] ? amount * r[cur] : cur === "USD" ? amount * 2.6 : null; }
+function countdown(ts) {
+  const sec = ts - Date.now() / 1000;
+  if (sec <= 0) return "now";
+  const d = Math.floor(sec / 86400), h = Math.floor(sec % 86400 / 3600), m = Math.floor(sec % 3600 / 60);
+  return d ? `${d}d ${h}h` : h ? `${h}h ${m}m` : `${m}m`;
+}
+/* every place you could buy it, cheapest first */
+function offersFor(name) {
+  const e = dealState.data?.games?.[name];
+  if (!e) return [];
+  const out = [];
+  if (e.steam) out.push({ store: "Steam", price: e.steam.final, was: e.steam.initial, cur: e.steam.currency, off: e.steam.discount, ends: e.steam_ends,
+    url: e.appid ? `https://store.steampowered.com/app/${e.appid}` : "", region: true });
+  for (const d of e.stores?.deals || []) {
+    if (d.store === "Steam" && e.steam) continue;  // your regional Steam price beats CheapShark's U.S. one
+    out.push({ store: d.store, price: d.price, was: d.retail, cur: "USD", off: d.savings, url: d.url });
+  }
+  if (e.ps && e.ps.final) {
+    const cur = PS_CUR[state.settings.ps_locale || "en-us"] || "USD";
+    const f = /free/i.test(e.ps.final) ? 0 : num(e.ps.final), b = num(e.ps.base);
+    if (f != null) out.push({ store: "PlayStation Store", price: f, was: b, cur, off: e.ps.discount ? Math.abs(parseInt(e.ps.discount, 10)) || (b ? Math.round(100 - f / b * 100) : 0) : 0, ends: e.ps.ends, url: e.ps.url });
+  }
+  return out.sort((a, b) => (inGEL(a.price, a.cur) ?? 1e9) - (inGEL(b.price, b.cur) ?? 1e9));
+}
+function priceTag(g) {
+  const o = offersFor(g.name), e = dealState.data?.games?.[g.name];
+  const rel = e?.release;
+  if (rel?.coming && rel.ts && rel.ts > Date.now() / 1000) return `<span class="pricetag soon" title="Releases ${esc(rel.text || "")}">${countdown(rel.ts)}</span>`;
+  if (!o.length) return "";
+  const best = o[0];
+  return best.off > 0 ? `<span class="pricetag sale" title="${esc(best.store)}"><b>-${best.off}%</b>${esc(money(best.price, best.cur))}</span>`
+    : `<span class="pricetag" title="${esc(best.store)}">${esc(money(best.price, best.cur))}</span>`;
+}
+async function loadDeals(force) {
+  if (!api || dealState.loading) return;
+  if (!force && dealState.data && Date.now() - dealState.t < 60 * 1000 && !dealState.data.running) return;
+  dealState.loading = true;
+  try { dealState.data = await api.deals(!!force); dealState.t = Date.now(); } catch {}
+  dealState.loading = false;
+  maybeSaleEvent();
+  if (state.catalog === "games" && (state.view === "deals" || state.view === "wishlist" || state.view === "home")) {
+    if (state.view === "deals") { $("#view").innerHTML = dealsHTML(); activateArt($("#view")); }
+    else render();
+  }
+  if (dealState.data?.running) setTimeout(() => loadDeals(false), 15000);
+}
+function saleBanner() {
+  const s = dealState.data?.sale;
+  if (!s) return "";
+  return s.live
+    ? `<div class="salebanner live"><div><b>${esc(s.name)} is on</b><span>Ends in ${countdown(s.end)} · ${new Date(s.end * 1000).toLocaleDateString(undefined, { month: "long", day: "numeric" })}</span></div><button class="ghost small" id="replaySale">Replay the intro</button></div>`
+    : `<div class="salebanner"><div><b>Next big sale: ${esc(s.name)}</b><span>Starts in ${countdown(s.start)} · ${new Date(s.start * 1000).toLocaleDateString(undefined, { month: "long", day: "numeric" })}, until ${new Date(s.end * 1000).toLocaleDateString(undefined, { month: "long", day: "numeric" })}</span></div></div>`;
+}
+function dealCard(g) {
+  const o = offersFor(g.name), best = o[0], e = dealState.data?.games?.[g.name] || {};
+  const low = e.stores?.low;
+  const alts = o.slice(1, 5).map(x => `<li data-url="${esc(x.url)}"><span>${esc(x.store)}</span><span>${x.off > 0 ? `<i>-${x.off}%</i> ` : ""}${esc(money(x.price, x.cur))}</span></li>`).join("");
+  const ends = best?.ends ? `<span class="ends">Sale ends in ${countdown(best.ends)}</span>` : "";
+  const rel = e.release?.coming ? `<span class="ends">${e.release.ts ? `Out in ${countdown(e.release.ts)}` : esc(e.release.text || "Coming soon")}</span>` : "";
+  return `<article class="dealcard">
+    ${caseHTML(g, { noLabel: true })}
+    <div class="dbody"><h3>${esc(g.name)}</h3><p class="muted">${esc(plat(g.platform).label)}${g.format === "Physical" ? " · physical" : ""}</p>
+      ${best ? `<div class="best" data-url="${esc(best.url)}"><span class="store">${esc(best.store)}${best.region ? " · your region" : ""}</span>
+        <span class="now">${best.off > 0 ? `<b>-${best.off}%</b>` : ""}${esc(money(best.price, best.cur))}</span>${best.off > 0 && best.was ? `<s>${esc(money(best.was, best.cur))}</s>` : ""}</div>` : `<p class="muted">No store price yet.</p>`}
+      ${ends}${rel}${low != null ? `<span class="low">All-time low ${esc(money(low, "USD"))}</span>` : ""}
+      ${alts ? `<ul class="alts">${alts}</ul>` : ""}
+      ${(dealState.data?.links?.[g.name] || []).map(l => `<button class="linkish" data-url="${esc(l.url)}">Search ${esc(l.store)}</button>`).join(" ")}
+    </div></article>`;
+}
+function dealsHTML() {
+  const d = dealState.data;
+  const wish = state.games.filter(g => g.status === "Wishlist");
+  const toggle = `<div class="seg" role="group" aria-label="Currency"><button data-money="native" aria-pressed="${state.settings.money !== "GEL"}">Store prices</button><button data-money="GEL" aria-pressed="${state.settings.money === "GEL"}">₾ GEL</button></div>`;
+  const head = `<header class="deals-head"><div><h1>Deals</h1><p class="muted">Your wishlist across Steam (your region), GOG, Humble, Fanatical, Epic and more, the PlayStation Store, and the deal subreddits. ${d?.rates?.date ? `GEL at the ${esc(d.rates.source)} rate of ${new Date(d.rates.date).toLocaleDateString()}.` : ""}</p></div>
+    <div class="deals-actions">${toggle}<button class="ghost small" id="dealsRefresh">${d?.running ? `<span class="spinner"></span> Checking prices…` : "Check prices now"}</button></div></header>`;
+  if (!d) return `<section class="deals">${head}<div class="news-loading"><span class="spinner"></span> Checking prices for your wishlist…</div></section>`;
+  const onSale = wish.filter(g => offersFor(g.name).some(o => o.off > 0));
+  const soon = wish.filter(g => d.games[g.name]?.release?.coming).sort((a, b) => (d.games[a.name].release.ts || 9e12) - (d.games[b.name].release.ts || 9e12));
+  const waiting = wish.filter(g => !onSale.includes(g) && !soon.includes(g) && offersFor(g.name).length);
+  const renames = Object.entries(d.renames || {}).map(([old, h]) => `<li>${esc(old)} → <b>${esc(h.name)}</b> <small>(${esc(h.source)})</small> <button class="ghost small" data-rename="${esc(old)}">Rename</button></li>`).join("");
+  const subs = (d.subs || []).slice(0, 30).map(p => `<article class="nitem" data-url="${esc(p.url)}" tabindex="0">${p.thumb ? `<div class="nthumb"><img alt="" loading="lazy" referrerpolicy="no-referrer" src="${esc(p.thumb)}" onerror="this.parentNode.classList.add('none')"></div>` : ""}
+      <div class="ntext"><div class="ntags"><span class="ngame">${esc(p.game)}</span>${p.owned ? `<span>You own it</span>` : ""}${p.flair ? `<span class="nflair">${esc(p.flair)}</span>` : ""}</div><h3>${esc(p.title)}</h3>
+      <div class="nmeta"><span class="nsrc">${esc(p.source)}</span><span>${esc(ago(p.date))}</span>${p.domain ? `<span>${esc(p.domain)}</span>` : ""}</div>${p.link ? `<button class="linkish" data-url="${esc(p.link)}">Go to the deal</button>` : ""}</div></article>`).join("");
+  const dlc = (d.dlc || []).map(x => `<li data-url="${esc(x.url)}">${x.art ? `<img alt="" loading="lazy" src="${esc(x.art)}">` : ""}<div><b>${esc(x.name)}</b><small>${esc(x.game)}${x.major ? " · major DLC" : ""}</small></div><span><i>-${x.price.discount}%</i> ${esc(money(x.price.final, x.price.currency))}</span></li>`).join("");
+  const sec = (title, sub, list) => list.length ? `<section class="dsec"><h2>${title}</h2>${sub ? `<p class="muted">${sub}</p>` : ""}<div class="dgrid">${list.map(dealCard).join("")}</div></section>` : "";
+  return `<section class="deals">${head}${saleBanner()}
+    ${renames ? `<section class="dsec"><h2>Official titles found</h2><ul class="renames">${renames}</ul></section>` : ""}
+    ${sec("On sale now", "Cheapest place first. Prices from stores other than Steam and PlayStation are in U.S. dollars.", onSale)}
+    ${sec("Coming out", "Counting down to release.", soon)}
+    ${dlc ? `<section class="dsec"><h2>DLC on sale for games you own</h2><ul class="dlcsale">${dlc}</ul></section>` : ""}
+    ${subs ? `<section class="dsec"><h2>Spotted on the deal subreddits</h2><p class="muted">r/GameDeals, r/PS5Deals, r/PS4Deals, r/NintendoSwitchDeals and r/FreeGameFindings: wishlist games, and DLC or editions for games you own. Amazon and eBay deals usually show up here.</p><div class="news-grid">${subs}</div></section>` : ""}
+    ${sec("Waiting for a sale", d.sale && !d.sale.live ? `Full price for now. The ${esc(d.sale.name)} starts in ${countdown(d.sale.start)}.` : "Full price for now.", waiting)}
+    ${!onSale.length && !soon.length && !waiting.length && !d.running ? `<p class="muted">No prices yet. Wishlist games need a Steam, PlayStation Store or PC store listing to be priced.</p>` : ""}
+  </section>`;
+}
+/* the big seasonal Steam sale: a one-time celebration when it starts */
+function maybeSaleEvent(force) {
+  const s = dealState.data?.sale;
+  if (!s || !s.live) return;
+  let seen = null; try { seen = localStorage.getItem("ml-sale-seen"); } catch {}
+  if (!force && seen === s.id) return;
+  try { localStorage.setItem("ml-sale-seen", s.id); } catch {}
+  const el = document.createElement("div");
+  el.className = "saleevent"; el.setAttribute("role", "dialog"); el.setAttribute("aria-label", s.name);
+  const tags = Array.from({ length: 34 }, (_, i) => `<i style="--x:${Math.random() * 100}%;--d:${(Math.random() * 2.4).toFixed(2)}s;--r:${Math.round(Math.random() * 60 - 30)}deg;--s:${(0.7 + Math.random() * 0.8).toFixed(2)}">-${[10, 20, 25, 33, 40, 50, 60, 67, 75, 80, 90][i % 11]}%</i>`).join("");
+  el.innerHTML = `<div class="rain">${tags}</div><div class="sale-card"><small>It's here</small><h1>${esc(s.name)}</h1>
+    <p>Until ${new Date(s.end * 1000).toLocaleDateString(undefined, { weekday: "long", month: "long", day: "numeric" })} · ends in ${countdown(s.end)}</p>
+    <button class="primary" id="saleGo">See what's on sale</button><button class="ghost" id="saleClose">Later</button></div>`;
+  document.body.append(el);
+  try { FX.play.notify(); setTimeout(() => FX.play.save(), 420); } catch {}
+  requestAnimationFrame(() => el.classList.add("in"));
+  const close = () => { el.classList.add("out"); setTimeout(() => el.remove(), 600); };
+  el.querySelector("#saleClose").addEventListener("click", close);
+  el.querySelector("#saleGo").addEventListener("click", () => { close(); if (state.catalog !== "games") switchCatalog("games"); go("deals"); });
+  el.addEventListener("keydown", e => { if (e.key === "Escape") close(); });
+  el.querySelector("#saleGo").focus();
+}
+async function pollRenames() {
+  if (!api) return;
+  let list = [];
+  try { list = await api.renamed(); } catch {}
+  for (const r of list || []) {
+    toast(`Official title: "${r.old}" is now "${r.new}" (from ${r.source}).`, "ok", { label: "Undo", run: async () => {
+      const res = await api.undo_rename(r.old, r.new, r.row);
+      toast(res?.error ? res.error : `Back to "${r.old}".`, res?.error ? "err" : "ok"); sync(true);
+    } });
+    sync(true);
+  }
+}
+
+/* ---------- News ---------- */
+const NEWS_INFO = {
+  leaks: "Newest posts from r/GamingLeaksAndRumours. Rumours aren't confirmed until a studio says so.",
+  breaking: "IGN, PC Gamer, Kotaku, Eurogamer, Steam, Bloomberg and Jason Schreier, newest first.",
+  yours: "Patches, major updates and news for the games you're playing, own and want.",
+  marvel: "Newest from r/MarvelStudiosSpoilers and r/DCULeaks. Spoiler-tagged posts stay hidden until you click them.",
+};
+const KIND_LABEL = { major: "Major update", update: "Update", minor: "Patch", release: "Release", news: "News" };
+const newsState = { data: {}, source: {}, loading: {}, seen: {} };
+try { Object.assign(newsState.seen, JSON.parse(localStorage.getItem("ml-news-seen") || "{}")); } catch {}
+function newsShellHTML(sec) {
+  return `<section class="news" data-sec="${sec}"><header class="news-head"><div><h1>${esc(TABS.news.find(t => t[0] === sec)?.[1] || "News")}</h1><p class="muted">${esc(NEWS_INFO[sec] || "")}</p></div>
+    <button class="ghost small" id="newsRefresh">Refresh</button></header>
+    <div class="news-filter" id="newsFilter"></div><div id="newsBody"><div class="news-loading"><span class="spinner"></span> Loading the latest…</div></div></section>`;
+}
+async function loadNews(sec, force) {
+  const have = newsState.data[sec];
+  if (have) paintNews(sec);
+  if (!api || newsState.loading[sec] || (!force && have && Date.now() - have.t < 5 * 60 * 1000)) return;
+  newsState.loading[sec] = true;
+  try {
+    const r = await api.news_section(sec);
+    newsState.data[sec] = { ...r, t: Date.now() };
+  } catch (e) { newsState.data[sec] = { items: have?.items || [], errors: [String(e)], t: Date.now() }; }
+  newsState.loading[sec] = false;
+  if (state.catalog === "news" && state.view === sec) paintNews(sec);
+  if (sec === "yours" && newsState.data.yours?.pending) setTimeout(() => { if (state.catalog === "news" && state.view === "yours") loadNews("yours", true); }, 20000);
+}
+function newsItemHTML(it, lead, sec, seenBefore) {
+  const fresh = seenBefore && it.date > seenBefore;
+  const kind = it.kind && it.kind !== "news" ? `<span class="nk k-${esc(it.kind)}">${esc(KIND_LABEL[it.kind] || it.kind)}</span>` : "";
+  const flair = it.flair ? `<span class="nflair">${esc(it.flair)}</span>` : "";
+  const game = it.game ? `<span class="ngame">${esc(it.game)}</span>` : "";
+  const when = it.upcoming && it.start ? `Starts ${fmtDateTime(it.start)}` : ago(it.date);
+  const spoil = it.spoiler ? " spoiler" : "";
+  const meta = `<div class="nmeta"><span class="nsrc">${esc(it.source)}</span><span>${esc(when)}</span>${it.comments != null ? `<span>${it.comments} comments</span>` : ""}${it.domain ? `<span>${esc(it.domain)}</span>` : ""}</div>`;
+  const thumb = it.thumb ? `<div class="nthumb"><img alt="" loading="lazy" decoding="async" referrerpolicy="no-referrer" src="${esc(it.thumb)}" onerror="this.parentNode.classList.add('none')"></div>` : `<div class="nthumb none"><span>${esc((it.source || "").replace(/^r\//, ""))}</span></div>`;
+  return `<article class="nitem${lead ? " lead" : ""}${spoil}${fresh ? " fresh" : ""}" data-url="${esc(it.url || "")}" tabindex="0">
+    ${thumb}<div class="ntext"><div class="ntags">${fresh ? `<span class="nnew">New</span>` : ""}${game}${kind}${flair}${it.spoiler ? `<span class="nflair sp">Spoiler · click to reveal</span>` : ""}</div>
+    <h3>${esc(it.title)}</h3>${it.summary && (lead || sec !== "leaks") ? `<p>${esc(it.summary)}</p>` : ""}${meta}
+    ${it.link ? `<button class="linkish" data-url="${esc(it.link)}">Open the source</button>` : ""}</div></article>`;
+}
+function paintNews(sec) {
+  const d = newsState.data[sec], body = $("#newsBody"), filt = $("#newsFilter");
+  if (!d || !body) return;
+  const srcs = [...new Set(d.items.map(i => sec === "yours" ? i.game : i.source))].filter(Boolean);
+  const pick = newsState.source[sec] || "All";
+  if (filt) filt.innerHTML = srcs.length > 1 ? ["All", ...srcs.slice(0, sec === "yours" ? 18 : 12)].map(x => `<button class="chip ${x === pick ? "on" : ""}" data-nsrc="${esc(x)}">${esc(x)}</button>`).join("") : "";
+  const items = d.items.filter(i => pick === "All" || (sec === "yours" ? i.game : i.source) === pick);
+  const seenBefore = newsState.seen[sec] || 0;
+  const errs = (d.errors || []).length ? `<p class="fine nerr">Couldn't reach ${esc(d.errors.map(e => e.split(":")[0]).join(", "))} just now. Showing the rest.</p>` : "";
+  if (!items.length) {
+    body.innerHTML = errs + `<p class="muted news-empty">${sec === "yours" && d.pending ? "Fetching news for your games. This fills in over the next minute." : "Nothing here yet."}</p>`;
+    return;
+  }
+  const lead = items.find(i => i.thumb) || items[0];
+  const rest = items.filter(i => i !== lead);
+  body.innerHTML = errs + `<div class="news-grid">${newsItemHTML(lead, true, sec, seenBefore)}${rest.slice(0, 90).map(i => newsItemHTML(i, false, sec, seenBefore)).join("")}</div>`;
+  newsState.seen[sec] = Math.max(seenBefore, ...items.map(i => i.date || 0));
+  try { localStorage.setItem("ml-news-seen", JSON.stringify(newsState.seen)); } catch {}
+}
+function fmtDateTime(ts) {
+  return new Date(ts * 1000).toLocaleString(undefined, { month: "short", day: "numeric", hour: "2-digit", minute: "2-digit" });
+}
+async function checkNewsDot() {
+  if (!api || state.catalog === "news") return;
+  try {
+    const r = await api.news_section("leaks");
+    newsState.data.leaks = { ...r, t: Date.now() };
+    const newest = Math.max(0, ...(r.items || []).map(i => i.date || 0));
+    $("#newsDot").hidden = !(newsState.seen.leaks && newest > newsState.seen.leaks);
+  } catch {}
+}
+
 /* ---------- start ---------- */
 async function start() {
   api = window.pywebview?.api || null;
@@ -1519,6 +1843,7 @@ async function start() {
   document.body.classList.toggle("bigpic", !!state.settings.big_picture);
   if (state.settings.intro !== false && !window.SKIP_INTRO) await new Promise(r => playIntro(r));
   else $("#intro")?.remove();
+  try { FX.startAmbient(false); } catch {}
   towers();
   state.mode = state.settings.view_mode === "list" ? "list" : "covers";
   const cached = await api.cached();
@@ -1528,6 +1853,10 @@ async function start() {
   setTimeout(() => checkForUpdate(false), 4000);
   setInterval(() => checkForUpdate(false), 6 * 3600 * 1000);
   setInterval(refreshUpdated, 5 * 60 * 1000);
+  setTimeout(checkNewsDot, 15000); setInterval(checkNewsDot, 15 * 60 * 1000);
+  setTimeout(() => loadDeals(false), 6000); setInterval(() => loadDeals(false), 30 * 60 * 1000);
+  setInterval(pollRenames, 60 * 1000);
+  setInterval(() => { if (state.catalog === "news") loadNews(state.view, true); }, 15 * 60 * 1000);
   pollAccounts(false);
 }
 if (window.pywebview?.api) start();
