@@ -280,7 +280,7 @@ function rankingHTML() {
   const row = (n, i) => {
     const g = rankedGame(n), fav = i < 10;
     const art = g ? `<div class="art" data-kind="game" data-id="${g.id}"></div>` : `<div class="art virtual" data-vname="${esc(n)}"></div>`;
-    return `<li class="rk ${fav ? "fav" : ""}" draggable="true" data-ri="${i}">
+    return `<li class="rk ${fav ? "fav" : ""}" data-ri="${i}">
       <span class="rk-n">${fav ? "★" : ""}${i + 1}</span>${art}
       <div class="rk-t"><b>${esc(n)}</b><small>${g ? `${esc(plat(g.platform).label)} · ${esc(statusOf(g))}${g.score != null ? ` · ${scoreText(g.score)}` : ""}` : "Not in your library"}</small></div>
       <div class="rk-act"><button class="icon" data-rkmove="${i}:-1" title="Move up" aria-label="Move up">▲</button><button class="icon" data-rkmove="${i}:1" title="Move down" aria-label="Move down">▼</button>
@@ -290,7 +290,7 @@ function rankingHTML() {
     const g = rankedGame(n), fav = i < 10;
     const inner = g ? caseHTML(g, { sub: `${plat(g.platform).label} · ${statusOf(g)}` })
       : `<div class="vcase"><div class="art virtual" data-vname="${esc(n)}"><span>${esc(n)}</span></div><div class="label"><div class="name">${esc(n)}</div><div class="sub">Not in your library</div></div></div>`;
-    return `<div class="rkcell ${fav ? "fav" : ""}" draggable="true" data-ri="${i}"><span class="rkbadge">${fav ? "★ " : ""}${i + 1}</span>${inner}</div>`;
+    return `<div class="rkcell ${fav ? "fav" : ""}" data-ri="${i}"><span class="rkbadge">${fav ? "★ " : ""}${i + 1}</span>${inner}</div>`;
   };
   const body = state.mode === "list" ? `<ol class="rklist" id="rkList">${list.map(row).join("")}</ol>`
     : `<div class="grid rkgrid">${list.map(cell).join("")}</div>`;
@@ -645,6 +645,7 @@ function libraryHTML() {
         ${scaleSlider()}
         <select class="pick" id="sort">${[["priority", "Sort by priority"], ["name", "Sort by name"], ["score", "Sort by score"], ["recent", "Recently finished"], ["hours", "Most hours"], ["platform", "Sort by platform"]].map(([v, l]) => `<option value="${v}" ${f.sort === v ? "selected" : ""}>${l}</option>`).join("")}</select>
         ${modeSwitch()}
+        <button class="ghost small walkbtn" data-walk title="Walk through your library (Ctrl+L)">Walk the shelves</button>
         <span class="total">${list.length} ${list.length === 1 ? "game" : "games"}</span>
         ${active ? `<button class="ghost small" id="clearFilters">Clear filters (${active})</button>` : ""}
         ${state.canEdit ? `<button class="ghost small" data-add="games">+ Add game</button>${state.view === "wishlist" ? `<button class="ghost small" data-itch>Browse itch.io</button>` : `<button class="ghost small" data-modpacks>+ Modpack</button>`}` : ""}
@@ -1183,6 +1184,47 @@ function refreshPanelHead() {
   if (head) head.innerHTML = `<h2>${esc(item.name)}</h2><div class="pills">${panelItem.kind === "game" ? pillsHTML(item) : bookPills(item)}</div>`;
   if ($("#pbody")?.dataset.tab === "overview") showPanelTab("overview");
 }
+/* ----- walk the shelves (walk.js draws it) ----- */
+function walkSections() {
+  const G = collapse(withCopies(state.games)), favs = [], used = new Set();
+  (state.ranking || []).slice(0, 10).forEach(n => { const g = G.find(x => rankKey(x.name) === rankKey(n)); if (g && !used.has(g)) { used.add(g); favs.push(g); } });
+  const byName = (a, b) => a.name.localeCompare(b.name);
+  const item = g => ({ g, p: plat(g.platform), fav: used.has(g) });
+  const shelves = [{ title: "Your top 10", accent: "#FFC93C", items: favs.map(item) }];
+  const rest = G.filter(g => !used.has(g));
+  const own = rest.filter(g => g.status !== "Wishlist");
+  const order = [["PS5", "PS5"], ["Switch 2", "Switch 2"], ["Switch", "Switch"], ["Steam", "Steam"], ["PS4", "PS4"], ["PS2", "PS2"]];
+  const taken = new Set();
+  for (const [key, title] of order) {
+    const items = own.filter(g => (ALIAS[g.platform] || g.platform) === key).sort(byName);
+    items.forEach(g => taken.add(g));
+    if (items.length) shelves.push({ title, accent: firstHex(plat(key).accent), items: items.map(item) });
+  }
+  for (const grp of ["Heroic", "Exiled"]) {
+    const items = own.filter(g => !taken.has(g) && GROUPS[g.platform] === grp).sort(byName);
+    items.forEach(g => taken.add(g));
+    if (items.length) shelves.push({ title: grp, accent: GROUP_STYLE[grp].chip, items: items.map(item) });
+  }
+  const other = own.filter(g => !taken.has(g)).sort(byName);
+  if (other.length) shelves.push({ title: "Everything else", accent: "#ADB5BD", items: other.map(item) });
+  const wish = rest.filter(g => g.status === "Wishlist").sort((a, b) => (PRIO_ORDER[a.priority] ?? 9) - (PRIO_ORDER[b.priority] ?? 9) || byName(a, b));
+  if (wish.length) shelves.push({ title: "Wishlist", accent: "#7FA6FF", items: wish.map(item) });
+  return shelves.filter(s => s.items.length);
+}
+const firstHex = c => (String(c).match(/#[0-9a-f]{3,8}/i) || ["#4A8CFF"])[0];
+function openWalk() {
+  if (isBooks()) switchCatalog("games");
+  if (!state.games.length) return toast("Your library is empty, so there's nothing on the shelves yet.");
+  closePanel();
+  const ok = Walk.open({
+    sections: walkSections,
+    cover: g => loadCover(g),
+    open: g => openPanel("game", g.id),
+    error: msg => toast(msg, "err"),
+    closed: () => $("#walkBtn")?.focus(),
+  });
+  if (ok) { try { FX.play.open(); } catch {} }
+}
 function closePanel() {
   const panel = $("#panel");
   if (!panel.classList.contains("open")) return;
@@ -1193,6 +1235,7 @@ function closePanel() {
   setTimeout(() => { panel.classList.remove("open"); panel.setAttribute("aria-hidden", "true"); }, 260);
   $("#scrim").hidden = true;
   panelItem = null;
+  if (Walk.active) setTimeout(() => Walk.resume(), 120);
 }
 
 /* ----- add dialog ----- */
@@ -1672,6 +1715,7 @@ function bindGlobal() {
     const t = e.target.closest(".itile"); if (t) return importPick(form, +t.dataset.i);
   });
   $("#bigBtn").addEventListener("click", toggleBigPicture);
+  $("#walkBtn").addEventListener("click", openWalk);
   $("#soundBtn").addEventListener("click", () => {
     const on = state.settings.sound_on === false;
     state.settings.sound_on = on; api?.set_pref("sound_on", on); applySound();
@@ -1718,6 +1762,7 @@ function bindGlobal() {
     const open = e.target.closest("[data-open]"); if (open) return openPanel(open.dataset.kind || "game", open.dataset.open);
     if (e.target.closest("[data-catalog-go]")) { switchCatalog("news"); return go("yours"); }
     if (e.target.closest("[data-modpacks]")) return openModpacks();
+    if (e.target.closest("[data-walk]")) return openWalk();
     if (e.target.closest("[data-itch]")) { api?.browse_itch(); return toast("itch.io opened. On any game's page, press \"+ Add to Masterlog wishlist\".", "ok"); }
     const mv = e.target.closest("[data-rkmove]");
     if (mv) { const [i, d] = mv.dataset.rkmove.split(":").map(Number), j = i + d, L = state.ranking; if (j < 0 || j >= L.length) return; [L[i], L[j]] = [L[j], L[i]]; try { FX.play.move(); } catch {} return saveRanking(); }
@@ -1725,42 +1770,66 @@ function bindGlobal() {
     if (rd) { const n = state.ranking.splice(+rd.dataset.rkdel, 1)[0]; return saveRanking(`${n} removed from your Top 100.`); }
   });
   document.addEventListener("click", e => { const u = e.target.closest("[data-url]"); if (u && u.dataset.url && !(u.matches(".nitem.spoiler"))) api?.open(u.dataset.url); });
-  // dragging rows in the Top 100
-  let dragFrom = null;
-  view.addEventListener("dragstart", e => { const li = e.target.closest?.(".rk, .rkcell"); if (!li) return; dragFrom = +li.dataset.ri; li.classList.add("dragging"); e.dataTransfer.effectAllowed = "move"; });
-  view.addEventListener("dragover", e => { const li = e.target.closest?.(".rk, .rkcell"); if (dragFrom == null || !li) return; e.preventDefault(); view.querySelectorAll(".over").forEach(x => x.classList.remove("over")); li.classList.add("over"); });
-  view.addEventListener("dragend", () => { dragFrom = null; view.querySelectorAll(".dragging, .over").forEach(x => x.classList.remove("dragging", "over")); });
-  view.addEventListener("drop", e => {
-    const li = e.target.closest?.(".rk, .rkcell"); if (dragFrom == null || !li) return;
+  // dragging in the Top 100 (grid or list): the others slide out of the way as you go
+  let drag = null, swallowClick = false;
+  const flip = (container, mutate) => {
+    const items = [...container.children], first = new Map(items.map(n => [n, n.getBoundingClientRect()]));
+    mutate();
+    for (const n of items) {
+      if (n === drag?.el) continue;
+      const a = first.get(n), b = n.getBoundingClientRect(), dx = a.left - b.left, dy = a.top - b.top;
+      if (dx || dy) n.animate([{ transform: `translate(${dx}px, ${dy}px)` }, { transform: "none" }], { duration: 260, easing: "cubic-bezier(.2, .8, .2, 1)" });
+    }
+  };
+  view.addEventListener("dragstart", e => { if (e.target.closest?.(".rkcell, .rk")) e.preventDefault(); });   // no browser image dragging here
+  view.addEventListener("pointerdown", e => {
+    const el = e.target.closest?.(".rkcell, .rk");
+    if (!el || e.button !== 0 || e.target.closest("input, a, .rk-act, .qc, [data-coverpick]") || (e.target.closest("button") && !e.target.closest(".case"))) return;
+    drag = { el, x: e.clientX, y: e.clientY, started: false, id: e.pointerId };
+  });
+  addEventListener("pointermove", e => {
+    if (!drag || e.pointerId !== drag.id) return;
+    if (!drag.started) {
+      if (Math.hypot(e.clientX - drag.x, e.clientY - drag.y) < 7) return;
+      const r = drag.el.getBoundingClientRect();
+      drag.started = true; drag.dx = drag.x - r.left; drag.dy = drag.y - r.top;
+      const ghost = drag.el.cloneNode(true);
+      ghost.classList.add("rk-ghost"); ghost.removeAttribute("data-ri");
+      Object.assign(ghost.style, { width: `${r.width}px`, height: `${r.height}px`, left: `${r.left}px`, top: `${r.top}px` });
+      document.body.append(ghost); drag.ghost = ghost;
+      drag.el.classList.add("rk-placeholder");
+      hidePeek(); try { FX.play.click(); } catch {}
+    }
     e.preventDefault();
-    const to = +li.dataset.ri, item = state.ranking.splice(dragFrom, 1)[0];
-    state.ranking.splice(to, 0, item); dragFrom = null;
-    try { FX.play.save(); } catch {}
-    saveRanking(to < 10 ? `${item} is now #${to + 1}: an all-time favourite.` : `${item} is now #${to + 1}.`);
+    drag.ghost.style.transform = `translate(${e.clientX - drag.dx - parseFloat(drag.ghost.style.left)}px, ${e.clientY - drag.dy - parseFloat(drag.ghost.style.top)}px) rotate(${drag.el.classList.contains("rkcell") ? 3 : 0}deg) scale(1.04)`;
+    // scroll when you hold it near the top or bottom
+    const vr = view.getBoundingClientRect();
+    drag.scroll = e.clientY < vr.top + 70 ? -14 : e.clientY > vr.bottom - 70 ? 14 : 0;
+    if (drag.scroll && !drag.scrolling) { drag.scrolling = true; const tickScroll = () => { if (!drag?.scroll) { if (drag) drag.scrolling = false; return; } view.scrollTop += drag.scroll; requestAnimationFrame(tickScroll); }; requestAnimationFrame(tickScroll); }
+    const over = document.elementFromPoint(e.clientX, e.clientY)?.closest?.(".rkcell, .rk");
+    if (!over || over === drag.el || over.parentElement !== drag.el.parentElement) return;
+    const sib = [...over.parentElement.children], from = sib.indexOf(drag.el), to = sib.indexOf(over);
+    flip(over.parentElement, () => over.parentElement.insertBefore(drag.el, from < to ? over.nextSibling : over));
+    try { FX.play.move(); } catch {}
+  }, { passive: false });
+  addEventListener("pointerup", e => {
+    if (!drag || e.pointerId !== drag.id) return;
+    const d = drag; drag = null;
+    if (!d.started) return;
+    swallowClick = true; setTimeout(() => { swallowClick = false; }, 50);
+    const r = d.el.getBoundingClientRect(), g = d.ghost;
+    g.style.transition = "transform .22s cubic-bezier(.2, .8, .2, 1)";
+    g.style.transform = `translate(${r.left - parseFloat(g.style.left)}px, ${r.top - parseFloat(g.style.top)}px)`;
+    const order = [...d.el.parentElement.children].map(n => +n.dataset.ri).filter(n => !isNaN(n));
+    setTimeout(() => {
+      g.remove(); d.el.classList.remove("rk-placeholder");
+      const before = state.ranking.slice(), moved = before[+d.el.dataset.ri];
+      state.ranking = order.map(i => before[i]);
+      const at = state.ranking.indexOf(moved);
+      if (at !== +d.el.dataset.ri) { try { FX.play.save(); } catch {} saveRanking(at < 10 ? `${moved} is now #${at + 1}: an all-time favourite.` : `${moved} is now #${at + 1}.`); }
+    }, 230);
   });
-  // right-click a game's cover for quick changes
-  document.addEventListener("contextmenu", e => {
-    const c = e.target.closest?.(".case[data-kind='game'], tr[data-kind='game'], .rkcell .case");
-    if (!c || e.target.closest("#panel")) { closeCtx(); return; }
-    const g = findItem("game", c.dataset.id);
-    if (!g) return;
-    e.preventDefault(); hidePeek();
-    ctxMenu(g, e.clientX, e.clientY);
-  });
-  document.addEventListener("click", e => {
-    const m = document.getElementById("ctx");
-    if (!m) return;
-    if (!m.contains(e.target)) return closeCtx();
-    const li = e.target.closest("li[data-act], li[data-set], button[data-act]");
-    if (li) { e.preventDefault(); e.stopPropagation(); ctxAction(li.tagName === "BUTTON" ? li : li); }
-  }, true);
-  document.addEventListener("keydown", e => {
-    const m = document.getElementById("ctx");
-    if (!m) return;
-    if (e.key === "Escape") { e.stopPropagation(); closeCtx(); }
-    if (e.key === "Enter" && e.target.closest?.(".ctx-rank")) { e.preventDefault(); ctxAction(m.querySelector('[data-act="rank"]')); }
-  }, true);
-  view.addEventListener("scroll", closeCtx, { passive: true });
+  addEventListener("click", e => { if (swallowClick) { e.stopPropagation(); e.preventDefault(); swallowClick = false; } }, true);
   view.addEventListener("change", e => {
     if (e.target.id === "rankAdd" && e.target.value.trim()) { const n = e.target.value.trim(); if (!state.ranking.some(x => rankKey(x) === rankKey(n))) { state.ranking.push(n); saveRanking(`${n} added at #${state.ranking.length}. Drag it where it belongs.`); } return; }
     if (e.target.id === "scale") applyScale(+e.target.value, true);
@@ -1857,7 +1926,9 @@ function bindGlobal() {
 
   document.addEventListener("keydown", e => {
     if (e.key === "F11") { e.preventDefault(); toggleBigPicture(); return; }
+    if (e.key === "l" && e.ctrlKey) { e.preventDefault(); Walk.active ? Walk.close() : openWalk(); return; }
     if (e.key === "Escape") { if ($("#panel").classList.contains("open")) closePanel(); return; }
+    if (Walk.active && !$("#panel").classList.contains("open")) return;
     if (["INPUT", "SELECT", "TEXTAREA"].includes(document.activeElement?.tagName) || document.querySelector("dialog[open]")) return;
     const dir = { ArrowLeft: "l", ArrowRight: "r", ArrowUp: "u", ArrowDown: "d" }[e.key];
     if (dir) { e.preventDefault(); move(dir); }
@@ -2183,7 +2254,8 @@ function pollPad() {
   const step = () => {
     const pad = navigator.getGamepads?.()[0];
     if (pad) {
-      const press = (i, fn) => { const on = pad.buttons[i]?.pressed; if (on && !held[i]) fn(); held[i] = on; };
+      const walking = Walk.active && !$("#panel").classList.contains("open");
+      const press = (i, fn) => { const on = pad.buttons[i]?.pressed; if (on && !held[i] && !walking) fn(); held[i] = on; };
       press(12, () => move("u")); press(13, () => move("d")); press(14, () => move("l")); press(15, () => move("r"));
       press(0, () => document.activeElement?.click());
       press(1, () => closePanel());
@@ -2192,7 +2264,7 @@ function pollPad() {
       press(9, toggleBigPicture);
       const [x, y] = pad.axes;
       const stick = Math.abs(x) > 0.6 ? (x > 0 ? "r" : "l") : Math.abs(y) > 0.6 ? (y > 0 ? "d" : "u") : null;
-      if (stick && !held.stick) move(stick);
+      if (stick && !held.stick && !walking) move(stick);
       held.stick = stick;
     }
     requestAnimationFrame(step);

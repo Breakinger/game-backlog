@@ -25,6 +25,9 @@
     <button class="icon" id="bigBtn" title="Big Picture mode (F11)" aria-label="Big Picture mode">
       <svg viewBox="0 0 24 24" width="20" height="20"><path fill="currentColor" d="M4 4h6v2H6v4H4V4zm10 0h6v6h-2V6h-4V4zM4 14h2v4h4v2H4v-6zm14 4v-4h2v6h-6v-2h4z"/></svg>
     </button>
+    <button class="icon" id="walkBtn" title="Walk the shelves (Ctrl+L)" aria-label="Walk the shelves">
+      <svg viewBox="0 0 24 24" width="20" height="20"><path fill="currentColor" d="M3 3h2v18H3zm16 0h2v18h-2zM7 5h2v4H7zm3-1h2v5h-2zm3 2h2v3h-2zM7 11h3v4H7zm4 0h2v4h-2zm3-1h2v5h-2zM7 17h2v3H7zm3 0h3v3h-3zm4 0h2v3h-2zM5 9.5h14v1H5zm0 6h14v1H5z"/></svg>
+    </button>
     <button class="icon" id="soundBtn" title="Sound" aria-label="Sound"></button>
     <button class="icon" id="claudeBtn" title="Ask Claude about your library" aria-label="Ask Claude">
       <svg viewBox="0 0 24 24" width="20" height="20"><path fill="currentColor" d="M12 2l1.8 6.2L20 10l-6.2 1.8L12 18l-1.8-6.2L4 10l6.2-1.8zM19 15l.9 2.1L22 18l-2.1.9L19 21l-.9-2.1L16 18l2.1-.9z"/></svg>
@@ -45,6 +48,12 @@
 
 <section id="panel" class="caseview" aria-hidden="true" tabindex="-1"></section>
 <div id="scrim" class="scrim" hidden></div>
+<section id="walk" class="walk" hidden aria-label="Walk the shelves">
+  <canvas></canvas>
+  <div class="walk-reticle" aria-hidden="true"></div>
+  <ul class="walk-help"><li><kbd>W A S D</kbd> walk</li><li><kbd>Shift</kbd> run</li><li><kbd>Click</kbd> on a game to take it, on empty space to look with the mouse</li><li><kbd>Right-drag</kbd> look around</li><li><kbd>Esc</kbd> leave</li></ul>
+  <button class="ghost walk-exit">Leave the shelves</button>
+</section>
 <div id="peek" class="peek" aria-hidden="true"><img alt=""></div>
 <div id="toast" class="toast" role="status" hidden></div>
 
@@ -192,6 +201,7 @@
 </dialog>
 
 <script src="fx.js"></script>
+<script src="walk.js"></script>
 <script src="app.js"></script>
 </body>
 </html>

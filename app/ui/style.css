@@ -1083,3 +1083,25 @@ body.away *, body.away *::before, body.away *::after { animation-play-state: pau
 .art.odd img { position: relative; z-index: 1; object-fit: contain !important; }
 .vcase .art.virtual { aspect-ratio: 2 / 3; }
 .rk .art { aspect-ratio: 2 / 3; }
+
+/* dragging in the Top 100 */
+.rkcell, .rk { touch-action: none; user-select: none; }
+.rk-placeholder { opacity: .22; filter: grayscale(1); }
+.rk-placeholder .rkbadge { opacity: 0; }
+.rk-ghost { position: fixed; z-index: 400; pointer-events: none; margin: 0; list-style: none; filter: drop-shadow(0 22px 30px rgba(0,0,0,.6)); transition: none; will-change: transform; }
+.rk-ghost.rk { background: #13213F; border-color: var(--focus); }
+.rkcell img, .rk img { -webkit-user-drag: none; pointer-events: none; }
+
+/* ---------- walk the shelves ---------- */
+.walk { position: fixed; inset: 0; z-index: 7; background: #050C24; opacity: 0; transition: opacity .35s ease; }
+.walk.in { opacity: 1; }
+.walk canvas { position: absolute; inset: 0; width: 100%; height: 100%; display: block; cursor: crosshair; transition: filter .3s ease; }
+.walk.dim canvas { filter: brightness(.45) blur(2px); }
+.walk-reticle { position: absolute; left: 50%; top: 50%; width: 6px; height: 6px; margin: -3px 0 0 -3px; border-radius: 50%; background: rgba(234, 240, 255, .85); box-shadow: 0 0 0 2px rgba(5, 12, 36, .6); display: none; pointer-events: none; }
+.walk.locked .walk-reticle { display: block; }
+.walk.locked canvas { cursor: none; }
+.walk-help { position: absolute; left: 24px; bottom: 22px; margin: 0; padding: 10px 14px; list-style: none; display: flex; flex-wrap: wrap; gap: 6px 18px; max-width: min(760px, calc(100% - 260px)); font-size: 13px; color: #C9D4F2; background: rgba(5, 12, 36, .7); border: 1px solid rgba(127, 166, 255, .25); border-radius: 8px; pointer-events: none; transition: opacity .4s; }
+.walk-help kbd { font: 600 12px Bahnschrift, "Segoe UI", sans-serif; padding: 1px 6px; margin-right: 4px; border-radius: 4px; background: #1E3478; color: #EAF0FF; }
+.walk.dim .walk-help, .walk.dim .walk-exit { opacity: 0; }
+.walk-exit { position: absolute; right: 24px; bottom: 22px; }
+@media (prefers-reduced-motion: reduce) { .walk, .walk canvas { transition: none; } }
