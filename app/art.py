@@ -106,6 +106,7 @@ class Art:
         self.sgdb_key = ""
         self.igdb = None      # set by the app when IGDB is configured
         self.meta_lookup = lambda name: None  # the app supplies developer/publisher from your sheet
+        self.mc_cover = lambda name: None     # the app supplies Metacritic box art as a last resort
         self.url_base = None  # set by the app: covers are served as local files instead of inline data
 
     @staticmethod
@@ -273,6 +274,7 @@ class Art:
         order.append(("sgdb", lambda: [x["url"] for x in self.sgdb_grids(name, appid)]))
         if appid and platform not in PC_PLATFORMS:
             order.append(("steam", lambda: self.steam_cover_urls(appid)))
+        order.append(("metacritic", lambda: [self.mc_cover(name)]))
         for src, urls in order:
             try:
                 img = self._first_image([u for u in urls() if u])
@@ -317,6 +319,10 @@ class Art:
                 pass
         try:
             add(self.igdb_cover_url(q), "IGDB", "box art")
+        except Exception:
+            pass
+        try:
+            add(self.mc_cover(q), "Metacritic", "box art")
         except Exception:
             pass
         try:

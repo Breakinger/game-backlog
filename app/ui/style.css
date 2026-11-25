@@ -931,3 +931,32 @@ body.away *, body.away *::before, body.away *::after { animation-play-state: pau
 .dlcsale.bundles li { grid-template-columns: 1fr auto; }
 .alts small { color: var(--muted); }
 .coverpick .row input[type=search] { min-width: 0; }
+
+/* top bar: the catalogs on the left, the tabs centred in their own space, with room between */
+.bar { column-gap: 40px; }
+.tabs { justify-content: safe center; }
+.brandbox { padding-right: 8px; }
+
+/* nothing sits on top of the cover's text any more: status and price live under the cover, the effects hang off its corners */
+.case .label .badge { position: static; display: inline-block; margin-right: 6px; padding: 0 6px; font-size: 10.5px; line-height: 17px; vertical-align: 1px; background: rgba(255,255,255,.07); }
+.case .label .pricetag { position: static; display: inline-flex; margin-top: 5px; box-shadow: none; background: rgba(255,255,255,.06); }
+.case .label .pricetag.soon { background: rgba(74, 140, 255, .85); }
+.case .typetag { top: auto; bottom: 6px; right: auto; left: 9%; }
+.case .honor { top: -9%; right: -12%; bottom: auto; width: 40%; }
+.cobweb { top: auto; right: -9%; bottom: -7%; width: 46%; transform: rotate(180deg); opacity: .65; }
+.extralife { left: -9%; top: -6%; }
+.case .copies { left: -8px; bottom: 34%; }
+.grid .case.fx-paused, .shelf-row .case.fx-paused, .grid .case.fx-chance, .shelf-row .case.fx-chance, .grid .case.stacked, .shelf-row .case.stacked { content-visibility: visible; }
+.shelf-row { padding-top: 22px; }
+.toolbar { background: linear-gradient(180deg, rgba(10, 20, 48, .97) calc(100% - 16px), rgba(10, 20, 48, 0)); padding-bottom: 22px; }
+.bar { column-gap: 28px; }
+@media (max-width: 1600px) { .tab { font-size: 16px; padding-left: 8px; padding-right: 8px; } .catalog { font-size: 19px; } .update-btn { padding: 6px 11px; font-size: 12px; } }
+/* when the window isn't very wide, the tabs get their own centred row under the top bar, so nothing collides */
+@media (max-width: 1799px) {
+  .bar { height: auto; grid-template-columns: auto 1fr auto; grid-template-rows: 62px 42px; grid-template-areas: "brand . status" "tabs tabs tabs"; row-gap: 0; padding-top: 4px; }
+  .brandbox { grid-area: brand; }
+  .status { grid-area: status; }
+  .tabs { grid-area: tabs; justify-content: center; align-self: stretch; border-top: 1px solid var(--line); }
+  .tab { padding-top: 8px; padding-bottom: 8px; font-size: 16px; }
+  main { height: calc(100% - 108px); }
+}

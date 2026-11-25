@@ -105,6 +105,18 @@ def mc_best(name):
     return best if similar(name, best.get("title", "")) >= 0.6 else None
 
 
+def mc_cover(name):
+    """Metacritic's box art for a game: the last resort when no store has the cover (old PS2 games, for example)."""
+    from art import same_title
+    items = [i for i in mc_search(name, 8) if same_title(name, i.get("title", ""), 0.85)]
+    for i in items:
+        imgs = [im for im in i.get("images") or [] if im.get("bucketPath")]
+        pick = next((im for im in imgs if re.search(r"box|product|cover", im.get("typeName", ""), re.I)), imgs[0] if imgs else None)
+        if pick:
+            return "https://www.metacritic.com/a/img/catalog" + pick["bucketPath"]
+    return None
+
+
 def mc_details(slug):
     item = (_mc(f"/games/metacritic/{slug}/web?componentName=product&componentType=Product").get("data") or {}).get("item") or {}
     try:

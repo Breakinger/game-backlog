@@ -107,38 +107,86 @@ def parse_feed(raw, source):
     return out
 
 
+REDDIT_APP = {"id": None}   # optional: your own free Reddit app ID (Settings), the reliable way past Reddit's blocks
+_reddit_token = {"token": None, "until": 0}
+
+
+def _reddit_oauth():
+    if not REDDIT_APP.get("id"):
+        return None
+    if _reddit_token["token"] and time.time() < _reddit_token["until"]:
+        return _reddit_token["token"]
+    import base64
+    auth = base64.b64encode(f"{REDDIT_APP['id']}:".encode()).decode()
+    req = urllib.request.Request("https://www.reddit.com/api/v1/access_token", method="POST",
+                                 data=urllib.parse.urlencode({"grant_type": "https://oauth.reddit.com/grants/installed_client",
+                                                              "device_id": "DO_NOT_TRACK_THIS_DEVICE"}).encode(),
+                                 headers={"Authorization": f"Basic {auth}", "User-Agent": REDDIT_UA, "Content-Type": "application/x-www-form-urlencoded"})
+    with urllib.request.urlopen(req, timeout=15) as r:
+        out = json.load(r)
+    _reddit_token.update(token=out["access_token"], until=time.time() + int(out.get("expires_in", 3600)) - 120)
+    return _reddit_token["token"]
+
+
+def _reddit_posts(data, label):
+    out = []
+    for c in (data.get("data") or {}).get("children") or []:
+        p = c.get("data") or {}
+        if p.get("over_18") or p.get("stickied"):
+            continue
+        thumb = None
+        imgs = ((p.get("preview") or {}).get("images") or [])
+        if imgs:
+            res = imgs[0].get("resolutions") or []
+            pick = next((r for r in res if r.get("width", 0) >= 320), None) or (res[-1] if res else imgs[0].get("source"))
+            thumb = pick and html.unescape(pick.get("url") or "")
+        elif str(p.get("thumbnail", "")).startswith("http"):
+            thumb = p["thumbnail"]
+        link = p.get("url_overridden_by_dest") or ""
+        domain = p.get("domain") or ""
+        out.append({"title": html.unescape(p.get("title", "")), "url": "https://www.reddit.com" + p.get("permalink", ""),
+                    "date": int(p.get("created_utc") or 0), "source": label, "summary": _clean(p.get("selftext", ""), 260),
+                    "thumb": thumb, "flair": p.get("link_flair_text") or "", "spoiler": bool(p.get("spoiler")),
+                    "score": p.get("score"), "comments": p.get("num_comments"),
+                    "link": link if link and "reddit.com" not in domain and not domain.startswith("self.") else "",
+                    "domain": domain if domain and not domain.startswith("self.") else ""})
+    return out
+
+
 def reddit(sub, label):
-    """A subreddit's newest posts. Uses Reddit's public JSON, falling back to its RSS feed."""
+    """A subreddit's newest posts. Reddit blocks a lot of apps, so this tries, in order: your own Reddit app ID
+    (if set), Reddit's public JSON from both its sites, then its RSS feeds."""
+    errors = []
+    tok = None
     try:
-        data = json.loads(_get(f"https://www.reddit.com/r/{sub}/new.json?limit=50&raw_json=1", REDDIT_UA, accept="application/json"))
-        out = []
-        for c in (data.get("data") or {}).get("children") or []:
-            p = c.get("data") or {}
-            if p.get("over_18") or p.get("stickied"):
-                continue
-            thumb = None
-            imgs = ((p.get("preview") or {}).get("images") or [])
-            if imgs:
-                res = imgs[0].get("resolutions") or []
-                pick = next((r for r in res if r.get("width", 0) >= 320), None) or (res[-1] if res else imgs[0].get("source"))
-                thumb = pick and pick.get("url")
-            elif str(p.get("thumbnail", "")).startswith("http"):
-                thumb = p["thumbnail"]
-            link = p.get("url_overridden_by_dest") or ""
-            domain = p.get("domain") or ""
-            out.append({"title": html.unescape(p.get("title", "")), "url": "https://www.reddit.com" + p.get("permalink", ""),
-                        "date": int(p.get("created_utc") or 0), "source": label, "summary": _clean(p.get("selftext", ""), 260),
-                        "thumb": thumb, "flair": p.get("link_flair_text") or "", "spoiler": bool(p.get("spoiler")),
-                        "score": p.get("score"), "comments": p.get("num_comments"),
-                        "link": link if link and "reddit.com" not in domain and not domain.startswith("self.") else "",
-                        "domain": domain if domain and not domain.startswith("self.") else ""})
-        return out
-    except Exception:
-        raw = _get(f"https://www.reddit.com/r/{sub}/new/.rss", REDDIT_UA)
-        items = parse_feed(raw, label)
-        for i in items:
-            i["summary"] = ""
-        return items
+        tok = _reddit_oauth()
+    except Exception as e:
+        errors.append(f"app: {e}")
+    if tok:
+        try:
+            req = urllib.request.Request(f"https://oauth.reddit.com/r/{sub}/new?limit=50&raw_json=1",
+                                         headers={"Authorization": f"Bearer {tok}", "User-Agent": REDDIT_UA})
+            with urllib.request.urlopen(req, timeout=15) as r:
+                return _reddit_posts(json.load(r), label)
+        except Exception as e:
+            errors.append(f"oauth: {e}")
+    for host in ("www.reddit.com", "old.reddit.com"):
+        for ua in (BROWSER_UA, REDDIT_UA):
+            try:
+                data = json.loads(_get(f"https://{host}/r/{sub}/new.json?limit=50&raw_json=1", ua, accept="application/json"))
+                return _reddit_posts(data, label)
+            except Exception as e:
+                errors.append(f"{host} json: {e}")
+    for host in ("www.reddit.com", "old.reddit.com"):
+        for ua in (BROWSER_UA, REDDIT_UA):
+            try:
+                items = parse_feed(_get(f"https://{host}/r/{sub}/new/.rss", ua, accept="application/atom+xml,application/xml"), label)
+                for i in items:
+                    i["summary"] = ""
+                return items
+            except Exception as e:
+                errors.append(f"{host} rss: {e}")
+    raise IOError("Reddit refused every way in (" + "; ".join(errors[-2:]) + ")")
 
 
 def steam_news_hub(appid, label):
@@ -181,7 +229,8 @@ class Feeds:
             entry = (time.time(), items, None)
         except Exception as e:
             old = hit[1] if hit else []
-            entry = (time.time() - FRESH + 120, old, f"{label}: {e.__class__.__name__}")  # try again in two minutes
+            reason = "blocked" if kind == "reddit" else e.__class__.__name__
+            entry = (time.time() - FRESH + 120, old, f"{label}: {reason}")  # try again in two minutes
         with self.lock:
             self.cache[label] = entry
         return entry

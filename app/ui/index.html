@@ -88,6 +88,11 @@
       </details>
       <label>IGDB Client ID <input name="igdb_id" type="text" autocomplete="off" placeholder="Leave empty to keep what's saved"></label>
       <label>IGDB Client secret <input name="igdb_secret" type="password" autocomplete="off" placeholder="Leave empty to keep what's saved"><small id="igdbState"></small></label>
+      <details class="howto"><summary>If Reddit news won't load: add a free Reddit app ID</summary>
+        <ol><li>Signed in to Reddit, open <b>reddit.com/prefs/apps</b> and press <b>create another app</b>.</li>
+          <li>Name it Masterlog, choose <b>installed app</b>, set the redirect URI to <b>http://localhost</b>, then <b>create app</b>.</li>
+          <li>Copy the short ID shown under the app's name and paste it below. It can only read public posts.</li></ol></details>
+      <label>Reddit app ID (optional) <input name="reddit_id" type="text" autocomplete="off" placeholder="Leave empty to keep what's saved"><small id="redditState"></small></label>
       <label>YouTube API key (optional) <input name="youtube_key" type="password" autocomplete="off" placeholder="Leave empty to keep what's saved"><small id="ytState"></small></label>
       <label>Check the sheet for changes every
         <select name="refresh_minutes">
@@ -127,7 +132,7 @@
       <label>eBay App ID <input name="ebay_id" type="text" autocomplete="off" placeholder="Leave empty to keep what's saved"></label>
       <label>eBay Cert ID <input name="ebay_secret" type="password" autocomplete="off" placeholder="Leave empty to keep what's saved"><small id="ebayState"></small></label>
       <label class="check"><input type="checkbox" name="money_gel"> Show prices in Georgian lari (₾), at the National Bank of Georgia's daily rate</label>
-      <label class="check"><input type="checkbox" name="auto_names"> Rename wishlist games to their official full title when a store lists it (you can undo each one)</label>
+      <label class="check"><input type="checkbox" name="auto_names"> Fix game names to their official titles (e.g. "Resident Evil 9 Requiem" → "Resident Evil Requiem"), so covers, manuals and ratings are found. Each rename can be undone.</label>
       <p class="fine">Prices are checked every few hours and when you open Deals. The Steam Winter Sale and Summer Sale get a little celebration when they start.</p>
     </div>
 

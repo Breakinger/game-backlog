@@ -165,10 +165,10 @@ function caseHTML(g, o = {}) {
       <div class="box"><div class="shell"></div>
         <div class="band"><span class="wm">${esc(p.label)}</span>${deck}${up}</div>
         <div class="art" data-kind="game" data-id="${g.id}">${art}</div>
-        <div class="hinge"></div><div class="sheen"></div>${badge}${typeTag}${quick}${g.status === "Wishlist" ? priceTag(g) : ""}
+        <div class="hinge"></div><div class="sheen"></div>${typeTag}${quick}
       </div>${ach}
     </div>
-    ${o.noLabel ? "" : `<div class="label">${fresh}<div class="name">${esc(g.name)}</div><div class="sub">${esc(o.sub ?? subline(g))}</div></div>`}
+    ${o.noLabel ? "" : `<div class="label">${fresh}<div class="name">${esc(g.name)}</div><div class="sub">${badge}${esc(o.sub ?? subline(g))}</div>${g.status === "Wishlist" ? priceTag(g) : ""}</div>`}
   </button>`;
 }
 function factsOf(g) { return state.facts[g.name] || {}; }
@@ -1220,7 +1220,9 @@ function openSettings(showHowTo, tab = "sheet") {
   ambienceState();
   $("#igdbState").textContent = st.has_igdb ? "IGDB is connected. Paste new values to replace them." : "Not connected.";
   $("#igdbState").className = st.has_igdb ? "ok" : "";
-  f.youtube_key.value = "";
+  f.youtube_key.value = ""; f.reddit_id.value = "";
+  $("#redditState").textContent = st.has_reddit ? "Reddit app connected. Type a single space and Save to remove it." : "Only needed if Leaks, Marvel & DC or the deal subreddits won't load.";
+  $("#redditState").className = st.has_reddit ? "ok" : "";
   $("#ytState").textContent = st.has_youtube ? "Using the official YouTube API. Type a single space and Save to remove it." : "Not needed: trailers are found on YouTube without it. A key (Google Cloud → YouTube Data API v3) just makes the search official.";
   $("#ytState").className = st.has_youtube ? "ok" : "";
   $("#keyState").textContent = st.has_sgdb_key ? "A key is saved. Paste a new one to replace it." : "Covers for every platform, including PS5 and Switch. Without a key, covers come from Steam only.";
@@ -1280,12 +1282,19 @@ async function saveSettings() {
     if (r.error) toast(r.error, "err"); else { state.settings.has_ebay = !r.removed; toast(r.removed ? "eBay removed." : "eBay connected. Physical prices appear in Deals shortly.", "ok"); }
     f.ebay_id.value = ""; f.ebay_secret.value = "";
   }
+  if (f.reddit_id.value) {
+    const r = await api.set_reddit_app(f.reddit_id.value);
+    if (r.error) toast(r.error, "err"); else { state.settings.has_reddit = !r.removed; toast(r.removed ? "Reddit app removed." : "Reddit connected. News reloads now.", "ok"); newsState.data = {}; }
+    f.reddit_id.value = "";
+  }
   const yk = f.youtube_key.value;
   if (yk) {
     const r = await api.set_youtube_key(yk);
     if (r.error) toast(r.error, "err");
     else { state.settings.has_youtube = !r.removed; toast(r.removed ? "YouTube key removed." : "YouTube API connected.", "ok"); }
-    f.youtube_key.value = "";
+    f.youtube_key.value = ""; f.reddit_id.value = "";
+  $("#redditState").textContent = st.has_reddit ? "Reddit app connected. Type a single space and Save to remove it." : "Only needed if Leaks, Marvel & DC or the deal subreddits won't load.";
+  $("#redditState").className = st.has_reddit ? "ok" : "";
   }
   scheduleRefresh();
   sync(true);
@@ -1657,6 +1666,7 @@ function bindGlobal() {
   view.addEventListener("click", e => {
     const ns = e.target.closest("[data-nsrc]"); if (ns) { newsState.source[state.view] = ns.dataset.nsrc; return paintNews(state.view); }
     if (e.target.closest("#newsRefresh")) return loadNews(state.view, true);
+    if (e.target.closest("#redditHelp")) { openSettings(false, "sheet"); setTimeout(() => { const d = [...document.querySelectorAll("#settingsForm details.howto")].find(x => /Reddit/.test(x.textContent)); if (d) { d.open = true; d.scrollIntoView({ block: "center" }); } }, 60); return; }
     if (e.target.closest("#dealsRefresh")) return loadDeals(true);
     if (e.target.closest("#replaySale")) return maybeSaleEvent(true);
     const mon = e.target.closest("[data-money]");
@@ -1818,7 +1828,14 @@ async function refreshGame() {
   const g = findItem(panelItem?.kind, panelItem?.id);
   if (!g || !api) return;
   toast(`Fetching ${g.name} again…`);
-  await api.refresh_game(g);
+  const r = await api.refresh_game(g).catch(() => null);
+  if (r?.renamed) {
+    toast(`"${g.name}" is officially "${r.renamed}" (${r.source}). Renamed so its info can be found.`, "ok", { label: "Undo", run: async () => { await api.undo_rename(g.name, r.renamed, r.row); sync(true); } });
+    await sync(true);
+    const ng = state.games.find(x => x.name === r.renamed);
+    if (ng) { closePanel(); render(); openPanel("game", ng.id, "overview"); }
+    return;
+  }
   covers.delete(coverKey(g));
   const uri = await api.cover(g.name, g.platform || "").catch(() => null);
   covers.set(coverKey(g), uri || null);
@@ -2187,7 +2204,10 @@ function paintNews(sec) {
   if (filt) filt.innerHTML = srcs.length > 1 ? ["All", ...srcs.slice(0, sec === "yours" ? 18 : 12)].map(x => `<button class="chip ${x === pick ? "on" : ""}" data-nsrc="${esc(x)}">${esc(x)}</button>`).join("") : "";
   const items = d.items.filter(i => pick === "All" || (sec === "yours" ? i.game : i.source) === pick);
   const seenBefore = newsState.seen[sec] || 0;
-  const errs = (d.errors || []).length ? `<p class="fine nerr">Couldn't reach ${esc(d.errors.map(e => e.split(":")[0]).join(", "))} just now. Showing the rest.</p>` : "";
+  const blocked = (d.errors || []).filter(e => / blocked$/.test(e)).map(e => e.split(":")[0]);
+  const other = (d.errors || []).filter(e => !/ blocked$/.test(e)).map(e => e.split(":")[0]);
+  const errs = (blocked.length ? `<p class="fine nerr">Reddit is refusing Masterlog for ${esc(blocked.join(", "))}. A free Reddit app ID fixes this: <button class="linkish" id="redditHelp">set it up in Settings</button>.</p>` : "")
+    + (other.length ? `<p class="fine nerr">Couldn't reach ${esc(other.join(", "))} just now. Showing the rest.</p>` : "");
   if (!items.length) {
     body.innerHTML = errs + `<p class="muted news-empty">${sec === "yours" && d.pending ? "Fetching news for your games. This fills in over the next minute." : "Nothing here yet."}</p>`;
     return;

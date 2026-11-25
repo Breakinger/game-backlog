@@ -12,12 +12,14 @@ import art
 import http.server
 import igdb
 import info
+import saver
 import secrets
 import youtube
 import feeds
 import deals
 import modpacks
 import twitch
+import names
 import socketserver
 import sheet
 import updater
@@ -91,15 +93,24 @@ class Api:
         self._igdb = igdb.IGDB(self._vault)
         self._art.igdb = self._igdb
         self._art.meta_lookup = self._meta
+        self._art.mc_cover = lambda name: _safe(info.mc_cover, name)
         self._igdb.meta_lookup = self._meta
         self._info = info.Info(self._dir, self._art, self._igdb)
         self._info.youtube_key = lambda: (self._vault.get("youtube") or {}).get("key")
         self._feeds = feeds.Feeds()
+        feeds.REDDIT_APP["id"] = (self._vault.get("reddit") or {}).get("id")
         self._twitch = twitch.Twitch(self._igdb)
         self._deals = deals.Deals(self._art, self._dir)
         self._deals.ebay = deals.Ebay(self._vault)
         self._renamed = []   # official-title renames done in the background, for the page to announce
         threading.Thread(target=self._deals_loop, daemon=True).start()
+        self._names_path = os.path.join(self._dir, "names.json")
+        try:
+            with open(self._names_path, encoding="utf-8") as f:
+                self._names = json.load(f)
+        except Exception:
+            self._names = {}
+        threading.Thread(target=self._names_loop, daemon=True).start()
         self._accounts = accounts.Accounts(self._dir, self._vault, self._settings)
         threading.Thread(target=self._account_loop, daemon=True).start()
         self._updater = updater.Updater()
@@ -215,6 +226,7 @@ class Api:
         s["has_sgdb_key"] = bool(self._settings.get("sgdb_key"))
         s["has_igdb"] = self._igdb.configured()
         s["has_youtube"] = self._vault.has("youtube")
+        s["has_reddit"] = self._vault.has("reddit")
         s["has_ebay"] = self._deals.ebay.configured() if getattr(self, "_deals", None) else False
         s["connected"] = bool(sheet.is_script_link(self._settings.get("sheet_url")) and self._settings.get("sheet_key"))
         s["link_kind"] = "script" if sheet.is_script_link(self._settings.get("sheet_url")) else ("csv" if self._settings.get("sheet_url") else "")
@@ -644,6 +656,44 @@ class Api:
                     self._deals.state["games"][hit["name"]] = g2
         self._deals._remember()
 
+    # ----- official titles for every game (fixes missing covers, manuals and ratings) -----
+    def _names_loop(self):
+        time.sleep(40)
+        while True:
+            try:
+                self._fix_names()
+            except Exception:
+                pass
+            time.sleep(30 * 60)
+
+    def _fix_names(self):
+        if not self._settings.get("auto_names", True) or not self._script():
+            return
+        games = [g for g in self._sheet_games() if g.get("type") != "Modded" and g.get("name")]
+        # games with no cover go first: their name is the likeliest reason
+        def missing(g):
+            e = self._art.index.get(art._norm(g["name"]))
+            return not (e and e.get("file"))
+        games.sort(key=lambda g: not missing(g))
+        checked = 0
+        for g in games:
+            k = art._norm(g["name"])
+            e = self._names.get(k)
+            if e and time.time() - e.get("t", 0) < (3 if missing(g) else 30) * 86400:
+                continue
+            hit = names.official_title(g["name"], self._meta(g["name"]), self._igdb, info.mc_search)
+            self._names[k] = {"t": time.time(), "hit": hit}
+            if hit and not self._names.get("undo:" + k):
+                r = self.edit("games", g.get("row"), g["name"], {"name": hit["name"]})
+                if r and not r.get("error"):
+                    self._renamed.append({"old": g["name"], "new": hit["name"], "source": hit["source"], "row": g.get("row")})
+                    self._art.forget(hit["name"])
+            saver.save_later(self._names_path, lambda: self._names)
+            checked += 1
+            if checked >= 40:
+                break
+            time.sleep(1.5)
+
     def deals(self, force=False):
         wish, _ = self._deals_inputs()
         if force or (not self._deals.running and time.time() - (self._deals.state.get("t") or 0) > 3 * 3600):
@@ -730,7 +780,15 @@ class Api:
         self._info.cache.forget(info.Info._key(game))
         self._art.forget(name)
         self._facts_cache = None
-        return True
+        # the usual reason info is missing: a name the stores don't use
+        hit = _safe(names.official_title, name, self._meta(name), self._igdb, info.mc_search)
+        if hit and self._script():
+            g = next((x for x in self._sheet_games() if x["name"] == name), None)
+            r = self.edit("games", (g or {}).get("row"), name, {"name": hit["name"]}) if g else None
+            if r and not r.get("error"):
+                self._art.forget(hit["name"])
+                return {"renamed": hit["name"], "source": hit["source"], "row": g.get("row")}
+        return {"ok": True}
 
     def apply_rename(self, old):
         hit = (self._deals.state.get("renames") or {}).get(old)
@@ -753,6 +811,8 @@ class Api:
         if old in props:
             props[old]["undone"] = time.time()
         self._deals._remember()
+        self._names["undo:" + art._norm(old)] = True   # don't rename it again
+        saver.save_later(self._names_path, lambda: self._names)
         return self.edit("games", row, new, {"name": old})
 
     # ----- News catalog -----
@@ -775,6 +835,23 @@ class Api:
         except Exception as e:
             return {"error": f"YouTube didn't accept that key ({e})."}
         self._vault.set("youtube", {"key": key})
+        return {"ok": True}
+
+    def set_reddit_app(self, app_id):
+        """Optional: a free Reddit app ID, so Reddit lets Masterlog read the subreddits."""
+        app_id = (app_id or "").strip()
+        self._vault.set("reddit", {"id": app_id} if app_id else None)
+        feeds.REDDIT_APP["id"] = app_id or None
+        feeds._reddit_token.update(token=None, until=0)
+        if not app_id:
+            return {"ok": True, "removed": True}
+        try:
+            feeds._reddit_oauth()
+        except Exception as e:
+            self._vault.set("reddit", None)
+            feeds.REDDIT_APP["id"] = None
+            return {"error": f"Reddit didn't accept that app ID ({e}). Make sure the app type is 'installed app'."}
+        self._feeds.cache.clear()
         return {"ok": True}
 
     def set_ebay_keys(self, client_id, secret):
