@@ -10,6 +10,7 @@ import webbrowser
 import accounts
 import art
 import http.server
+import igdb
 import info
 import secrets
 import socketserver
@@ -41,8 +42,8 @@ def resource(rel):
 
 DEFAULTS = {"sheet_url": sheet.DEFAULT_SHEET, "sheet_key": "", "sgdb_key": "", "refresh_minutes": 2,
             "view_mode": "covers", "sound_on": True, "ambient_volume": 0.35, "fx_volume": 0.5, "intro": True,
-            "heroic_linked": False}
-PREFS = ("view_mode", "refresh_minutes", "sound_on", "ambient_volume", "fx_volume", "intro")
+            "heroic_linked": False, "big_picture": False}
+PREFS = ("view_mode", "refresh_minutes", "sound_on", "ambient_volume", "fx_volume", "intro", "big_picture")
 PRIVATE = ("sgdb_key", "sheet_key")
 
 
@@ -62,8 +63,10 @@ class Api:
         self._art = art.Art(self._dir)
         self._art.sgdb_key = self._settings.get("sgdb_key", "")
         self._serve_covers()
-        self._info = info.Info(self._dir, self._art)
         self._vault = vault.Vault(self._dir)
+        self._igdb = igdb.IGDB(self._vault)
+        self._art.igdb = self._igdb
+        self._info = info.Info(self._dir, self._art, self._igdb)
         self._accounts = accounts.Accounts(self._dir, self._vault, self._settings)
         threading.Thread(target=self._account_loop, daemon=True).start()
         self._updater = updater.Updater()
@@ -108,6 +111,7 @@ class Api:
     def get_settings(self):
         s = {k: v for k, v in self._settings.items() if k not in PRIVATE}
         s["has_sgdb_key"] = bool(self._settings.get("sgdb_key"))
+        s["has_igdb"] = self._igdb.configured()
         s["connected"] = bool(sheet.is_script_link(self._settings.get("sheet_url")) and self._settings.get("sheet_key"))
         s["link_kind"] = "script" if sheet.is_script_link(self._settings.get("sheet_url")) else ("csv" if self._settings.get("sheet_url") else "")
         s["data_dir"] = self._dir
@@ -356,6 +360,17 @@ class Api:
     def news(self, game):
         return _safe(self._info.news, game) or []
 
+    def media(self, game):
+        return _safe(self._info.media, game) or {"shots": [], "videos": []}
+
+    def set_igdb(self, client_id, secret):
+        try:
+            self._igdb.set_credentials(client_id, secret)
+            return {"ok": True}
+        except Exception as e:
+            self._vault.set("igdb", None)
+            return {"error": str(e) or "Couldn't connect to IGDB."}
+
     def milestones(self, game):
         return _safe(self._info.milestones, game) or []
 
@@ -384,6 +399,14 @@ class Api:
         if sheet.is_script_link(link):
             return "Open the sheet from Google Drive."
         return self.open(link) if link else "No sheet link yet."
+
+    def toggle_big_picture(self):
+        """Borderless fullscreen: no window frame, no taskbar."""
+        if not self._window:
+            return False
+        self._window.toggle_fullscreen()
+        self._fullscreen = not getattr(self, "_fullscreen", bool(self._settings.get("big_picture")))
+        return self._fullscreen
 
     def connection_script(self):
         with open(resource(os.path.join("ui", "connect.gs")), encoding="utf-8") as f:
@@ -429,7 +452,9 @@ def main():
     api._window = webview.create_window(
         "Masterlog", resource(os.path.join("ui", "index.html")), js_api=api,
         width=1480, height=920, min_size=(1100, 700), background_color="#0A1430",
+        fullscreen=bool(api._settings.get("big_picture")),
     )
+    api._fullscreen = bool(api._settings.get("big_picture"))
     webview.start(gui="edgechromium" if sys.platform == "win32" else None)
 
 

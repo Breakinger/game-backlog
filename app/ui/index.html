@@ -21,6 +21,9 @@
   <nav class="tabs" role="tablist" id="tabs"></nav>
   <div class="status">
     <button class="update-btn" id="updateBtn" hidden></button>
+    <button class="icon" id="bigBtn" title="Big Picture mode (F11)" aria-label="Big Picture mode">
+      <svg viewBox="0 0 24 24" width="20" height="20"><path fill="currentColor" d="M4 4h6v2H6v4H4V4zm10 0h6v6h-2V6h-4V4zM4 14h2v4h4v2H4v-6zm14 4v-4h2v6h-6v-2h4z"/></svg>
+    </button>
     <button class="icon" id="soundBtn" title="Sound" aria-label="Sound"></button>
     <button class="icon" id="addBtn" title="Add" aria-label="Add">
       <svg viewBox="0 0 24 24" width="20" height="20"><path fill="currentColor" d="M11 5h2v6h6v2h-6v6h-2v-6H5v-2h6z"/></svg>
@@ -45,7 +48,7 @@
   <form method="dialog" id="settingsForm">
     <h2>Settings</h2>
     <div class="stabs" role="tablist">
-      <button type="button" data-stab="sheet" aria-selected="true">Sheet</button>
+      <button type="button" data-stab="sheet" aria-selected="true">Sheet &amp; sources</button>
       <button type="button" data-stab="accounts">Accounts</button>
       <button type="button" data-stab="sound">Sound &amp; look</button>
       <button type="button" data-stab="about">About</button>
@@ -70,6 +73,16 @@
         <input name="sgdb_key" type="password" autocomplete="off" placeholder="Leave empty to keep the saved key">
         <small id="keyState">Covers for every platform. Without a key, covers come from Steam only.</small>
       </label>
+      <details class="howto">
+        <summary>IGDB: covers, screenshots and trailers for console games</summary>
+        <ol>
+          <li>Sign in at <button type="button" class="linkish" data-url="https://dev.twitch.tv/console/apps/create">dev.twitch.tv/console/apps/create</button> (turn on two-factor if Twitch asks).</li>
+          <li>Name it anything (e.g. Masterlog), set the OAuth Redirect URL to <b>http://localhost</b>, Category <b>Application Integration</b>, Client Type <b>Confidential</b>, then Create.</li>
+          <li>Open it, copy the <b>Client ID</b>, press <b>New Secret</b> and copy the secret. Paste both below and Save.</li>
+        </ol>
+      </details>
+      <label>IGDB Client ID <input name="igdb_id" type="text" autocomplete="off" placeholder="Leave empty to keep what's saved"></label>
+      <label>IGDB Client secret <input name="igdb_secret" type="password" autocomplete="off" placeholder="Leave empty to keep what's saved"><small id="igdbState"></small></label>
       <label>Check the sheet for changes every
         <select name="refresh_minutes">
           <option value="1">1 minute</option><option value="2">2 minutes</option><option value="5">5 minutes</option>
@@ -88,6 +101,7 @@
       <label>Ambience <input type="range" name="ambient_volume" min="0" max="1" step="0.05"></label>
       <label>Clicks and chimes <input type="range" name="fx_volume" min="0" max="1" step="0.05"></label>
       <label class="check"><input type="checkbox" name="intro"> Play the startup animation</label>
+      <label class="check"><input type="checkbox" name="big_picture"> Start in Big Picture mode (borderless fullscreen; F11 or the controller's Start button toggles it)</label>
       <p class="fine">Ambience pauses when Masterlog isn't the window you're using.</p>
     </div>
 

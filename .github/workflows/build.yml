@@ -28,7 +28,7 @@ jobs:
         run: echo "VERSION = \"1.0.${{ github.run_number }}\"" > app/version.py
 
       - name: Check the app imports
-        run: python -c "import sys; sys.path.insert(0, 'app'); import sheet, art, info, updater, vault, accounts, main, version; print('imports ok', version.VERSION)"
+        run: python -c "import sys; sys.path.insert(0, 'app'); import sheet, art, info, igdb, updater, vault, accounts, main, version; print('imports ok', version.VERSION)"
 
       - name: Build the exe
         run: pyinstaller --noconfirm --onefile --windowed --name Masterlog --icon assets/icon.ico --add-data "app/ui;ui" --paths app app/main.py

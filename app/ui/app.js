@@ -697,6 +697,7 @@ function showPanelTab(tab) {
   const item = findItem(panelItem.kind, panelItem.id);
   if (!item) return closePanel();
   document.querySelectorAll("[data-ptab]").forEach(b => b.setAttribute("aria-selected", String(b.dataset.ptab === tab)));
+  $("#panel").querySelectorAll("video").forEach(v => v.pause()); try { FX.duck(false); } catch {}
   const body = $("#pbody");
   body.dataset.tab = tab;
   const still = () => body.isConnected && body.dataset.tab === tab && panelItem && findItem(panelItem.kind, panelItem.id) === item;
@@ -710,6 +711,8 @@ function showPanelTab(tab) {
   if (tab === "overview") {
     body.innerHTML = gameOverviewHTML(item);
     Promise.resolve(api?.links(item)).then(links => { const box = $("#links"); if (box && still()) box.innerHTML = (links || []).map(l => `<button class="${l.primary ? "primary" : "ghost"}" data-url="${esc(l.url)}">${esc(l.label)}</button>`).join(""); }).catch(() => {});
+    Promise.resolve(api?.media(item)).then(m => { if (still()) renderGallery(m || { shots: [], videos: [] }); }).catch(() => renderGallery({ shots: [], videos: [] }));
+    Promise.resolve(api?.about(item)).then(a => { const box = $("#aboutLong"); if (box && still() && a?.long) { box.hidden = false; box.querySelector("div").textContent = a.long; } }).catch(() => {});
     getRatings(item).then(r => { const box = $("#ovScores"); if (box && still()) box.innerHTML = r && (r.metacritic || r.steam || r.playstation) ? `${miniScoresHTML(r)}<button class="linkish" data-ptab="ratings">View more</button>` : `<span class="muted">No ratings found.</span>`; });
   }
   if (tab === "ratings") { body.innerHTML = loading("Fetching scores…"); getRatings(item).then(r => { if (still()) body.innerHTML = ratingsHTML(item, r); }); }
@@ -742,15 +745,46 @@ function gameOverviewHTML(g) {
   const quick = state.canEdit ? `<div class="quick">${opts("games", "status").map(s => `<button class="qs ${g.status === s ? "on" : ""}" data-quick="${esc(s)}" style="--c:${STATUS_COLOR[s] || "#8F9BB3"}">${esc(s)}</button>`).join("")}</div>` : "";
   const fresh = state.updated[g.name];
   return `${fresh ? `<div class="freshbar" data-url="${esc(fresh.url || "")}"><b>Newly updated!</b> ${esc(fresh.title)} · ${ago(fresh.date)}</div>` : ""}
+    <div class="gallery" id="gallery"><div class="g-main" id="gMain"><div class="g-empty"><span class="spinner"></span></div></div><div class="g-strip" id="gStrip"></div></div>
     <div class="links" id="links"><button class="ghost" disabled>Finding links…</button></div>
     <div class="scores" id="ovScores"><span class="muted">Fetching scores…</span></div>
     ${quick}
     <div class="kv">${kv.map(([k, v]) => `<div><small>${esc(k)}</small><span>${esc(v)}</span></div>`).join("")}</div>
     <div class="flags">${flags.map(([k, on]) => `<span class="flag ${on ? "on" : ""}">${on ? "✓ " : ""}${esc(k)}</span>`).join("")}</div>
     ${g.notes ? `<h3>Notes</h3><p class="notes">${esc(g.notes)}</p>` : ""}
+    <details class="more about-long" id="aboutLong" hidden><summary>About this game</summary><div></div></details>
     <h3>Runs</h3>
     ${runs.length ? `<ul class="runs">${runs.map(r => `<li><span>Run ${r.run || "?"}${r.platform ? ` on ${esc(r.platform)}` : ""}${r.modded ? " · modded" : ""}${r.dlc ? " · with DLC" : ""}${r.platinum ? " · 100%" : ""}</span><span>${r.finished_on ? fmtDate(r.finished_on) : r.finished ? "Finished" : "In progress"}</span></li>`).join("")}</ul>` : `<p class="muted">${g.status === "Completed" ? "One run so far." : "No runs yet."}</p>`}
     ${state.canEdit && g.status === "Completed" ? `<button class="ghost small" id="logRun">Log a replay</button><div id="runForm"></div>` : ""}`;
+}
+let galleryItems = [];
+function renderGallery(m) {
+  const main = $("#gMain"), strip = $("#gStrip");
+  if (!main) return;
+  galleryItems = [...(m.videos || []).map(v => ({ ...v, video: true })), ...(m.shots || [])];
+  if (!galleryItems.length) { $("#gallery").hidden = true; return; }
+  strip.innerHTML = galleryItems.map((it, i) => `<button class="g-thumb ${i === 0 ? "on" : ""} ${it.video ? "vid" : ""}" data-g="${i}"><img alt="" loading="lazy" decoding="async" src="${esc(it.thumb)}">${it.video ? "<i>▶</i>" : ""}</button>`).join("");
+  showGallery(0, false);
+}
+function showGallery(i, play) {
+  const it = galleryItems[i], main = $("#gMain");
+  if (!it || !main) return;
+  document.querySelectorAll(".g-thumb").forEach(b => b.classList.toggle("on", +b.dataset.g === i));
+  try { FX.duck(false); } catch {}
+  if (it.video && play) {
+    try { FX.duck(true); } catch {}
+    if (it.youtube) { main.innerHTML = `<iframe src="https://www.youtube-nocookie.com/embed/${encodeURIComponent(it.youtube)}?autoplay=1&rel=0" allow="autoplay; encrypted-media; fullscreen" allowfullscreen></iframe>`; return; }
+    const src = it.webm || it.mp4 || it.hls;
+    main.innerHTML = `<video controls autoplay playsinline poster="${esc(it.thumb)}">${it.webm ? `<source src="${esc(it.webm)}" type="video/webm">` : ""}${it.mp4 ? `<source src="${esc(it.mp4)}" type="video/mp4">` : ""}${!it.webm && !it.mp4 && it.hls ? `<source src="${esc(it.hls)}" type="application/x-mpegURL">` : ""}</video>`;
+    const v = main.querySelector("video");
+    v.addEventListener("ended", () => { try { FX.duck(false); } catch {} });
+    v.addEventListener("error", () => { main.innerHTML = `<div class="g-empty">This trailer only plays on Steam. <button class="ghost small" data-url="${esc(it.page || "")}">Watch on Steam</button></div>`; try { FX.duck(false); } catch {} }, true);
+    if (!src) v.dispatchEvent(new Event("error"));
+    return;
+  }
+  main.innerHTML = it.video
+    ? `<button class="g-play" data-gplay="${i}"><img alt="" src="${esc(it.thumb)}"><span>▶</span><small>${esc(it.name || "Trailer")}</small></button>`
+    : `<img alt="" decoding="async" src="${esc(it.full || it.thumb)}">`;
 }
 function ratingsHTML(g, r) {
   if (!r || (!r.metacritic && !r.steam && !r.playstation)) return `<p class="muted">No ratings found for this game. Metacritic and the stores may list it under a different name.</p>`;
@@ -901,6 +935,8 @@ function refreshPanelHead() {
 function closePanel() {
   const panel = $("#panel");
   if (!panel.classList.contains("open")) return;
+  panel.querySelectorAll("video").forEach(v => v.pause());
+  try { FX.duck(false); } catch {}
   try { FX.play.back(); } catch {}
   panel.classList.remove("opened");
   setTimeout(() => { panel.classList.remove("open"); panel.setAttribute("aria-hidden", "true"); }, 260);
@@ -1027,6 +1063,9 @@ function openSettings(showHowTo, tab = "sheet") {
   f.ambient_volume.value = st.ambient_volume ?? 0.35;
   f.fx_volume.value = st.fx_volume ?? 0.5;
   f.intro.checked = st.intro !== false;
+  f.big_picture.checked = !!st.big_picture;
+  $("#igdbState").textContent = st.has_igdb ? "IGDB is connected. Paste new values to replace them." : "Not connected.";
+  $("#igdbState").className = st.has_igdb ? "ok" : "";
   $("#keyState").textContent = st.has_sgdb_key ? "A key is saved. Paste a new one to replace it." : "Covers for every platform, including PS5 and Switch. Without a key, covers come from Steam only.";
   $("#connState").textContent = st.connected ? "Connected. You can edit and add from the app." : st.link_kind === "csv" ? "Read-only: this is a published sheet link. Use the connection script below to edit from the app." : "Paste the Web app link from the connection script.";
   $("#connState").className = st.connected ? "ok" : "";
@@ -1037,7 +1076,7 @@ function openSettings(showHowTo, tab = "sheet") {
 }
 function soundSettings() {
   const f = $("#settingsForm");
-  return { sound_on: f.sound_on.checked, ambient_volume: +f.ambient_volume.value, fx_volume: +f.fx_volume.value, intro: f.intro.checked };
+  return { sound_on: f.sound_on.checked, ambient_volume: +f.ambient_volume.value, fx_volume: +f.fx_volume.value, intro: f.intro.checked, big_picture: f.big_picture.checked };
 }
 function applySound(st = state.settings) {
   try { FX.configure({ on: st.sound_on !== false, ambient: st.ambient_volume ?? 0.35, fx: st.fx_volume ?? 0.5 }); } catch {}
@@ -1056,6 +1095,13 @@ async function saveSettings() {
   if (res.pair_error) toast(`Couldn't connect: ${res.pair_error}`, "err");
   else if (res.paired) toast(`Connected to ${typeof res.paired === "string" ? res.paired : "your sheet"}.`, "ok");
   if (!hadKey && state.settings.has_sgdb_key) { await api.clear_covers(); covers.clear(); }
+  const iid = f.igdb_id.value.trim(), isec = f.igdb_secret.value.trim();
+  if (iid && isec) {
+    const r = await api.set_igdb(iid, isec);
+    if (r.error) toast(r.error, "err");
+    else { toast("IGDB connected. Missing covers will fill in as you browse.", "ok"); covers.forEach((v, k) => { if (!v) covers.delete(k); }); state.settings.has_igdb = true; render(); }
+    f.igdb_id.value = ""; f.igdb_secret.value = "";
+  }
   scheduleRefresh();
   sync(true);
 }
@@ -1237,6 +1283,7 @@ function bindGlobal() {
     if (e.target.id === "impAll") e.target.form.querySelectorAll("[name=imp]").forEach(x => { x.checked = true; });
     if (e.target.id === "impNone") e.target.form.querySelectorAll("[name=imp]").forEach(x => { x.checked = false; });
   });
+  $("#bigBtn").addEventListener("click", toggleBigPicture);
   $("#soundBtn").addEventListener("click", () => {
     const on = state.settings.sound_on === false;
     state.settings.sound_on = on; api?.set_pref("sound_on", on); applySound();
@@ -1333,6 +1380,8 @@ function bindGlobal() {
     if (q) { const item = findItem(panelItem.kind, panelItem.id); if (item && item.status !== q.dataset.quick) saveEdit(panelItem.kind === "book" ? "books" : "games", item, { status: q.dataset.quick }); return; }
     const o = e.target.closest("[data-open]"); if (o) return openPanel(o.dataset.kind || "game", o.dataset.open);
     if (e.target.closest("#logRun")) return runForm();
+    const gt = e.target.closest("[data-g]"); if (gt) return showGallery(+gt.dataset.g, galleryItems[+gt.dataset.g]?.video);
+    const gp = e.target.closest("[data-gplay]"); if (gp) return showGallery(+gp.dataset.gplay, true);
     if (e.target.closest("#customCover")) return customCover(true);
     if (e.target.closest("#resetCover")) return customCover(false);
   });
@@ -1344,6 +1393,7 @@ function bindGlobal() {
   });
 
   document.addEventListener("keydown", e => {
+    if (e.key === "F11") { e.preventDefault(); toggleBigPicture(); return; }
     if (e.key === "Escape") { if ($("#panel").classList.contains("open")) closePanel(); return; }
     if (["INPUT", "SELECT", "TEXTAREA"].includes(document.activeElement?.tagName) || document.querySelector("dialog[open]")) return;
     const dir = { ArrowLeft: "l", ArrowRight: "r", ArrowUp: "u", ArrowDown: "d" }[e.key];
@@ -1400,6 +1450,11 @@ async function submitRun(form, g) {
   toast("Run added. The sheet stamps the date.", "ok");
   sync(true);
 }
+async function toggleBigPicture() {
+  const on = await Promise.resolve(api?.toggle_big_picture()).catch(() => null);
+  document.body.classList.toggle("bigpic", !!on);
+  try { FX.play.tab(); } catch {}
+}
 function switchCatalog(cat) {
   if (cat === state.catalog) return;
   state.catalog = cat;
@@ -1443,6 +1498,7 @@ function pollPad() {
       press(1, () => closePanel());
       press(4, () => cycleTab(-1)); press(5, () => cycleTab(1));
       press(8, () => switchCatalog(isBooks() ? "games" : "books"));
+      press(9, toggleBigPicture);
       const [x, y] = pad.axes;
       const stick = Math.abs(x) > 0.6 ? (x > 0 ? "r" : "l") : Math.abs(y) > 0.6 ? (y > 0 ? "d" : "u") : null;
       if (stick && !held.stick) move(stick);
@@ -1460,6 +1516,7 @@ async function start() {
   if (!api) { $("#intro")?.remove(); towers(); render(); return; }
   state.settings = await api.get_settings();
   applySound();
+  document.body.classList.toggle("bigpic", !!state.settings.big_picture);
   if (state.settings.intro !== false && !window.SKIP_INTRO) await new Promise(r => playIntro(r));
   else $("#intro")?.remove();
   towers();

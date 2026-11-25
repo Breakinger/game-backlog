@@ -17,7 +17,7 @@ from art import similar, _norm
 BROWSER_UA = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/130.0 Safari/537.36"
 MC = "https://backend.metacritic.com"
 DAY = 86400
-TTL = {"about": 30 * DAY, "ratings": 3 * DAY, "dlcs": 7 * DAY, "wiki": 30 * DAY, "news": 6 * 3600, "updated": 12 * 3600, "book": 30 * DAY}
+TTL = {"about": 30 * DAY, "media": 7 * DAY, "ratings": 3 * DAY, "dlcs": 7 * DAY, "wiki": 30 * DAY, "news": 6 * 3600, "updated": 12 * 3600, "book": 30 * DAY}
 NEW_UPDATE_DAYS = 14
 PATCH_RE = re.compile(r"\b(patch|update|hotfix|hot-fix|version\s*\d|v\d+\.\d+|release notes)\b", re.I)
 JUNK_DLC_RE = re.compile(r"soundtrack|\bost\b|art ?book|wallpaper|avatar|theme|\bskin|costume|outfit|cosmetic|bonus content|digital extras|pre-?order", re.I)
@@ -268,9 +268,10 @@ def google_news(query, count=10):
 # ---------------- the service the app calls ----------------
 
 class Info:
-    def __init__(self, data_dir, art):
+    def __init__(self, data_dir, art, igdb=None):
         self.cache = Cache(data_dir)
         self.art = art
+        self.igdb = igdb
         self.pool = cf.ThreadPoolExecutor(max_workers=6)
         self._updates_running = False
 
@@ -388,28 +389,37 @@ class Info:
         self.cache.put("dlcs", key, out)
         return out
 
-    # ----- back-of-the-box synopsis -----
+    # ----- back-of-the-box synopsis (official text first) -----
     def about(self, game):
         key = self._key(game)
         hit = self.cache.get("about", key)
         if hit is not None:
             return hit
-        text, source, facts = "", None, {}
+        text, long_text, source, facts = "", "", None, {}
         appid = self._appid(game)
         if appid:
             try:
                 d = steam_details(appid)
-                text = _clean(d.get("short_description", ""), 700)
-                source = "Steam" if text else None
+                text = _clean(d.get("short_description", ""), 900)
+                long_text = _clean(d.get("about_the_game") or d.get("detailed_description") or "", 4000)
+                source = "Steam store page" if text else None
                 facts = {"release": (d.get("release_date") or {}).get("date"), "developers": d.get("developers"),
                          "publishers": d.get("publishers"), "genres": [g.get("description") for g in d.get("genres") or []]}
+            except Exception:
+                pass
+        if not text and self.igdb:
+            try:
+                ig = self.igdb.game(game.get("name", ""))
+                if ig and ig.get("summary"):
+                    text, source = _clean(ig["summary"], 900), "IGDB"
+                    long_text = _clean(ig.get("storyline") or "", 4000)
             except Exception:
                 pass
         if not text:
             try:
                 best = mc_best(game.get("name", ""))
-                if best:
-                    text, source = _clean(best.get("description", ""), 700), "Metacritic"
+                if best and best.get("description"):
+                    text, source = _clean(best.get("description", ""), 900), "Metacritic"
             except Exception:
                 pass
         if not text:
@@ -420,9 +430,46 @@ class Info:
                     text, source = " ".join(sentences[:3]), "Wikipedia"
             except Exception:
                 pass
-        out = {"text": text, "source": source, **facts}
+        out = {"text": text, "long": long_text if long_text and long_text[:200] != text[:200] else "", "source": source, **facts}
         if text:
             self.cache.put("about", key, out)
+        return out
+
+    # ----- screenshots and trailers -----
+    def media(self, game):
+        key = self._key(game)
+        hit = self.cache.get("media", key)
+        if hit is not None:
+            return hit
+        shots, videos = [], []
+        appid = self._appid(game)
+        if appid:
+            try:
+                d = steam_details(appid)
+                for m in d.get("movies") or []:
+                    mp4, webm = m.get("mp4") or {}, m.get("webm") or {}
+                    videos.append({"name": m.get("name"), "thumb": m.get("thumbnail"),
+                                   "mp4": mp4.get("max") or mp4.get("480"), "webm": webm.get("max") or webm.get("480"),
+                                   "hls": m.get("hls_h264"), "dash": m.get("dash_h264"),
+                                   "page": f"https://store.steampowered.com/app/{appid}"})
+                for sh in d.get("screenshots") or []:
+                    shots.append({"thumb": sh.get("path_thumbnail"), "full": sh.get("path_full")})
+            except Exception:
+                pass
+        if (not shots or not videos) and self.igdb:
+            try:
+                ig = self.igdb.game(game.get("name", "")) or {}
+                if not shots:
+                    for sh in (ig.get("screenshots") or []) + (ig.get("artworks") or []):
+                        shots.append({"thumb": self.igdb.img(sh["image_id"], "t_screenshot_med"), "full": self.igdb.img(sh["image_id"], "t_1080p")})
+                if not videos:
+                    for v in ig.get("videos") or []:
+                        videos.append({"name": v.get("name"), "youtube": v["video_id"], "thumb": f"https://i.ytimg.com/vi/{v['video_id']}/hqdefault.jpg"})
+            except Exception:
+                pass
+        out = {"shots": shots[:20], "videos": videos[:8]}
+        if shots or videos:
+            self.cache.put("media", key, out)
         return out
 
     # ----- wiki -----

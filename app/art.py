@@ -42,6 +42,7 @@ class Art:
         self.index = self._read(self.index_path)
         self.appids = self._read(self.appid_path)
         self.sgdb_key = ""
+        self.igdb = None      # set by the app when IGDB is configured
         self.url_base = None  # set by the app: covers are served as local files instead of inline data
 
     @staticmethod
@@ -120,7 +121,8 @@ class Art:
             fname = entry.get("file")
             if fname and os.path.exists(os.path.join(self.dir, fname)):
                 return self._data_uri(os.path.join(self.dir, fname))
-            if not fname and time.time() - entry.get("t", 0) < MISS_RETRY_DAYS * 86400 and not (self.sgdb_key and entry.get("src") != "sgdb"):
+            igdb_new = self.igdb and self.igdb.configured() and "igdb" not in (entry.get("src") or "")
+            if not fname and time.time() - entry.get("t", 0) < MISS_RETRY_DAYS * 86400 and not (self.sgdb_key and not (entry.get("src") or "").startswith("sgdb")) and not igdb_new:
                 return None
         img, src = None, None
         try:
@@ -134,8 +136,16 @@ class Art:
                 src = "steam" if img else None
             except Exception:
                 img = None
+        if not img and self.igdb and self.igdb.configured():
+            try:
+                g = self.igdb.game(name)
+                if g and g.get("cover"):
+                    img, _ = _get(self.igdb.img(g["cover"]["image_id"], "t_cover_big_2x"), timeout=25)
+                    src = "igdb"
+            except Exception:
+                img = None
         if not img:
-            self.index[key] = {"file": "", "t": time.time(), "src": "sgdb" if self.sgdb_key else "none"}
+            self.index[key] = {"file": "", "t": time.time(), "src": ("sgdb" if self.sgdb_key else "none") + ("+igdb" if self.igdb and self.igdb.configured() else "")}
             self._save()
             return None
         ext = ".png" if img[:4] == b"\x89PNG" else ".webp" if img[8:12] == b"WEBP" else ".jpg"
@@ -295,6 +305,15 @@ class Art:
                         img = None
                     except Exception:
                         img = None
+        if not img and self.igdb and self.igdb.configured():
+            try:
+                g = self.igdb.game(name) or {}
+                pics = (g.get("artworks") or []) + (g.get("screenshots") or [])
+                if pics:
+                    img, _ = _get(self.igdb.img(pics[0]["image_id"], "t_1080p"), timeout=30)
+                    src = "igdb"
+            except Exception:
+                img = None
         return self._store(key, img, src)
 
 
