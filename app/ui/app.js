@@ -138,6 +138,13 @@ function upgradeLabel(g) {
   if (!to || !g.upgrade || g.upgrade === "No upgrade") return "";
   return `${g.upgrade.startsWith("Free") ? "Free" : "Paid"} upgrade to ${to}`;
 }
+/* small square emblems in the spirit of the real boxes (original marks, not the companies' logos) */
+function emblem(kind) {
+  if (kind === "Switch" || kind === "Switch 2") return `<span class="emblem sw" aria-hidden="true">${kind === "Switch 2" ? "<b>2</b>" : "<i></i>"}</span>`;
+  if (kind === "deck") return `<span class="emblem deck" title="Plays on Steam Deck" aria-label="Steam Deck"><i></i></span>`;
+  return "";
+}
+function bandLabel(platform, p) { return platform === "Switch" || platform === "Switch 2" ? platform.toUpperCase() : p.label; }
 function caseHTML(g, o = {}) {
   const p = plat(g.platform), st = statusOf(g);
   let badge = "";
@@ -152,7 +159,7 @@ function caseHTML(g, o = {}) {
   const up = g.upgrade && UPGRADE_TO[g.platform] && g.upgrade !== "No upgrade" ? `<span class="tag up ${upOwned ? "owned" : g.upgrade.startsWith("Free") ? "free" : "paid"}" title="${esc(upgradeLabel(g))}${upOwned ? " · you own the upgrade" : ""}">${upOwned ? `${esc(UPGRADE_TO[g.platform].replace("PlayStation ", "PS").replace("Nintendo ", ""))} ✓` : `${g.upgrade.startsWith("Free") ? "FREE" : "PAID"} ↑`}</span>` : "";
   const cached = covers.get(coverKey(g));
   const art = cached ? `<img alt="" decoding="async" src="${cached}">` : `<div class="fallback"><div class="t">${esc(g.name)}</div><div class="d">${esc(g.developer || g.genre || "")}</div></div>`;
-  const deck = g.platform === "Steam" && g.play_on === "Steam Deck" ? `<span class="tag deck">DECK</span>` : p.tag ? `<span class="tag">${p.tag}</span>` : "";
+  const deck = g.platform === "Steam" && g.play_on === "Steam Deck" ? emblem("deck") : p.tag ? `<span class="tag">${p.tag}</span>` : "";
   const typeTag = g.type === "Live service" ? `<span class="typetag live"><i></i>LIVE</span>` : g.type === "Modded" ? `<span class="typetag mod">MODDED</span>` : "";
   const ach = achBadge(g);
   const quick = !o.noLabel ? quickBtn(g) : "";
@@ -165,7 +172,7 @@ function caseHTML(g, o = {}) {
     style="--band:${p.band};--band-text:${p.text};--shell:${p.shell};--accent:${p.accent};--plat:${p.chip}" aria-label="${esc(g.name)}">
     <div class="stage">${stack}${media}${effectLayer(g)}
       <div class="box"><div class="shell"></div>
-        <div class="band"><span class="wm">${esc(p.label)}</span>${deck}${up}</div>
+        <div class="band">${emblem(g.platform)}<span class="wm">${esc(bandLabel(g.platform, p))}</span>${deck}${up}</div>
         <div class="art" data-kind="game" data-id="${g.id}">${art}</div>
         <div class="hinge"></div><div class="sheen"></div>${typeTag}${quick}
       </div>${ach}
@@ -814,7 +821,7 @@ function openCaseHTML(kind, item) {
   return `<div class="opencase p-${(item.platform || "x").replace(/\W+/g, "")}" style="--band:${p.band};--band-text:${p.text};--shell:${p.shell};--accent:${p.accent};--plat:${p.chip}">
     <div class="leaf back"><div class="tray">${tray}</div></div>
     <div class="leaf front">
-      <div class="face outside"><div class="band"><span class="wm">${esc(p.label)}</span></div><div class="art" data-kind="game" data-id="${item.id}">${art}<button type="button" class="artedit" data-coverpick title="Change cover" aria-label="Change cover"><svg viewBox="0 0 24 24" width="16" height="16"><path fill="currentColor" d="M4 5h11l2 2h3v12H4zm2 2v10h12V9h-2l-2-2zm2 8 3-4 2 3 1.5-2 2.5 3z"/></svg></button></div><div class="hinge"></div><div class="sheen"></div></div>
+      <div class="face outside"><div class="band">${emblem(item.platform)}<span class="wm">${esc(p.label)}</span>${item.platform === "Steam" && item.play_on === "Steam Deck" ? emblem("deck") : ""}</div><div class="art" data-kind="game" data-id="${item.id}">${art}<button type="button" class="artedit" data-coverpick title="Change cover" aria-label="Change cover"><svg viewBox="0 0 24 24" width="16" height="16"><path fill="currentColor" d="M4 5h11l2 2h3v12H4zm2 2v10h12V9h-2l-2-2zm2 8 3-4 2 3 1.5-2 2.5 3z"/></svg></button></div><div class="hinge"></div><div class="sheen"></div></div>
       <div class="face inside"><div class="manual"><div class="manual-body" id="manual"><p class="muted">Opening the manual…</p></div></div></div>
     </div></div>`;
 }

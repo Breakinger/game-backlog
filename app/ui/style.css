@@ -1041,3 +1041,15 @@ body.away *, body.away *::before, body.away *::after { animation-play-state: pau
 .fx-extreme .box { box-shadow: 0 0 0 3px rgba(255, 140, 60, .8), 0 -8px 30px rgba(255, 110, 40, .45), 0 10px 24px rgba(0,0,0,.45); }
 .grid .case.fx-high, .shelf-row .case.fx-high, .grid .case.fx-done, .shelf-row .case.fx-done { content-visibility: visible; }
 @media (prefers-reduced-motion: reduce) { .fx-high .box::before { animation: none; } }
+
+/* platform emblems: one small square, like the real boxes */
+.band .emblem { flex: 0 0 auto; display: grid; place-items: center; width: 1.45em; height: 1.45em; border-radius: .28em; margin-right: .45em; }
+.band .emblem.sw { background: #fff; box-shadow: 0 0 0 1px rgba(0,0,0,.12); }
+.band .emblem.sw i { width: 58%; height: 58%; border: .16em solid #E60012; border-radius: .2em; }
+.band .emblem.sw b { color: #E60012; font-weight: 900; font-size: .95em; line-height: 1; }
+.band .emblem.deck { margin: 0 0 0 auto; background: linear-gradient(135deg, #1A9FFF, #6D4AFF 70%); box-shadow: 0 0 0 1px rgba(255,255,255,.25); }
+.band .emblem.deck i { width: 52%; height: 34%; border-radius: .18em; border: .13em solid #fff; position: relative; }
+.band .emblem.deck i::after { content: ""; position: absolute; left: 50%; top: 50%; width: .22em; height: .22em; margin: -.11em 0 0 -.11em; border-radius: 50%; background: #fff; }
+.band .emblem.deck + .tag.up { margin-left: .35em; }
+.p-Switch .band .wm, .p-Switch2 .band .wm { font-size: .74em; letter-spacing: .04em; font-weight: 800; }
+.band .emblem.sw + .wm { margin-right: auto; }
