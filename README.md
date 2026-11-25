@@ -6,17 +6,32 @@ A console-style desktop library for my game backlog. It reads the Google Sheet, 
 
 Download **GameBacklog.exe** from the latest [release](../../releases). No install. Windows may warn that the app isn't signed: click **More info → Run anyway**.
 
-## First run
+## First run: connect your sheet
 
-1. In the Google Sheet: **File → Share → Publish to web → Entire document → Comma-separated values (.csv) → Publish**. Copy the link.
-2. In the app, open **Settings** (gear, top right) and paste the link.
-3. Optional, for better covers: make a free key at [steamgriddb.com/profile/preferences/api](https://www.steamgriddb.com/profile/preferences/api) and paste it into Settings. Without one, covers come from Steam where it can find them.
+The app reads and edits your Google Sheet through a small script that lives inside the sheet. Your sheet stays private: nothing is published, and the app pairs with the script once and keeps a secret key on your PC.
 
-The key and settings are stored only on this PC, in `%APPDATA%\GameBacklog`.
+1. In the Google Sheet, open **Extensions → Apps Script**.
+2. Replace what's in the editor with the contents of [`app/ui/connect.gs`](app/ui/connect.gs) (the app's Settings has a **Copy the script** button) and press **Save**.
+3. **Deploy → New deployment → Web app**. Set **Execute as: Me** and **Who has access: Anyone**, then **Deploy** and authorize. If Google says the app isn't verified, choose **Advanced → Go to (unsafe)**; it's your own script.
+4. Copy the **Web app** link and paste it into the app's **Settings → Sheet connection**.
 
-## How it stays up to date
+To disconnect the app, run `resetConnection` in the Apps Script editor.
 
-The sheet is the source of truth. The app re-reads it every few minutes (Settings → refresh interval) and whenever you come back to the window. Completion and drop dates are stamped by the sheet itself, so the app just shows them.
+Optional, for better covers: make a free key at [steamgriddb.com/profile/preferences/api](https://www.steamgriddb.com/profile/preferences/api) and paste it into Settings.
+
+Settings, keys and the cover cache live only on this PC, in `%APPDATA%\GameBacklog`.
+
+## Updating
+
+When a new version is out, an **Update** button appears in the top bar. Click it and the app downloads the new version, swaps itself and restarts.
+
+## What it shows
+
+- Games and Books catalogs (switch at the top left).
+- Covers or a sheet-style list (toggle in the toolbar). In the list, hovering a row fades the cover in.
+- For each game: Metacritic critic and user scores, the score on your platform, Steam and PlayStation Store ratings, DLC with their own scores, Wikipedia, news, and a "Newly updated!" flag when the game got a patch in the last 14 days.
+- PS4 discs and Switch 1 games show whether the upgrade to PS5 or Switch 2 is free or paid.
+- Epic and GOG games are grouped as Heroic in the library and launch through Heroic.
 
 ## Controls
 

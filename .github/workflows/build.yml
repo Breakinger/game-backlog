@@ -23,8 +23,12 @@ jobs:
           python -m pip install --upgrade pip
           pip install -r requirements.txt
 
+      - name: Stamp the version
+        shell: bash
+        run: echo "VERSION = \"1.0.${{ github.run_number }}\"" > app/version.py
+
       - name: Check the app imports
-        run: python -c "import sys; sys.path.insert(0, 'app'); import sheet, art, main; print('imports ok')"
+        run: python -c "import sys; sys.path.insert(0, 'app'); import sheet, art, info, updater, main, version; print('imports ok', version.VERSION)"
 
       - name: Build the exe
         run: pyinstaller --noconfirm --onefile --windowed --name GameBacklog --icon assets/icon.ico --add-data "app/ui;ui" --paths app app/main.py
@@ -42,4 +46,4 @@ jobs:
         run: |
           gh release create "v1.0.${{ github.run_number }}" dist/GameBacklog.exe \
             --title "Game Backlog v1.0.${{ github.run_number }}" \
-            --notes "Download GameBacklog.exe below and run it. No install needed. If Windows SmartScreen warns you, click More info, then Run anyway (the app isn't signed)."
+            --notes "Already have the app? Click Update in its top bar. New here? Download GameBacklog.exe below and run it; no install needed. If Windows SmartScreen warns you, click More info, then Run anyway (the app isn't signed)."

@@ -4,3 +4,4 @@ build/
 dist/
 *.spec
 dev/mock.js
+dev/preview.html

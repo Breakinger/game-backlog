@@ -6,19 +6,20 @@
 <title>Game Backlog</title>
 <link rel="stylesheet" href="style.css">
 </head>
-<body>
+<body data-catalog="games">
 <canvas id="towers" aria-hidden="true"></canvas>
 
 <header class="bar">
-  <div class="brand">Backlog</div>
-  <nav class="tabs" role="tablist">
-    <button class="tab" data-view="home" role="tab">Home</button>
-    <button class="tab" data-view="library" role="tab">Library</button>
-    <button class="tab" data-view="wishlist" role="tab">Wishlist</button>
-    <button class="tab" data-view="played" role="tab">Played</button>
-    <button class="tab" data-view="stats" role="tab">Your years</button>
-  </nav>
+  <div class="catalogs" role="tablist" aria-label="Catalog">
+    <button class="catalog" data-catalog="games" role="tab">Games</button>
+    <button class="catalog" data-catalog="books" role="tab">Books</button>
+  </div>
+  <nav class="tabs" role="tablist" id="tabs"></nav>
   <div class="status">
+    <button class="update-btn" id="updateBtn" hidden></button>
+    <button class="icon" id="addBtn" title="Add" aria-label="Add">
+      <svg viewBox="0 0 24 24" width="20" height="20"><path fill="currentColor" d="M11 5h2v6h6v2h-6v6h-2v-6H5v-2h6z"/></svg>
+    </button>
     <button class="sync" id="syncBtn" title="Sync now"><span class="dot"></span><span id="syncText">Connecting…</span></button>
     <button class="icon" id="settingsBtn" title="Settings" aria-label="Settings">
       <svg viewBox="0 0 24 24" width="20" height="20"><path fill="currentColor" d="M19.4 13a7.6 7.6 0 0 0 0-2l2-1.6-2-3.4-2.4 1a7 7 0 0 0-1.7-1L15 3.5h-4l-.4 2.5a7 7 0 0 0-1.7 1l-2.4-1-2 3.4L6.6 11a7.6 7.6 0 0 0 0 2l-2 1.6 2 3.4 2.4-1a7 7 0 0 0 1.7 1l.4 2.5h4l.4-2.5a7 7 0 0 0 1.7-1l2.4 1 2-3.4zM13 15.5a3.5 3.5 0 1 1 0-7 3.5 3.5 0 0 1 0 7z" transform="translate(-1 0)"/></svg>
@@ -32,14 +33,26 @@
 
 <aside id="panel" class="panel" aria-hidden="true" tabindex="-1"></aside>
 <div id="scrim" class="scrim" hidden></div>
+<div id="peek" class="peek" aria-hidden="true"><img alt=""></div>
+<div id="toast" class="toast" role="status" hidden></div>
 
 <dialog id="settings" class="settings">
   <form method="dialog" id="settingsForm">
     <h2>Settings</h2>
-    <label>Sheet link
-      <input name="sheet_url" type="url" placeholder="https://docs.google.com/spreadsheets/…" required>
-      <small>Paste the link from <em>File → Share → Publish to web</em> (Entire document, Comma-separated values). A normal sheet link also works if the sheet is shared with "Anyone with the link".</small>
+    <label>Sheet connection
+      <input name="sheet_url" type="url" placeholder="https://script.google.com/macros/s/…/exec">
+      <small id="connState"></small>
     </label>
+    <details class="howto">
+      <summary>How to connect your sheet (one time, about 2 minutes)</summary>
+      <ol>
+        <li>In your Google Sheet, open <b>Extensions → Apps Script</b>.</li>
+        <li>Delete what's in the editor, paste the connection script, and press <b>Save</b>. <button type="button" class="linkish" id="copyScript">Copy the script</button></li>
+        <li>Press <b>Deploy → New deployment</b>, pick type <b>Web app</b>, set <b>Execute as: Me</b> and <b>Who has access: Anyone</b>, then <b>Deploy</b>.</li>
+        <li>Google asks you to authorize. If it says the app isn't verified, choose <b>Advanced → Go to (unsafe)</b>. It's your own script.</li>
+        <li>Copy the <b>Web app</b> link and paste it above. The sheet stays private: the app pairs with the script and keeps a secret key on this PC.</li>
+      </ol>
+    </details>
     <label>SteamGridDB API key
       <input name="sgdb_key" type="password" autocomplete="off" placeholder="Leave empty to keep the saved key">
       <small id="keyState">Covers for every platform. Without a key, covers come from Steam only.</small>
@@ -50,14 +63,18 @@
         <option value="10">10 minutes</option><option value="30">30 minutes</option>
       </select>
     </label>
+    <div class="row version-row"><span id="versionText"></span><button type="button" class="ghost small" id="checkUpdates">Check for updates</button></div>
     <div class="row">
-      <button type="button" class="ghost" id="openSheet">Open the sheet</button>
       <button type="button" class="ghost" id="clearCovers">Download covers again</button>
       <span class="spacer"></span>
       <button value="cancel" class="ghost">Cancel</button>
       <button value="save" class="primary" id="saveSettings">Save</button>
     </div>
   </form>
+</dialog>
+
+<dialog id="addDialog" class="settings">
+  <form method="dialog" id="addForm"></form>
 </dialog>
 
 <script src="app.js"></script>

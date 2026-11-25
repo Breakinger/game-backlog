@@ -145,6 +145,60 @@ class Art:
         self._save()
         return self._data_uri(os.path.join(self.dir, fname))
 
+    # ---------- book covers ----------
+    def book_cover(self, title, author=""):
+        key = "book|" + _norm(title) + "|" + _norm(author)
+        entry = self.index.get(key)
+        if entry:
+            fname = entry.get("file")
+            if fname and os.path.exists(os.path.join(self.dir, fname)):
+                return self._data_uri(os.path.join(self.dir, fname))
+            if not fname and time.time() - entry.get("t", 0) < MISS_RETRY_DAYS * 86400:
+                return None
+        img, src = None, None
+        try:
+            q = "title=" + urllib.parse.quote(title) + ("&author=" + urllib.parse.quote(author) if author else "")
+            body, _ = _get("https://openlibrary.org/search.json?limit=5&fields=title,cover_i,ratings_count&" + q)
+            docs = [d for d in json.loads(body).get("docs", []) if d.get("cover_i")]
+            if docs:
+                d = max(docs, key=lambda x: (similar(title, x.get("title", "")), x.get("ratings_count") or 0))
+                img, ctype = _get(f"https://covers.openlibrary.org/b/id/{d['cover_i']}-L.jpg?default=false", timeout=25)
+                if "image" not in ctype or len(img) < 2000:
+                    img = None
+                src = "openlibrary" if img else None
+        except Exception:
+            img = None
+        if not img:
+            try:
+                q = urllib.parse.quote(f'intitle:"{title}"' + (f' inauthor:"{author}"' if author else ""))
+                body, _ = _get(f"https://www.googleapis.com/books/v1/volumes?maxResults=5&q={q}")
+                for it in json.loads(body).get("items", []):
+                    links = (it.get("volumeInfo") or {}).get("imageLinks") or {}
+                    url = links.get("thumbnail") or links.get("smallThumbnail")
+                    if url:
+                        url = url.replace("http://", "https://").replace("&edge=curl", "").replace("zoom=1", "zoom=0")
+                        img, ctype = _get(url, timeout=25)
+                        if "image" in ctype and len(img) > 2000:
+                            src = "google"
+                            break
+                        img = None
+            except Exception:
+                img = None
+        return self._store(key, img, src)
+
+    def _store(self, key, img, src):
+        if not img:
+            self.index[key] = {"file": "", "t": time.time(), "src": "none"}
+            self._save()
+            return None
+        ext = ".png" if img[:4] == b"\x89PNG" else ".webp" if img[8:12] == b"WEBP" else ".jpg"
+        fname = re.sub(r"[^a-z0-9]+", "-", key)[:70].strip("-") + ext
+        with open(os.path.join(self.dir, fname), "wb") as f:
+            f.write(img)
+        self.index[key] = {"file": fname, "t": time.time(), "src": src}
+        self._save()
+        return self._data_uri(os.path.join(self.dir, fname))
+
     @staticmethod
     def _data_uri(path):
         ext = os.path.splitext(path)[1].lower()
@@ -188,17 +242,17 @@ def links_for(game, appid=None):
         if owned:
             add("PlayStation library", "https://library.playstation.com/recently-purchased", True)
         add("PlayStation Store", f"https://store.playstation.com/en-us/search/{q}", not owned)
-    elif plat == "Switch 2":
+    elif plat in ("Switch 2", "Switch"):
         add("Nintendo eShop", f"https://www.nintendo.com/us/search/#q={q}", True)
-    elif plat == "GOG":
+    elif plat == "PS2":
+        add("PlayStation Store (PS2 Classics)", f"https://store.playstation.com/en-us/search/{q}", True)
+    elif plat in ("GOG", "Epic Games"):
         if owned:
-            add("Open in Heroic", "heroic://", True)
-            add("GOG library", "https://www.gog.com/en/account")
-        add("GOG store page", f"https://www.gog.com/en/games?query={q}", not owned)
-    elif plat == "Epic Games":
-        if owned:
-            add("Open in Heroic", "heroic://", True)
-        add("Epic Games Store", f"https://store.epicgames.com/en-US/browse?q={q}&sortBy=relevancy", not owned)
+            add("Play in Heroic", "heroic://", True)
+        if plat == "GOG":
+            add("GOG store page", f"https://www.gog.com/en/games?query={q}", not owned)
+        else:
+            add("Epic Games Store", f"https://store.epicgames.com/en-US/browse?q={q}&sortBy=relevancy", not owned)
     elif plat == "Ubisoft Connect":
         if owned:
             add("Open Ubisoft Connect", "uplay://", True)
