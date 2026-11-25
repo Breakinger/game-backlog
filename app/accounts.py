@@ -15,6 +15,7 @@ import urllib.parse
 import urllib.request
 
 from art import similar, same_title, _norm
+import saver
 
 UA = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) Masterlog/1.0"
 JUNK = re.compile(r"dedicated server|soundtrack|\bost\b|\bsdk\b|benchmark|playtest|\bdemo\b|test server|editor|mod tools|artbook|wallpaper", re.I)
@@ -62,6 +63,27 @@ class Steam:
         if games is None:
             raise PermissionError("Steam returned no games. In Steam, set Profile → Privacy → Game details to Public.")
         return games
+
+    @staticmethod
+    def wishlist(key, sid):
+        """Your public Steam wishlist, with names. Needs the wishlist to be visible (same privacy as game details)."""
+        out = _http(f"{Steam.API}/IWishlistService/GetWishlist/v1/?key={urllib.parse.quote(key)}&steamid={sid}")
+        items = (out.get("response") or {}).get("items") or []
+        ids = [int(i["appid"]) for i in items if i.get("appid")]
+        names = {}
+        for i in range(0, len(ids), 50):
+            req = json.dumps({"ids": [{"appid": a} for a in ids[i:i + 50]], "context": {"language": "english", "country_code": "US"},
+                              "data_request": {"include_basic_info": False}})
+            try:
+                r = _http(f"{Steam.API}/IStoreBrowseService/GetItems/v1/?input_json=" + urllib.parse.quote(req))
+                for it in (r.get("response") or {}).get("store_items") or []:
+                    if it.get("name"):
+                        names[int(it.get("appid") or it.get("id") or 0)] = {"name": it["name"], "type": it.get("type")}
+            except Exception:
+                pass
+        return [{"id": f"steamwish:{a}", "appid": a, "name": names.get(a, {}).get("name", ""), "platform": "Steam",
+                 "dlc": names.get(a, {}).get("type") == 4, "added": next((i.get("date_added") for i in items if int(i.get("appid", 0)) == a), None)}
+                for a in ids]
 
     @staticmethod
     def achievements(key, sid, appid):
@@ -261,13 +283,12 @@ class Accounts:
         self.state.setdefault("sources", {})   # source -> {"games": [...], "synced": t, "error": str, "who": str}
         self.state.setdefault("seen", {})      # source -> [ids seen before]
         self.state.setdefault("ach", {})       # steam appid -> {"done", "total", "t"}
+        self.state.setdefault("blacklist", [])  # ids and names you never want suggested
+        self._match_cache = None
 
     def _save(self):
-        with self.lock:
-            tmp = self.path + ".tmp"
-            with open(tmp, "w", encoding="utf-8") as f:
-                json.dump(self.state, f, ensure_ascii=False)
-            os.replace(tmp, self.path)
+        self._match_cache = None
+        saver.save_later(self.path, lambda: self.state, delay=1.0, lock=self.lock)
 
     # ----- linking -----
     def status(self):
@@ -415,15 +436,56 @@ class Accounts:
                     entry["error"] = None
                 except Exception as e:
                     entry["error"] = str(e) or e.__class__.__name__
+                if src == "steam":
+                    try:
+                        c = self.vault.get("steam")
+                        entry["wishlist"] = Steam.wishlist(c["key"], c["sid"])
+                        entry["wishlist_error"] = None
+                    except Exception as e:
+                        entry["wishlist_error"] = str(e) or e.__class__.__name__
                 self._save()
         finally:
             self.running = False
 
     # ----- matching against the sheet -----
     def match(self, sheet_games):
-        """Per sheet game: account facts. Plus candidates the sheet doesn't have yet."""
-        index = [(_norm(g["name"]), g) for g in sheet_games]
-        facts, candidates, new_ids, unreviewed = {}, [], [], []
+        """Per sheet game: account facts. Plus candidates the sheet doesn't have yet. Exact names match instantly;
+        only the rest are compared, and only against names that share a word. Results are reused until something changes."""
+        sig = (tuple((g["name"], g.get("platform")) for g in sheet_games), self.running,
+               tuple((k, v.get("synced"), len(v.get("wishlist") or [])) for k, v in self.state["sources"].items()),
+               tuple((k, len(v)) for k, v in self.state["seen"].items()), len(self.state["blacklist"]),
+               tuple(s for s in ("steam", "psn", "heroic", "itch") if self.linked(s)))
+        if self._match_cache and self._match_cache[0] == sig:
+            return self._match_cache[1]
+        exact, words = {}, {}
+        for g in sheet_games:
+            k = _norm(g["name"])
+            exact.setdefault(k, []).append(g)
+            for w in set(k.split()):
+                if len(w) > 2:
+                    words.setdefault(w, []).append(g)
+        black = set(self.state["blacklist"])
+        PLATS = {"steam": ("Steam",), "psn": ("PS5", "PS4", "PS2"), "heroic": ("GOG", "Epic Games"), "itch": ("itch.io",)}
+
+        def find(a, src):
+            k = _norm(a["name"])
+            pool = exact.get(k)
+            if not pool:
+                cands = {id(g): g for w in set(k.split()) if len(w) > 2 for g in words.get(w, [])}.values()
+                best, score = None, 0
+                for g in cands:
+                    if same_title(a["name"], g["name"], MATCH):
+                        sc = similar(a["name"], g["name"])
+                        if sc > score:
+                            best, score = g, sc
+                pool = [best] if best else []
+            if not pool:
+                return None
+            # the same game on several platforms: the row for this account's platform
+            return next((g for g in pool if g.get("platform") in PLATS.get(src, ())), pool[0])
+
+        facts, candidates, new_ids, unreviewed, wish = {}, [], [], [], []
+        wish_appids = []
         for src, entry in self.state["sources"].items():
             if not self.linked(src):
                 continue
@@ -432,13 +494,8 @@ class Accounts:
             if first_time and entry.get("games"):
                 unreviewed.append(src)
             for a in entry.get("games") or []:
-                key = _norm(a["name"])
-                best, score = None, 0
-                for k, g in index:
-                    s = 1.0 if k == key else (similar(a["name"], g["name"]) if same_title(a["name"], g["name"], MATCH) else 0)
-                    if s > score:
-                        best, score = g, s
-                if best and score >= MATCH:
+                best = find(a, src)
+                if best:
                     f = facts.setdefault(best["name"], {})
                     f.setdefault("sources", []).append(src)
                     f["minutes"] = max(f.get("minutes") or 0, a.get("minutes") or 0)
@@ -456,16 +513,41 @@ class Accounts:
                         f["appid"] = a.get("appid")
                     if a.get("art"):
                         f["ps_art"] = a["art"]
-                else:
+                    if src == "psn" and a.get("platform") == "PS5" and best.get("platform") == "PS4":
+                        f["ps5_version"] = True   # you have the PS5 version of a PS4 disc: the upgrade is yours
+                elif a["id"] not in black and _norm(a["name"]) not in black:
                     c = dict(a, source=src)
                     candidates.append(c)
                     if not first_time and a["id"] not in seen:
                         new_ids.append(c)
-        return {"facts": facts, "candidates": candidates, "new": new_ids, "unreviewed": unreviewed, "running": self.running}
+            for w in entry.get("wishlist") or []:
+                wish_appids.append(w["appid"])
+                if w.get("dlc") or not w.get("name"):
+                    continue
+                best = find(w, "steam")
+                if best:
+                    facts.setdefault(best["name"], {})["steam_wishlist"] = True
+                elif w["id"] not in black and _norm(w["name"]) not in black:
+                    wish.append(dict(w, source="steam", wishlist=True))
+                    if not first_time and w["id"] not in seen:
+                        new_ids.append(dict(w, source="steam", wishlist=True))
+        out = {"facts": facts, "candidates": candidates, "wishlist": wish, "wish_appids": wish_appids, "new": new_ids,
+               "unreviewed": unreviewed, "running": self.running}
+        self._match_cache = (sig, out)
+        return out
+
+    def blacklist(self, ids_and_names, remove=False):
+        bl = set(self.state["blacklist"])
+        for x in ids_and_names:
+            x = x if ":" in x else _norm(x)
+            (bl.discard if remove else bl.add)(x)
+        self.state["blacklist"] = sorted(bl)
+        self._save()
+        return self.state["blacklist"]
 
     def mark_seen(self, ids_by_source=None):
         """Remember everything currently owned, so only genuinely new purchases count as new later."""
         for src, entry in self.state["sources"].items():
-            ids = [a["id"] for a in entry.get("games") or []]
+            ids = [a["id"] for a in (entry.get("games") or []) + (entry.get("wishlist") or [])]
             self.state["seen"][src] = sorted(set(self.state["seen"].get(src) or []) | set(ids))
         self._save()

@@ -48,7 +48,7 @@ const state = {
   games: [], plays: [], books: [], options: { games: {}, plays: {}, books: {} }, canEdit: false,
   syncedAt: null, error: null, settings: {}, updated: {}, facts: {}, candidates: [],
   view: "home", focusId: null, mode: "covers",
-  filter: { q: "", status: "All", plats: new Set(), playOn: "All", prio: "All", sort: "priority" },
+  filter: { q: "", status: new Set(), plats: new Set(), playOn: "All", prio: new Set(), formats: new Set(), sort: "priority" },
   bfilter: { q: "", status: "All", sort: "series" },
   openYears: new Set([new Date().getFullYear()]),
 };
@@ -145,8 +145,9 @@ function caseHTML(g, o = {}) {
   else if (st === "Second chance") badge = `<span class="badge chance">↺</span>`;
   else if (g.status === "Dropped") badge = `<span class="badge drop">✗</span>`;
   else if (g.priority === "Extreme" || g.priority === "High") badge = `<span class="badge" style="color:${PRIO_COLOR[g.priority]}">${g.priority}</span>`;
-  const fresh = state.updated[g.name] ? `<span class="fresh">Newly updated!</span>` : "";
-  const up = g.upgrade && UPGRADE_TO[g.platform] && g.upgrade !== "No upgrade" ? `<span class="tag up ${g.upgrade.startsWith("Free") ? "free" : "paid"}" title="${esc(upgradeLabel(g))}">${g.upgrade.startsWith("Free") ? "FREE" : "PAID"} ↑</span>` : "";
+  const fresh = state.updated[g.name] ? `<span class="freshline" title="${esc(state.updated[g.name].title || "")}"><i></i>Newly updated!</span>` : "";
+  const upOwned = g.upgrade_owned || factsOf(g).ps5_version;
+  const up = g.upgrade && UPGRADE_TO[g.platform] && g.upgrade !== "No upgrade" ? `<span class="tag up ${upOwned ? "owned" : g.upgrade.startsWith("Free") ? "free" : "paid"}" title="${esc(upgradeLabel(g))}${upOwned ? " · you own the upgrade" : ""}">${upOwned ? `${esc(UPGRADE_TO[g.platform].replace("PlayStation ", "PS").replace("Nintendo ", ""))} ✓` : `${g.upgrade.startsWith("Free") ? "FREE" : "PAID"} ↑`}</span>` : "";
   const cached = covers.get(coverKey(g));
   const art = cached ? `<img alt="" decoding="async" src="${cached}">` : `<div class="fallback"><div class="t">${esc(g.name)}</div><div class="d">${esc(g.developer || g.genre || "")}</div></div>`;
   const deck = g.platform === "Steam" && g.play_on === "Steam Deck" ? `<span class="tag deck">DECK</span>` : p.tag ? `<span class="tag">${p.tag}</span>` : "";
@@ -156,24 +157,49 @@ function caseHTML(g, o = {}) {
   const media = p.media === "card"
     ? `<div class="media card"><div class="card-face"><span>${esc(p.label.replace("Nintendo ", ""))}</span></div></div>`
     : `<div class="media disc ${p.disc || ""}"><div class="disc-face"></div></div>`;
-  return `<button class="case p-${(g.platform || "x").replace(/\W+/g, "")} ${g.status === "Wishlist" ? "unowned" : ""}" data-id="${g.id}" data-kind="game"
+  const dups = (dupsOf.get(g) || []).slice(0, 3);
+  const stack = dups.length ? `<div class="stackdiscs" aria-hidden="true">${dups.map((d, i) => { const dp = plat(d.platform); return `<i style="--i:${i + 1};--dc:${dp.band}" title="${esc(d.name)} · ${esc(dp.label)}"></i>`; }).join("")}</div><span class="copies" title="${esc(dups.map(d => `${d.name} (${plat(d.platform).label}, ${d.status})`).join(" · "))}">×${dups.length + 1}</span>` : "";
+  return `<button class="case p-${(g.platform || "x").replace(/\W+/g, "")} ${g.status === "Wishlist" ? "unowned" : ""} ${dups.length ? "stacked" : ""} ${effectClass(g)} ${ach ? "honored" : ""}" data-id="${g.id}" data-kind="game"
     style="--band:${p.band};--band-text:${p.text};--shell:${p.shell};--accent:${p.accent};--plat:${p.chip}" aria-label="${esc(g.name)}">
-    <div class="stage">${media}
+    <div class="stage">${stack}${media}${effectLayer(g)}
       <div class="box"><div class="shell"></div>
         <div class="band"><span class="wm">${esc(p.label)}</span>${deck}${up}</div>
         <div class="art" data-kind="game" data-id="${g.id}">${art}</div>
-        <div class="hinge"></div><div class="sheen"></div>${badge}${fresh}${typeTag}${ach}${quick}${g.status === "Wishlist" ? priceTag(g) : ""}
-      </div>
+        <div class="hinge"></div><div class="sheen"></div>${badge}${typeTag}${quick}${g.status === "Wishlist" ? priceTag(g) : ""}
+      </div>${ach}
     </div>
-    ${o.noLabel ? "" : `<div class="label"><div class="name">${esc(g.name)}</div><div class="sub">${esc(o.sub ?? subline(g))}</div></div>`}
+    ${o.noLabel ? "" : `<div class="label">${fresh}<div class="name">${esc(g.name)}</div><div class="sub">${esc(o.sub ?? subline(g))}</div></div>`}
   </button>`;
 }
 function factsOf(g) { return state.facts[g.name] || {}; }
 function achBadge(g) {
   const f = factsOf(g);
-  if (f.complete === "Platinum" || (g.platinum && CONSOLES.has(g.platform))) return `<span class="ach plat" title="Platinum trophy">◆ PLATINUM</span>`;
-  if (f.complete || g.platinum) return `<span class="ach full" title="Every achievement">★ 100%</span>`;
+  // a badge of honour: bigger than the cover's edge, like a perfect-game badge
+  if (f.complete === "Platinum" || (g.platinum && CONSOLES.has(g.platform))) return `<span class="honor plat" title="Platinum trophy"><svg viewBox="0 0 40 40"><path d="M20 3 33 11v18L20 37 7 29V11z"/><path class="in" d="M20 10l3 6.2 6.8 1-4.9 4.8 1.2 6.8L20 25.6l-6.1 3.2 1.2-6.8-4.9-4.8 6.8-1z"/></svg><b>PLATINUM</b></span>`;
+  if (f.complete || g.platinum) return `<span class="honor full" title="Every achievement"><svg viewBox="0 0 40 40"><circle cx="20" cy="20" r="17"/><path class="in" d="M20 9l3.2 6.6 7.2 1-5.2 5.1 1.2 7.2L20 25.5l-6.4 3.4 1.2-7.2-5.2-5.1 7.2-1z"/></svg><b>100%</b></span>`;
   return "";
+}
+/* status you can see at a glance: flames for Extreme, a gold pulse for High, a green glow when completed,
+   cobwebs on paused games, dropped games tossed aside, an extra life for second chances */
+function effectClass(g) {
+  const st = statusOf(g), out = [];
+  if (st === "Second chance") out.push("fx-chance");
+  else if (g.status === "Dropped") out.push("fx-dropped");
+  else if (g.status === "Completed") out.push("fx-done");
+  else if (st === "Paused" || g.status === "Paused") out.push("fx-paused");
+  if (g.status !== "Completed" && g.status !== "Dropped") {
+    if (g.priority === "Extreme") out.push("fx-extreme");
+    else if (g.priority === "High") out.push("fx-high");
+  }
+  return out.join(" ");
+}
+function effectLayer(g) {
+  const st = statusOf(g);
+  let out = "";
+  if (g.priority === "Extreme" && g.status !== "Completed" && g.status !== "Dropped") out += `<div class="flames" aria-hidden="true"><i></i><i></i><i></i><i></i><i></i></div>`;
+  if ((st === "Paused" || g.status === "Paused") && st !== "Second chance") out += `<div class="cobweb" aria-hidden="true"><svg viewBox="0 0 60 60"><path d="M0 0L60 60M0 0L60 22M0 0L22 60M0 0L60 0M0 0L0 60M10 0Q8 8 0 10M22 0Q18 18 0 22M36 0Q30 30 0 36M52 0Q42 42 0 52"/></svg></div><div class="dust" aria-hidden="true"></div>`;
+  if (st === "Second chance") out += `<span class="extralife" title="Second chance"><svg viewBox="0 0 24 24"><path d="M12 21s-7.5-4.6-9.5-9.1C1 8.4 3.2 5 6.6 5c2 0 3.4 1.1 4.2 2.4C11.6 6.1 13 5 15 5c3.4 0 5.6 3.4 4.1 6.9C17.1 16.4 12 21 12 21z"/></svg><b>↻ 1UP</b></span>`;
+  return out;
 }
 function quickBtn(item) {
   if (!state.canEdit) return "";
@@ -209,21 +235,70 @@ function bookHTML(b, o = {}) {
 const byPrio = (a, b) => (PRIO_ORDER[a.priority] ?? 9) - (PRIO_ORDER[b.priority] ?? 9) || a.name.localeCompare(b.name);
 const byDone = (a, b) => (b.completed || "").localeCompare(a.completed || "");
 function shelves() {
-  const G = state.games, year = new Date().getFullYear();
+  const G = collapse(state.games), year = new Date().getFullYear();
   const fresh = G.filter(g => state.updated[g.name] && owned(g) && g.status !== "Completed");
   return [
     { title: "Continue playing", items: G.filter(g => g.status === "Playing" && g.type !== "Live service").concat(G.filter(g => g.status === "Paused").sort(byPrio)), view: "library", preset: { status: "Playing" } },
     { title: "Your live games", items: G.filter(g => g.type === "Live service" && g.status !== "Dropped"), view: "library", preset: { status: "Live service" } },
-    { title: "Modded playthroughs", items: G.filter(g => g.type === "Modded"), view: "library", preset: { status: "Modded" } },
+    { title: "Modpacks", items: G.filter(g => g.type === "Modded"), view: "library", preset: { status: "Modpacks" } },
+    { title: "Replays", items: G.filter(g => (g.runs || 0) > 1 && g.status !== "Wishlist").sort(byDone), view: "library", preset: { status: "Replays" } },
     { title: "Newly updated", items: fresh, view: "library" },
     { title: "Up next", items: G.filter(g => g.status === "Library").sort(byPrio).slice(0, 24), view: "library", preset: { status: "Library" } },
     { title: "On the Steam Deck", items: G.filter(g => g.play_on === "Steam Deck" && ["Library", "Playing", "Paused"].includes(g.status)).sort(byPrio), view: "library", preset: { playOn: "Steam Deck" } },
-    { title: "Upgrade these to PS5 or Switch 2", items: G.filter(g => g.upgrade && g.upgrade !== "No upgrade" && UPGRADE_TO[g.platform] && g.status !== "Completed"), view: "library" },
+    { title: "Upgrade these to PS5 or Switch 2", items: G.filter(g => g.upgrade && g.upgrade !== "No upgrade" && UPGRADE_TO[g.platform] && g.status !== "Completed" && !g.upgrade_owned && !factsOf(g).ps5_version), view: "library" },
     { title: "Wishlist, top priority", items: G.filter(g => g.status === "Wishlist").sort(byPrio).slice(0, 24), view: "wishlist" },
     { title: "Plan to migrate", items: G.filter(migrating), view: "library", preset: { status: "Plan to migrate" } },
     { title: `Finished in ${year}`, items: G.filter(g => g.status === "Completed" && (g.completed || "").startsWith(String(year))).sort(byDone), view: "stats" },
     { title: "Second chances", items: G.filter(g => statusOf(g) === "Second chance"), view: "played" },
   ];
+}
+/* ----- the same game more than once: one cover, the other copies stacked behind it ----- */
+const PLAT_RANK = ["PS5", "Switch 2", "Switch", "Steam", "PS4", "GOG", "Epic Games", "EA", "Ubisoft Connect", "PC (Other)", "itch.io", "Emulation", "PS2"];
+const VERSION_WORDS = [[/\banniversary( edition)?\b/, 3], [/\bspecial edition\b/, 3], [/\benhanced( edition)?\b/, 3], [/\bdefinitive( edition)?\b/, 2],
+  [/\bremaster(ed)?\b/, 2], [/\bdirector'?s cut\b/, 2], [/\b(complete|ultimate|goty|game of the year)( edition)?\b/, 1], [/\blegacy( edition)?\b/, -3],
+  [/\b(classic|original)( edition)?\b/, -2]];
+function versionScore(name) { const n = name.toLowerCase(); return VERSION_WORDS.reduce((s, [re, v]) => s + (re.test(n) ? v : 0), 0); }
+function baseTitle(name) {
+  let n = name.toLowerCase().replace(/[™®©]/g, "").replace(/&/g, "and");
+  const year = (n.match(/\((\d{4})\)/) || [])[1] || "";
+  n = n.replace(/\(\d{4}\)/g, " ");
+  for (const [re] of VERSION_WORDS) n = n.replace(re, " ");
+  n = n.replace(/\blegendary edition\b/, " ").replace(/\b(edition|the)\b/g, " ").replace(/[^a-z0-9]+/g, " ").trim();
+  return { base: n, year };
+}
+const dupsOf = new WeakMap();   // main copy -> the other copies
+function copyRank(g) {
+  return [-versionScore(g.name), g.format === "Physical" ? 0 : 1, (PLAT_RANK.indexOf(g.platform) + 1) || 99, g.status === "Wishlist" ? 1 : 0];
+}
+function collapse(list) {
+  const groups = new Map(), years = new Map();
+  for (const g of list) {
+    if (g.type === "Modded") { groups.set("mod:" + g.id, [g]); continue; }   // a modpack is its own thing
+    const { base, year } = baseTitle(g.name);
+    if (!base) { groups.set("id:" + g.id, [g]); continue; }
+    if (year) { if (!years.has(base)) years.set(base, new Set()); years.get(base).add(year); }
+    const k = base + "|" + year;
+    (groups.get(k) || groups.set(k, []).get(k)).push(g);
+  }
+  // 'God of War' and 'God of War (2018)' are the same game when there's only one God of War with a year
+  for (const [base, ys] of years) {
+    if (ys.size !== 1 || !groups.has(base + "|")) continue;
+    const y = [...ys][0];
+    groups.get(base + "|" + y).push(...groups.get(base + "|")); groups.delete(base + "|");
+  }
+  const out = [];
+  for (const g of list) {
+    for (const [k, arr] of groups) {
+      if (arr[0] !== g && !arr.includes(g)) continue;
+      if (arr.done) break;
+      arr.done = true;
+      const sorted = [...arr].sort((a, b) => { const x = copyRank(a), y = copyRank(b); for (let i = 0; i < x.length; i++) if (x[i] !== y[i]) return x[i] - y[i]; return 0; });
+      dupsOf.set(sorted[0], sorted.slice(1));
+      out.push(sorted[0]);
+      break;
+    }
+  }
+  return out;
 }
 function migrating(g) { return !!g.migrate_to && g.migrate_to !== g.platform && owned(g); }
 function heroGame() {
@@ -253,7 +328,7 @@ function render() {
   else if (state.view === "bookyears") v.innerHTML = bookYearsHTML();
   else v.innerHTML = libraryHTML();
   activateArt(v);
-  if (state.view === "home") updateHero(heroGame(), true);
+  if (state.view === "home") { updateHero(heroGame(), true); fillWhatsNew(); }
   if (state.view === "shelf") updateBookHero(bookHero(), true);
 }
 
@@ -276,10 +351,10 @@ function homeHTML() {
   const rows = shelves().filter(s => s.items.length).map((s, i) => `
     <section class="shelf">
       <div class="shelf-head"><h2>${esc(s.title)}</h2><span class="count">${s.items.length}</span>
-        <button class="more" data-go="${s.view}" data-shelf="${i}">See all</button></div>
+        <button class="more" data-go="${s.view}" data-shelf="${i}">See all</button>${s.title === "Modpacks" ? `<button class="more" data-modpacks>Find modpacks on this PC</button>` : ""}</div>
       <div class="shelf-row">${s.items.map(g => caseHTML(g)).join("")}</div>
     </section>`).join("");
-  return `<section class="hero"><div class="hero-bg" id="heroBg"></div><div id="heroCase"></div><div id="heroText"></div></section>${rows}`;
+  return `<section class="whatsnew" id="whatsNew" hidden></section><section class="hero"><div class="hero-bg" id="heroBg"></div><div id="heroCase"></div><div id="heroText"></div></section>${rows}`;
 }
 
 function updateHero(g, force) {
@@ -412,19 +487,27 @@ function movePeek(x, y) {
 function hidePeek() { const p = $("#peek"); if (p) { p.classList.remove("show"); p.dataset.key = ""; } }
 
 /* ----- library / wishlist / played ----- */
+const SPECIAL = {
+  "Live service": g => g.type === "Live service",
+  "Modpacks": g => g.type === "Modded",
+  "Replays": g => (g.runs || 0) > 1,
+  "Plan to migrate": g => migrating(g) || (groupOf(g.platform) === "Exiled" && owned(g)) || (g.platform === "Epic Games" && owned(g)),
+};
+function asSet(v) { return v instanceof Set ? v : new Set(!v || v === "All" ? [] : [v]); }
 function filtered() {
   const f = state.filter, q = f.q.trim().toLowerCase();
+  f.status = asSet(f.status); f.prio = asSet(f.prio); f.formats = asSet(f.formats);
   const list = state.games.filter(g => {
     if (state.view === "wishlist" && g.status !== "Wishlist") return false;
     if (state.view === "played" && !["Completed", "Dropped"].includes(g.status)) return false;
-    if (state.view === "library" && g.status === "Wishlist" && f.status !== "Wishlist") return false;
-    if (f.status === "Live service" || f.status === "Modded") { if (g.type !== f.status) return false; }
-    else if (f.status === "Plan to migrate") { if (!migrating(g) && !(groupOf(g.platform) === "Exiled" && owned(g)) && !(g.platform === "Epic Games" && owned(g))) return false; }
-    else if (f.status !== "All" && statusOf(g) !== f.status && !(f.status === "Dropped" && g.status === "Dropped")) return false;
+    if (state.view === "library" && g.status === "Wishlist" && !f.status.has("Wishlist")) return false;
+    // inside one group any match counts; across groups every group has to match
+    if (f.status.size && ![...f.status].some(st => SPECIAL[st] ? SPECIAL[st](g) : statusOf(g) === st || (st === "Dropped" && g.status === "Dropped"))) return false;
     if (f.plats.size && !f.plats.has(groupOf(g.platform))) return false;
     if (f.playOn === "Console" && !CONSOLES.has(g.platform)) return false;
     if (["PC", "Steam Deck"].includes(f.playOn) && (g.play_on !== f.playOn || CONSOLES.has(g.platform))) return false;
-    if (f.prio !== "All" && g.priority !== f.prio) return false;
+    if (f.prio.size && !f.prio.has(g.priority || "None")) return false;
+    if (f.formats.size && !f.formats.has(g.format || "Digital")) return false;
     if (q && !`${g.name} ${g.genre} ${g.developer} ${g.publisher} ${g.platform}`.toLowerCase().includes(q)) return false;
     return true;
   });
@@ -436,13 +519,22 @@ function filtered() {
     hours: (a, b) => (b.hours ?? -1) - (a.hours ?? -1),
     platform: (a, b) => order.indexOf(a.platform) - order.indexOf(b.platform) || byPrio(a, b),
   };
-  return list.sort(sorts[f.sort] || byPrio);
+  list.sort(sorts[f.sort] || byPrio);
+  return f.plats.size ? list : collapse(list);   // filtering by platform shows every copy on that platform
 }
+const multi = (set, name, options, labels = {}) => `<div class="seg multi" data-multi="${name}"><button aria-pressed="${!set.size}" data-v="All">All</button>${options.map(o => `<button aria-pressed="${set.has(o)}" data-v="${esc(o)}">${esc(labels[o] || o)}</button>`).join("")}</div>`;
 const seg = (obj, name, options) => `<div class="seg" data-seg="${name}">${options.map(o => `<button aria-pressed="${obj[name] === o}" data-v="${esc(o)}">${esc(o)}</button>`).join("")}</div>`;
+const scaleSlider = () => `<label class="scale" title="Cover size"><span aria-hidden="true">▫</span><input type="range" id="scale" min="0.7" max="1.7" step="0.05" value="${state.settings.scale || 1}" aria-label="Cover size"><span aria-hidden="true">◻</span></label>`;
+function applyScale(v, save) {
+  v = Math.min(1.7, Math.max(0.7, v || 1));
+  document.documentElement.style.setProperty("--scale", v);
+  state.settings.scale = v;
+  if (save) { clearTimeout(applyScale.t); applyScale.t = setTimeout(() => api?.set_pref("scale", v), 400); }
+}
 const modeSwitch = () => `<div class="seg mode" data-mode><button aria-pressed="${state.mode === "covers"}" data-v="covers" title="Covers">▦ Covers</button><button aria-pressed="${state.mode === "list"}" data-v="list" title="List">☰ List</button></div>`;
 function libraryHTML() {
   const f = state.filter;
-  const statuses = state.view === "wishlist" ? [] : state.view === "played" ? ["All", "Completed", "Dropped", "Second chance"] : ["All", "Library", "Playing", "Paused", "Completed", "Dropped", "Second chance", "Wishlist", "Live service", "Modded", "Plan to migrate"];
+  const statuses = state.view === "wishlist" ? [] : state.view === "played" ? ["Completed", "Dropped", "Second chance", "Replays"] : ["Library", "Playing", "Paused", "Completed", "Dropped", "Second chance", "Wishlist", "Live service", "Modpacks", "Replays", "Plan to migrate"];
   const present = new Set(state.games.map(g => groupOf(g.platform)));
   const groups = [...new Set(Object.keys(PLAT).map(groupOf))].filter(p => present.has(p));
   const chips = groups.map(p => {
@@ -451,17 +543,20 @@ function libraryHTML() {
     return `<button class="chip" data-plat="${esc(p)}" aria-pressed="${f.plats.has(p)}" style="--c:${c.chip};--t:${c.chipText}"><i></i>${esc(label)}</button>`;
   }).join("");
   const list = filtered();
+  const active = f.status.size + f.prio.size + f.formats.size + f.plats.size + (f.playOn !== "All") + !!f.q;
   return `<div class="toolbar">
       <div class="line">
         <input class="search" id="search" type="search" placeholder="Search games, genres, studios" value="${esc(f.q)}">
         ${seg(f, "playOn", ["All", "PC", "Steam Deck", "Console"])}
-        <select class="pick" id="prio"><option value="All">Any priority</option>${Object.keys(PRIO_ORDER).map(p => `<option ${f.prio === p ? "selected" : ""}>${p}</option>`).join("")}</select>
+        ${scaleSlider()}
         <select class="pick" id="sort">${[["priority", "Sort by priority"], ["name", "Sort by name"], ["score", "Sort by score"], ["recent", "Recently finished"], ["hours", "Most hours"], ["platform", "Sort by platform"]].map(([v, l]) => `<option value="${v}" ${f.sort === v ? "selected" : ""}>${l}</option>`).join("")}</select>
         ${modeSwitch()}
         <span class="total">${list.length} ${list.length === 1 ? "game" : "games"}</span>
-        ${state.canEdit ? `<button class="ghost small" data-add="games">+ Add game</button>` : ""}
+        ${active ? `<button class="ghost small" id="clearFilters">Clear filters (${active})</button>` : ""}
+        ${state.canEdit ? `<button class="ghost small" data-add="games">+ Add game</button><button class="ghost small" data-modpacks>+ Modpack</button>` : ""}
       </div>
-      ${statuses.length ? `<div class="line">${seg(f, "status", statuses)}</div>` : ""}
+      ${statuses.length ? `<div class="line">${multi(f.status, "status", statuses)}</div>` : ""}
+      <div class="line">${multi(f.prio, "prio", [...Object.keys(PRIO_ORDER), "None"], { None: "No priority" })}${multi(f.formats, "formats", ["Physical", "Digital"])}</div>
       <div class="line">${chips}</div>
     </div>
     ${!list.length ? `<p class="empty">No games match these filters. Clear the search or pick another platform.</p>`
@@ -664,12 +759,12 @@ function openPanel(kind, id, tab = "overview") {
   panelItem = { kind, id: item.id };
   hidePeek();
   const panel = $("#panel");
-  const tabs = kind === "game" ? [["overview", "Overview"], ["ratings", "Ratings"], ["dlc", "DLC"], ...(item.type === "Live service" ? [["milestones", "Milestones"]] : []), ["wiki", "Wiki"], ["news", "News"], ["edit", "Edit"]]
+  const tabs = kind === "game" ? [["overview", "Overview"], ["ratings", "Ratings"], ["dlc", "DLC"], ...(item.type === "Live service" ? [["milestones", "Milestones"]] : []), ["watch", "Watch"], ["wiki", "Wiki"], ["news", "News"], ["edit", "Edit"]]
     : [["overview", "Overview"], ["wiki", "About"], ["edit", "Edit"]];
   if (!same) {
     try { FX.play.open(); } catch {}
     panel.innerHTML = `<div class="cv-bg"><div class="cv-art" id="cvArt"></div></div>
-      <button class="icon close" aria-label="Close">✕</button>
+      <button class="icon close" aria-label="Close">✕</button>${kind === "game" ? `<button class="icon refreshinfo" data-refresh title="Refresh info: fetch cover, synopsis, ratings and media again" aria-label="Refresh info">↻</button>` : ""}
       <div class="cv-stage">${openCaseHTML(kind, item)}</div>
       <div class="cv-info"><div class="cv-head"><h2>${esc(item.name)}</h2><div class="pills">${kind === "game" ? pillsHTML(item) : bookPills(item)}</div></div>
         <div class="ptabs" role="tablist">${tabs.map(([k, l]) => `<button data-ptab="${k}" aria-selected="${k === tab}">${l}</button>`).join("")}</div>
@@ -707,7 +802,7 @@ function showPanelTab(tab) {
   const item = findItem(panelItem.kind, panelItem.id);
   if (!item) return closePanel();
   document.querySelectorAll("[data-ptab]").forEach(b => b.setAttribute("aria-selected", String(b.dataset.ptab === tab)));
-  $("#panel").querySelectorAll("video").forEach(v => v.pause()); try { FX.duck(false); } catch {}
+  $("#panel").querySelectorAll("video").forEach(v => v.pause()); $("#panel").querySelectorAll("#wPlayer, #gMain iframe").forEach(x => x.remove()); try { FX.duck(false); } catch {}
   const body = $("#pbody");
   body.dataset.tab = tab;
   const still = () => body.isConnected && body.dataset.tab === tab && panelItem && findItem(panelItem.kind, panelItem.id) === item;
@@ -730,7 +825,31 @@ function showPanelTab(tab) {
   if (tab === "wiki") { body.innerHTML = loading("Opening the wiki…"); Promise.resolve(api?.wiki(item)).then(w => { if (still()) body.innerHTML = wikiHTML(item, w); }); }
   if (tab === "milestones") { body.innerHTML = loading("Gathering milestones…"); Promise.resolve(api?.milestones(item)).then(m => { if (still()) body.innerHTML = milestonesHTML(item, m || []); }); }
   if (tab === "news") { body.innerHTML = loading("Fetching news…"); Promise.resolve(api?.news(item)).then(n => { if (still()) body.innerHTML = newsHTML(item, n || []); }); }
+  if (tab === "watch") { body.innerHTML = loading("Looking for streams and videos…"); Promise.resolve(api?.watch(item)).then(w => { if (still()) { body.innerHTML = watchHTML(item, w || {}); watchData = w; } }); }
   if (tab === "edit") body.innerHTML = editHTML("games", item);
+}
+let watchData = null;
+function watchHTML(g, w) {
+  const tw = w.twitch || {}, yt = w.youtube || [];
+  const live = tw.needs_setup ? `<p class="muted">Live streams use the same free Twitch app as IGDB. Add it in Settings → Sheet &amp; sources to see who's streaming.</p>`
+    : (tw.items || []).length ? `<div class="wgrid">${tw.items.map((s, i) => `<button class="wcard" data-twitch="${i}"><div class="wthumb"><img alt="" loading="lazy" src="${esc(s.thumb)}"><span class="live">LIVE</span><span class="viewers">${(s.viewers || 0).toLocaleString()} watching</span></div><b>${esc(s.name)}</b><small>${esc(s.title)}</small></button>`).join("")}</div>`
+    : `<p class="muted">Nobody is streaming ${esc(g.name)} on Twitch right now.</p>`;
+  const vids = yt.length ? `<div class="wgrid">${yt.map((v, i) => `<button class="wcard" data-ytw="${i}"><div class="wthumb"><img alt="" loading="lazy" src="${esc(v.thumb)}">${v.seconds ? `<span class="viewers">${Math.floor(v.seconds / 60)}:${String(v.seconds % 60).padStart(2, "0")}</span>` : ""}</div><b>${esc(v.name)}</b><small>${esc(v.channel || "")}${v.published ? ` · ${esc(v.published)}` : ""}</small></button>`).join("")}</div>` : `<p class="muted">No videos found.</p>`;
+  return `<div class="player" id="wPlayer" hidden></div><h3>Live on Twitch</h3>${live}<h3>On YouTube</h3>${vids}`;
+}
+function playWatch(kind, i) {
+  const box = $("#wPlayer"), w = watchData;
+  if (!box || !w) return;
+  const host = encodeURIComponent(location.hostname || w.host || "localhost");
+  if (kind === "twitch") {
+    const s = w.twitch.items[i];
+    box.innerHTML = `<iframe title="${esc(s.name)} on Twitch" src="https://player.twitch.tv/?channel=${encodeURIComponent(s.login)}&parent=${host}&autoplay=true" allow="autoplay; fullscreen" allowfullscreen></iframe><button class="ghost small" data-url="https://www.twitch.tv/${esc(s.login)}">Open on Twitch</button>`;
+  } else {
+    const v = w.youtube[i];
+    box.innerHTML = `<iframe title="${esc(v.name)}" src="https://www.youtube-nocookie.com/embed/${encodeURIComponent(v.youtube)}?autoplay=1&rel=0&modestbranding=1&origin=${encodeURIComponent(location.origin)}" referrerpolicy="strict-origin-when-cross-origin" allow="autoplay; encrypted-media; fullscreen; picture-in-picture" allowfullscreen></iframe><button class="ghost small" data-url="https://www.youtube.com/watch?v=${esc(v.youtube)}">Open on YouTube</button>`;
+  }
+  box.hidden = false; box.scrollIntoView({ block: "nearest", behavior: "smooth" });
+  try { FX.duck(true); } catch {}
 }
 function gameOverviewHTML(g) {
   const runs = state.plays.filter(p => p.game === g.name);
@@ -754,7 +873,10 @@ function gameOverviewHTML(g) {
   if (g.status === "Dropped") flags.push(["Second chance", g.second_chance]);
   const quick = state.canEdit ? `<div class="quick">${opts("games", "status").map(s => `<button class="qs ${g.status === s ? "on" : ""}" data-quick="${esc(s)}" style="--c:${STATUS_COLOR[s] || "#8F9BB3"}">${esc(s)}</button>`).join("")}</div>` : "";
   const fresh = state.updated[g.name];
-  return `${fresh ? `<div class="freshbar" data-url="${esc(fresh.url || "")}"><b>Newly updated!</b> ${esc(fresh.title)} · ${ago(fresh.date)}</div>` : ""}
+  collapse(state.games);
+  const others = dupsOf.get(g) || state.games.filter(x => x !== g && (dupsOf.get(x) || []).includes(g));
+  const copies = others.length ? `<div class="copiesbar"><span>Also in your library:</span>${others.map(o => `<button class="chip" data-open="${o.id}" data-kind="game">${esc(o.name)} · ${esc(plat(o.platform).label)}${o.format === "Physical" ? " (disc)" : ""} · ${esc(statusOf(o))}</button>`).join("")}</div>` : "";
+  return `${fresh ? `<div class="freshbar" data-url="${esc(fresh.url || "")}"><b>Newly updated!</b> ${esc(fresh.title)} · ${ago(fresh.date)}</div>` : ""}${copies}
     <div class="gallery" id="gallery"><div class="g-main" id="gMain"><div class="g-empty"><span class="spinner"></span></div></div><div class="g-strip" id="gStrip"></div></div>
     <div class="links" id="links"><button class="ghost" disabled>Finding links…</button></div>
     <div class="scores" id="ovScores"><span class="muted">Fetching scores…</span></div>
@@ -819,17 +941,25 @@ function ratingsHTML(g, r) {
     ${others.length ? `<details class="more"><summary>Other platform scores</summary><ul class="plist">${others.map(p => `<li><span>${esc(p.name)}</span><b class="mc ${mcClass(p.score)}">${p.score}</b></li>`).join("")}</ul></details>` : ""}
     <p class="fine">Scores from ${[mc.url && "Metacritic", r.steam && "Steam", r.playstation && "the PlayStation Store"].filter(Boolean).join(", ")}. Nintendo's eShop doesn't publish player ratings, so Switch games show Metacritic's Switch score instead.</p>`;
 }
+function dlcAppid(d) { const m = /\/app\/(\d+)/.exec(d.url || ""); return m ? +m[1] : null; }
 function dlcHTML(g, list) {
   if (!list.length) return `<p class="muted">No DLC found for this game.</p>`;
-  const row = d => `<li class="${d.major ? "major" : ""} ${d.kind === "upgrade" ? "upg" : ""}">
+  const marks = state.dlcMarks?.[g.name] || {};
+  const rowEnd = d => {
+    const id = dlcAppid(d), own = !!marks[d.name], wish = id && state.wishAppids?.has(id);
+    return `${own ? `<span class="owntag">Owned</span>` : wish ? `<span class="wishtag">On your Steam wishlist</span>` : ""}
+      <button class="ghost small" data-dlcown="${esc(d.name)}" aria-pressed="${own}">${own ? "Owned ✓" : "I own this"}</button>`;
+  };
+  const row0 = d => `<li class="${d.major ? "major" : ""} ${d.kind === "upgrade" ? "upg" : ""}">
       <div class="dl-art">${d.art ? `<img alt="" loading="lazy" decoding="async" src="${esc(d.art)}">` : `<span>${esc(shortDlc(g, d.name).slice(0, 2).toUpperCase())}</span>`}</div>
       <div class="dl-main"><div class="dl-title"><b>${esc(shortDlc(g, d.name))}</b>${d.major ? `<span class="majortag">Major expansion</span>` : d.kind === "upgrade" ? `<span class="minortag">Upgrade / pass</span>` : ""}${d.coming ? `<span class="minortag soon">Coming</span>` : ""}</div>
         <small>${[d.release, d.price].filter(Boolean).map(esc).join(" · ")}</small>${d.summary ? `<p>${esc(d.summary)}</p>` : ""}</div>
       <div class="dl-scores">${d.metacritic != null ? `<span class="mc ${mcClass(d.metacritic)}" data-url="${esc(d.metacritic_url || "")}" title="Metascore">${d.metacritic}</span>` : ""}
         ${d.steam ? `<span class="steamr" title="${esc(d.steam.label)}">${d.steam.percent}%</span>` : ""}
-        ${d.url ? `<button class="linkish" data-url="${esc(d.url)}">Store</button>` : ""}</div></li>`;
-  return `<p class="fine">${g.dlc_owned ? `You own DLC for this game${g.dlc_done ? " and you've finished it" : ""}.` : "You haven't marked any DLC as owned."}</p>
-    <ul class="dlcs">${list.map(row).join("")}</ul>`;
+        ${d.url ? `<button class="linkish" data-url="${esc(d.url)}">Store</button>` : ""}${rowEnd(d)}</div></li>`;
+  const n = Object.values(marks).filter(Boolean).length;
+  return `<p class="fine">${n ? `You own ${n} of these.` : g.dlc_owned ? `You own DLC for this game${g.dlc_done ? " and you've finished it" : ""}.` : "Mark the DLC you own; DLC on your Steam wishlist is flagged automatically."}</p>
+    <ul class="dlcs">${list.map(d => row0(d).replace(/^<li class="/, `<li class="${marks[d.name] ? "owned " : ""}`)).join("")}</ul>`;
 }
 function milestonesHTML(g, items) {
   if (!items.length) return `<p class="muted">No major updates found yet. Milestones come from the game's official update posts.</p>`;
@@ -886,7 +1016,7 @@ const GAME_FORM = [["name", "Name", "text"], ["status", "Status", "select"], ["p
   ["format", "Format", "select"], ["upgrade", "Upgrade", "select"], ["hours", "Hours", "number"], ["score", "Score (0–10)", "number"],
   ["type", "Category", "select"], ["migrate_to", "Migrate to", "select"],
   ["genre", "Genre", "text"], ["store_link", "Store link", "text"], ["notes", "Notes", "textarea"],
-  ["second_chance", "Second chance", "check"], ["dlc_owned", "DLC owned", "check"], ["dlc_done", "DLC done", "check"], ["platinum", "100% / Platinum", "check"], ["modded", "Modded", "check"]];
+  ["second_chance", "Second chance", "check"], ["upgrade_owned", "Upgrade owned", "check"], ["dlc_owned", "DLC owned", "check"], ["dlc_done", "DLC done", "check"], ["platinum", "100% / Platinum", "check"], ["modded", "Modded", "check"]];
 const BOOK_FORM = [["name", "Title", "text"], ["author", "Author", "text"], ["series", "Series", "text"], ["number", "Number in series", "number"],
   ["status", "Status", "select"], ["priority", "Priority", "select"], ["format", "Format", "select"], ["score", "Score (0–10)", "number"],
   ["store_link", "Store link", "text"], ["notes", "Notes", "textarea"]];
@@ -905,7 +1035,7 @@ function editHTML(cat, item) {
     <div class="fields">${form.filter(f => f[2] !== "check").map(f => fieldHTML(cat, f, item)).join("")}</div>
     ${cat === "games" ? `<div class="checks">${form.filter(f => f[2] === "check").map(f => fieldHTML(cat, f, item)).join("")}</div>` : ""}
     <p class="fine">Finish and drop dates, runs and "Beaten on" are filled in by the sheet itself. Renaming a game also renames its replays and fetches the cover for the new name.</p>
-    ${cat === "games" ? `<div class="row"><button type="button" class="ghost small" data-coverpick>Change cover…</button></div>` : ""}
+    ${cat === "games" ? `<div class="row"><button type="button" class="ghost small" data-coverpick>Change cover…</button><button type="button" class="ghost small" data-refresh>Refresh info</button></div>` : ""}
     <div class="row"><span class="spacer"></span><button type="submit" class="primary">Save changes</button></div></form>`;
 }
 function readForm(form, cat, item) {
@@ -1181,7 +1311,7 @@ async function renderAccounts() {
       ${s.linked ? `<button type="button" class="ghost small" data-unlink="${k}">Unlink</button>` : `<button type="button" class="primary small" data-linkopen="${k}">Link</button>`}</div>
       <div class="form" data-linkform="${k}" hidden>${a.help}${a.fields.map(([n, l, t]) => `<label>${l}<input name="acct_${k}_${n}" type="${t}" autocomplete="off"></label>`).join("")}
         <div class="row"><span class="spacer"></span><button type="button" class="primary small" data-link="${k}">${k === "heroic" ? "Link Heroic" : `Link ${a.name}`}</button></div></div></div>`;
-  }).join("") + `<div class="row"><button type="button" class="ghost small" id="syncAccounts">Check accounts now</button><button type="button" class="ghost small" id="reviewImports">Review games not in Masterlog</button></div>`;
+  }).join("") + `<div class="row"><button type="button" class="ghost small" id="syncAccounts">Check accounts now</button><button type="button" class="ghost small" id="reviewImports">Review games not in Masterlog</button><button type="button" class="ghost small" id="showHidden">Hidden games</button></div>`;
 }
 async function linkAccount(k) {
   const v = n => $(`[name="acct_${k}_${n}"]`)?.value.trim() || "";
@@ -1201,15 +1331,25 @@ function pollAccounts(fast) {
     const d = await Promise.resolve(api?.account_data()).catch(() => null);
     if (d) {
       const before = JSON.stringify(state.facts);
-      state.facts = d.facts || {}; state.candidates = d.candidates || [];
+      state.facts = d.facts || {}; state.candidates = d.candidates || []; state.steamWish = d.wishlist || []; state.wishAppids = new Set(d.wish_appids || []);
       if (before !== JSON.stringify(state.facts) && !document.activeElement?.closest?.("#editForm")) { render(); if (panelItem) refreshPanelHead(); }
       if (d.unreviewed?.length && state.candidates.length && !importOffered && state.canEdit) { importOffered = true; openImport(d.unreviewed); }
-      if (d.new?.length && state.canEdit) autoAdd(d.new);
+      if (d.new?.length && state.canEdit) offerNew(d.new);
       syncTrophies();
     }
     accountsPoll = setTimeout(run, d?.running || fast ? 4000 : 120000);
   };
   accountsPoll = setTimeout(run, fast ? 2500 : 0);
+}
+let offeredNew = "";
+function offerNew(items) {
+  const key = items.map(i => i.id).sort().join(",");
+  if (key === offeredNew) return;
+  offeredNew = key;
+  try { FX.play.notify(); } catch {}
+  const n = items.length, bought = items.filter(i => !i.wishlist).length;
+  toast(n === 1 ? `${items[0].name} just showed up on your ${SRC_LABEL[items[0].source] || ""} ${items[0].wishlist ? "wishlist" : "account"}.` : `${n} new games on your accounts${bought ? ` (${bought} bought)` : ""}.`,
+    "party", { label: "Review", run: () => openImport(null, { fresh: items }) });
 }
 async function autoAdd(items) {
   const res = await Promise.resolve(api?.import_games(items.map(c => ({ name: c.name, platform: c.platform, store_link: c.url })))).catch(() => null);
@@ -1224,6 +1364,11 @@ async function autoAdd(items) {
 async function syncTrophies() {
   // tick the sheet's 100% / Plat box when Steam or PlayStation says you've done it all
   if (!state.canEdit) return;
+  for (const g of state.games.filter(g => factsOf(g).ps5_version && g.upgrade && g.upgrade !== "No upgrade" && !g.upgrade_owned && !platSynced.has("up:" + g.name)).slice(0, 6)) {
+    platSynced.add("up:" + g.name);
+    const r = await Promise.resolve(api?.edit("games", g.row, g.name, { upgrade_owned: true })).catch(() => null);
+    if (r && !r.error) { g.upgrade_owned = true; toast(`${g.name}: your PlayStation account has the PS5 version, so the upgrade is marked as owned.`, "ok"); }
+  }
   const todo = state.games.filter(g => factsOf(g).complete && !g.platinum && !platSynced.has(g.name)).slice(0, 8);
   for (const g of todo) {
     platSynced.add(g.name);
@@ -1232,30 +1377,75 @@ async function syncTrophies() {
   }
   if (todo.length) { render(); toast(todo.length === 1 ? `${todo[0].name}: every achievement unlocked. Badge earned!` : `${todo.length} games just earned their 100% badge.`, "party"); }
 }
-function openImport(sources) {
-  const list = state.candidates.filter(c => !sources || sources.includes(c.source));
-  if (!list.length) return toast("Everything on your accounts is already in Masterlog.", "ok");
-  const label = { steam: "Steam", psn: "PlayStation", heroic: "Heroic", itch: "itch.io" };
-  list.sort((a, b) => (b.minutes || 0) - (a.minutes || 0) || a.name.localeCompare(b.name));
-  $("#importForm").innerHTML = `<h2>Found ${list.length} game${list.length === 1 ? "" : "s"} that aren't in Masterlog yet</h2>
-    <p class="fine">Ticked ones are games you've actually played. Untick anything you don't want (free giveaways, tools). Skipped games won't be offered again, but you can review them any time in Settings → Accounts.</p>
-    <div class="row"><button type="button" class="linkish" id="impAll">Select all</button><button type="button" class="linkish" id="impNone">Select none</button></div>
-    <div class="importlist">${list.map((c, i) => `<label><input type="checkbox" name="imp" value="${i}" ${c.minutes > 0 || c.source === "psn" ? "checked" : ""}>
-      <span>${esc(c.name)}</span><small>${esc(c.platform)} · ${label[c.source]}</small><small>${c.minutes ? `${Math.round(c.minutes / 6) / 10} h` : "not played"}</small></label>`).join("")}</div>
-    <div class="row"><span class="spacer"></span><button value="skip" class="ghost">Skip these</button><button value="add" class="primary">Add selected</button></div>`;
-  $("#importForm")._list = list;
+/* ---------- games on your accounts: pick the ones you care about, by cover ---------- */
+const SRC_LABEL = { steam: "Steam", psn: "PlayStation", heroic: "Heroic", itch: "itch.io" };
+function openImport(sources, opts = {}) {
+  const fresh = new Set((opts.fresh || []).map(c => c.id));
+  const owned_ = state.candidates.filter(c => !sources || sources.includes(c.source));
+  const wish = state.steamWish || [];
+  if (!owned_.length && !wish.length) return toast("Everything on your accounts is already in Masterlog.", "ok");
+  owned_.sort((a, b) => fresh.has(b.id) - fresh.has(a.id) || (b.minutes || 0) - (a.minutes || 0) || a.name.localeCompare(b.name));
+  const all = [...owned_, ...wish.map(w => ({ ...w, wishlist: true }))];
+  const tile = (c, i) => `<div class="itile" data-i="${i}" role="checkbox" aria-checked="false" tabindex="0" title="${esc(c.name)}">
+      <div class="iart" data-cand="${i}"><span>${esc(c.name)}</span></div>
+      ${fresh.has(c.id) ? `<span class="inew">New</span>` : ""}<span class="icheck">✓</span>
+      <button type="button" class="ihide" data-hide="${i}" title="Never suggest this game">Never</button>
+      <div class="iname">${esc(c.name)}</div><small>${esc(c.platform)} · ${esc(SRC_LABEL[c.source] || c.source)}${c.minutes ? ` · ${Math.round(c.minutes / 6) / 10} h` : ""}</small></div>`;
+  const wStart = owned_.length;
+  $("#importForm").innerHTML = `<h2>${opts.fresh?.length ? `New on your accounts` : `Games on your accounts`}</h2>
+    <p class="fine">Pick only the ones you're interested in; nothing is added until you say so. "Never" hides a game for good (you can bring it back in Settings → Accounts).</p>
+    ${owned_.length ? `<h3>You own these (${owned_.length})</h3><div class="igrid">${owned_.map((c, i) => tile(c, i)).join("")}</div>` : ""}
+    ${wish.length ? `<h3>On your Steam wishlist (${wish.length})</h3><p class="fine">Picked ones go to your Masterlog wishlist.</p><div class="igrid">${wish.map((c, i) => tile({ ...c, wishlist: true }, wStart + i)).join("")}</div>` : ""}
+    <div class="row sticky"><span id="impCount" class="muted">Nothing picked</span><span class="spacer"></span><button value="later" class="ghost">Not now</button><button value="add" class="primary" id="impAdd" disabled>Add picked</button></div>`;
+  const form = $("#importForm");
+  form._list = all; form._picked = new Set();
   $("#importDialog").showModal();
+  // covers load as they scroll into view
+  const io = new IntersectionObserver(es => es.forEach(e => {
+    if (!e.isIntersecting) return; io.unobserve(e.target);
+    const c = all[+e.target.dataset.cand];
+    Promise.resolve(api?.candidate_cover(c.name, c.platform, c.appid || null, c.art || null)).then(uri => { if (uri) e.target.innerHTML = `<img alt="" decoding="async" src="${uri}">`; }).catch(() => {});
+  }), { root: form, rootMargin: "200px" });
+  form.querySelectorAll(".iart").forEach(el => io.observe(el));
+}
+function importPick(form, i) {
+  const t = form.querySelector(`.itile[data-i="${i}"]`);
+  form._picked.has(i) ? form._picked.delete(i) : form._picked.add(i);
+  t.setAttribute("aria-checked", String(form._picked.has(i)));
+  const n = form._picked.size;
+  $("#impCount").textContent = n ? `${n} picked` : "Nothing picked";
+  $("#impAdd").disabled = !n;
+  try { FX.play.tab(); } catch {}
+}
+async function importHide(form, i) {
+  const c = form._list[i];
+  await Promise.resolve(api?.hide_games([c.id])).catch(() => null);
+  form._picked.delete(i);
+  form.querySelector(`.itile[data-i="${i}"]`)?.remove();
+  state.candidates = state.candidates.filter(x => x.id !== c.id);
+  state.steamWish = (state.steamWish || []).filter(x => x.id !== c.id);
+  toast(`${c.name} won't be suggested again.`, "", { label: "Undo", run: () => api?.hide_games([c.id], true).then(() => pollAccounts(true)) });
 }
 async function submitImport(form, action) {
-  if (action === "skip") { await api?.accounts_seen(); return toast("Got it. They won't be offered again.", "ok"); }
-  const chosen = [...form.querySelectorAll("[name=imp]:checked")].map(x => form._list[+x.value]);
-  if (!chosen.length) { await api?.accounts_seen(); return; }
+  await api?.accounts_seen();   // whatever you didn't pick stays reviewable, but no longer counts as new
+  if (action !== "add") return;
+  const chosen = [...form._picked].map(i => form._list[i]);
+  if (!chosen.length) return;
   toast(`Adding ${chosen.length} game${chosen.length === 1 ? "" : "s"}…`);
-  const res = await Promise.resolve(api?.import_games(chosen.map(c => ({ name: c.name, platform: c.platform, store_link: c.url })))).catch(e => ({ error: String(e) }));
+  const res = await Promise.resolve(api?.import_games(chosen.map(c => ({ name: c.name, platform: c.platform, store_link: c.url, wishlist: !!c.wishlist })))).catch(e => ({ error: String(e) }));
   if (!res || res.error) return toast(res?.error || "Couldn't add them.", "err");
   try { FX.play.notify(); } catch {}
-  toast(`Welcome aboard: ${res.added.length} game${res.added.length === 1 ? "" : "s"} added to your library.${res.failed.length ? ` ${res.failed.length} couldn't be added.` : ""}`, "party");
+  toast(`Welcome aboard: ${res.added.length} game${res.added.length === 1 ? "" : "s"} added.${res.failed.length ? ` ${res.failed.length} couldn't be added.` : ""}`, "party");
   sync(true);
+}
+async function showHidden() {
+  const list = await Promise.resolve(api?.hidden_games()).catch(() => []) || [];
+  if (!list.length) return toast("No hidden games.", "ok");
+  $("#importForm").innerHTML = `<h2>Hidden from suggestions (${list.length})</h2><p class="fine">Click a game to let Masterlog suggest it again.</p>
+    <div class="hiddenlist">${list.map(c => `<button type="button" class="chip" data-unhide="${esc(c.id)}">${esc(c.name)} · ${esc(SRC_LABEL[c.source] || c.source)}</button>`).join("")}</div>
+    <div class="row"><span class="spacer"></span><button value="close" class="ghost">Close</button></div>`;
+  $("#importForm")._list = []; $("#importForm")._picked = new Set();
+  $("#importDialog").showModal();
 }
 
 /* ---------- clock ---------- */
@@ -1272,10 +1462,10 @@ function towers() {
   const reduce = matchMedia("(prefers-reduced-motion: reduce)").matches;
   let w, h, cols = [];
   const resize = () => {
-    w = c.width = innerWidth * devicePixelRatio; h = c.height = innerHeight * devicePixelRatio;
+    w = c.width = Math.round(innerWidth * 0.6); h = c.height = Math.round(innerHeight * 0.6);  // soft shapes: a smaller canvas looks the same
     cols = Array.from({ length: 26 }, (_, i) => ({
       x: (i / 26) * w + Math.random() * w / 30, base: 0.25 + Math.random() * 0.55, phase: Math.random() * Math.PI * 2,
-      speed: 0.00012 + Math.random() * 0.00018, width: (8 + Math.random() * 22) * devicePixelRatio, depth: 0.35 + Math.random() * 0.65,
+      speed: 0.00012 + Math.random() * 0.00018, width: (8 + Math.random() * 22) * 0.6, depth: 0.35 + Math.random() * 0.65,
     }));
   };
   const draw = t => {
@@ -1291,14 +1481,17 @@ function towers() {
       ctx.fillStyle = g;
       ctx.fillRect(col.x, y, col.width * col.depth, hh);
       ctx.fillStyle = `rgba(${tint},${0.22 * col.depth})`;
-      ctx.fillRect(col.x, y, col.width * col.depth, 2 * devicePixelRatio);
+      ctx.fillRect(col.x, y, col.width * col.depth, 1.2);
     }
   };
   resize(); addEventListener("resize", resize);
   if (reduce) { draw(0); return; }
   let last = 0;
+  // the background moves slowly, so a dozen frames a second is plenty; it rests while you scroll, read a case or use another window
+  let scrolling = 0;
+  $("#view").addEventListener("scroll", () => { scrolling = performance.now(); }, { passive: true });
   const loop = t => {
-    if (t - last > 50 && !document.hidden && !$("#panel").classList.contains("open")) { draw(t); last = t; }
+    if (t - last > 85 && !document.hidden && document.hasFocus() && t - scrolling > 250 && !$("#panel").classList.contains("open")) { draw(t); last = t; }
     requestAnimationFrame(loop);
   };
   requestAnimationFrame(loop);
@@ -1314,6 +1507,17 @@ function bindGlobal() {
   $("#updateBtn").addEventListener("click", installUpdate);
   $("#checkUpdates").addEventListener("click", () => checkForUpdate(true));
   $("#ambChoose").addEventListener("click", () => chooseAmbience(false));
+  $("#claudeBtn").addEventListener("click", () => { if (!state.canEdit) toast("Claude can suggest changes, but applying them needs the sheet connection (Settings)."); $("#claudeDialog").showModal(); });
+  $("#claudeCopy").addEventListener("click", async () => {
+    const ask = $("#claudeAsk").value.trim();
+    if (!ask) return toast("Write what you want first.", "err");
+    const text = claudePrompt(ask);
+    try { await navigator.clipboard.writeText(text); } catch { const t = document.createElement("textarea"); t.value = text; document.body.append(t); t.select(); document.execCommand("copy"); t.remove(); }
+    $("#claudeCopied").textContent = "Copied. Paste it into the new chat with Ctrl+V.";
+    api?.open("https://claude.ai/new");
+  });
+  $("#claudeReply").addEventListener("input", () => { clearTimeout(claudePreview.t); claudePreview.t = setTimeout(claudePreview, 250); });
+  $("#claudeApply").addEventListener("click", claudeApply);
   $("#coverGrid").addEventListener("click", e => { const b = e.target.closest("[data-cand]"); if (b) pickCover(+b.dataset.cand); });
   $("#coverSearch").addEventListener("click", () => openCoverPicker($("#coverQuery").value.trim()));
   $("#coverQuery").addEventListener("keydown", e => { if (e.key === "Enter") { e.preventDefault(); openCoverPicker($("#coverQuery").value.trim()); } });
@@ -1328,12 +1532,17 @@ function bindGlobal() {
     const l = e.target.closest("[data-link]"); if (l) return linkAccount(l.dataset.link);
     const u = e.target.closest("[data-unlink]"); if (u) return Promise.resolve(api?.unlink_account(u.dataset.unlink)).then(() => { renderAccounts(); toast("Unlinked. Its saved key was deleted from this PC.", "ok"); });
     if (e.target.closest("#syncAccounts")) { api?.accounts_sync(); pollAccounts(true); return toast("Checking your accounts…"); }
+    if (e.target.closest("#showHidden")) { $("#settings").close(); return showHidden(); }
     if (e.target.closest("#reviewImports")) { $("#settings").close(); return openImport(null); }
   });
   $("#importForm").addEventListener("submit", e => submitImport(e.target, e.submitter?.value));
+  $("#importForm").addEventListener("keydown", e => { const t = e.target.closest?.(".itile"); if (t && (e.key === " " || e.key === "Enter")) { e.preventDefault(); importPick(e.currentTarget, +t.dataset.i); } });
   $("#importForm").addEventListener("click", e => {
-    if (e.target.id === "impAll") e.target.form.querySelectorAll("[name=imp]").forEach(x => { x.checked = true; });
-    if (e.target.id === "impNone") e.target.form.querySelectorAll("[name=imp]").forEach(x => { x.checked = false; });
+    const form = e.currentTarget;
+    const hide = e.target.closest("[data-hide]"); if (hide) { e.preventDefault(); return importHide(form, +hide.dataset.hide); }
+    const am = e.target.closest("[data-addmod]"); if (am) { e.preventDefault(); return addModpack(+am.dataset.addmod, am); }
+    const un = e.target.closest("[data-unhide]"); if (un) { api?.hide_games([un.dataset.unhide], true).then(() => { un.remove(); pollAccounts(true); toast("It can be suggested again.", "ok"); }); return; }
+    const t = e.target.closest(".itile"); if (t) return importPick(form, +t.dataset.i);
   });
   $("#bigBtn").addEventListener("click", toggleBigPicture);
   $("#soundBtn").addEventListener("click", () => {
@@ -1356,7 +1565,8 @@ function bindGlobal() {
     const more = e.target.closest("[data-go]");
     if (more) {
       const s = shelves()[+more.dataset.shelf];
-      state.filter = { q: "", status: "All", plats: new Set(), playOn: "All", prio: "All", sort: s?.title.startsWith("Finished") ? "recent" : "priority", ...(s?.preset || {}) };
+      const pre = s?.preset || {};
+      state.filter = { q: "", status: asSet(pre.status), plats: new Set(), playOn: pre.playOn || "All", prio: new Set(), formats: new Set(), sort: s?.title.startsWith("Finished") ? "recent" : "priority" };
       return go(more.dataset.go);
     }
     const yr = e.target.closest(".year > button");
@@ -1365,16 +1575,25 @@ function bindGlobal() {
     if (chip) { const p = chip.dataset.plat; state.filter.plats.has(p) ? state.filter.plats.delete(p) : state.filter.plats.add(p); return render(); }
     const m = e.target.closest("[data-mode] button");
     if (m) { state.mode = m.dataset.v; api?.set_pref("view_mode", state.mode); return render(); }
+    const mb = e.target.closest("[data-multi] button");
+    if (mb) {
+      const key = mb.parentElement.dataset.multi, set = asSet(state.filter[key]);
+      if (mb.dataset.v === "All") set.clear(); else set.has(mb.dataset.v) ? set.delete(mb.dataset.v) : set.add(mb.dataset.v);
+      state.filter[key] = set; return render();
+    }
+    if (e.target.closest("#clearFilters")) { state.filter = { q: "", status: new Set(), plats: new Set(), playOn: "All", prio: new Set(), formats: new Set(), sort: state.filter.sort }; return render(); }
     const segB = e.target.closest("[data-seg] button");
     if (segB) { state.filter[segB.parentElement.dataset.seg] = segB.dataset.v; return render(); }
     const bseg = e.target.closest("[data-bseg] button");
     if (bseg) { state.bfilter[bseg.parentElement.dataset.bseg] = bseg.dataset.v; return render(); }
     const add = e.target.closest("[data-add]"); if (add) return openAdd(add.dataset.add);
     const open = e.target.closest("[data-open]"); if (open) return openPanel(open.dataset.kind || "game", open.dataset.open);
+    if (e.target.closest("[data-catalog-go]")) { switchCatalog("news"); return go("yours"); }
+    if (e.target.closest("[data-modpacks]")) return openModpacks();
   });
   document.addEventListener("click", e => { const u = e.target.closest("[data-url]"); if (u && u.dataset.url && !(u.matches(".nitem.spoiler"))) api?.open(u.dataset.url); });
   view.addEventListener("change", e => {
-    if (e.target.id === "prio") { state.filter.prio = e.target.value; render(); }
+    if (e.target.id === "scale") applyScale(+e.target.value, true);
     if (e.target.id === "sort") { state.filter.sort = e.target.value; render(); }
     if (e.target.id === "bsort") { state.bfilter.sort = e.target.value; render(); }
     if (e.target.classList.contains("cellsel")) {
@@ -1446,6 +1665,10 @@ function bindGlobal() {
     const gt = e.target.closest("[data-g]"); if (gt) return showGallery(+gt.dataset.g, galleryItems[+gt.dataset.g]?.video);
     const gp = e.target.closest("[data-gplay]"); if (gp) return showGallery(+gp.dataset.gplay, true);
     if (e.target.closest("[data-coverpick]")) { e.stopPropagation(); return openCoverPicker(); }
+    if (e.target.closest("[data-refresh]")) return refreshGame();
+    const dl = e.target.closest("[data-dlcown]"); if (dl) return markDlc(dl.dataset.dlcown);
+    const tw = e.target.closest("[data-twitch]"); if (tw) return playWatch("twitch", +tw.dataset.twitch);
+    const yw = e.target.closest("[data-ytw]"); if (yw) return playWatch("yt", +yw.dataset.ytw);
   });
   panel.addEventListener("submit", e => {
     e.preventDefault();
@@ -1481,6 +1704,118 @@ async function quickMark(btn) {
   await saveEdit(kind === "book" ? "books" : "games", item, changes, true);
   toast(kind === "book" ? `Finished ${item.name}. Nice read!` : `${item.name} completed${changes.hours ? ` in ${changes.hours} h` : ""}. GG!`, "ok");
 }
+async function markDlc(name) {
+  const g = findItem(panelItem?.kind, panelItem?.id);
+  if (!g || !api) return;
+  const own = !(state.dlcMarks?.[g.name] || {})[name];
+  state.dlcMarks = await api.mark_dlc(g.name, name, own);
+  if (own && !g.dlc_owned && state.canEdit) { await saveEdit("games", g, { dlc_owned: true }, true); }
+  try { FX.play.check(); } catch {}
+  showPanelTab("dlc");
+}
+/* ---------- modpacks from your mod managers ---------- */
+async function openModpacks() {
+  if (!api) return;
+  $("#importForm").innerHTML = `<h2>Modpacks on this PC</h2><div class="news-loading"><span class="spinner"></span> Looking in CurseForge, r2modman, Thunderstore, Vortex and Mod Organizer 2…</div>`;
+  $("#importForm")._list = []; $("#importForm")._picked = new Set();
+  $("#importDialog").showModal();
+  const r = await api.modpacks_scan().catch(() => ({ items: [] }));
+  const items = r.items || [];
+  $("#importForm")._mods = items;
+  $("#importForm").innerHTML = `<h2>Modpacks on this PC</h2>
+    <p class="fine">Profiles and modpacks from your mod managers. Add one and it gets its own cover in Modpacks, on Home and in Library.</p>
+    ${items.length ? `<ul class="modlist">${items.map((p, i) => `<li><div><b>${esc(p.name)}</b><small>${esc(p.manager)}${p.mods ? ` · ${p.mods} mods` : ""}${p.detail ? ` · ${esc(p.detail)}` : ""}${p.last ? ` · used ${esc(ago(p.last))}` : ""}</small></div>
+      ${p.added ? `<span class="owntag">In Masterlog</span>` : `<button type="button" class="primary small" data-addmod="${i}">Add</button>`}</li>`).join("")}</ul>`
+      : `<p class="muted">No modpacks found. Masterlog looks in the default folders of CurseForge (Minecraft), r2modman, Thunderstore Mod Manager, Vortex and Mod Organizer 2.</p>`}
+    <div class="row"><span class="spacer"></span><button value="close" class="ghost">Close</button></div>`;
+}
+async function addModpack(i, btn) {
+  const p = $("#importForm")._mods?.[i];
+  if (!p) return;
+  btn.disabled = true;
+  const r = await api.add_modpack(p).catch(e => ({ error: String(e) }));
+  if (r.error) { btn.disabled = false; return toast(r.error, "err"); }
+  btn.outerHTML = `<span class="owntag">Added</span>`;
+  try { FX.play.save(); } catch {}
+  toast(`${p.name} added to Modpacks.`, "ok");
+  sync(true);
+}
+
+/* ---------- Claude, for free: copy a prompt, paste the answer back ---------- */
+const CLAUDE_FIELDS = ["status", "priority", "platform", "play_on", "format", "hours", "score", "genre", "developer", "publisher", "notes", "type", "migrate_to", "upgrade", "upgrade_owned", "dlc_owned", "dlc_done", "platinum", "second_chance"];
+function claudePrompt(ask) {
+  const opts = state.options.games || {};
+  const rows = state.games.map(g => [g.name, g.status, g.priority || "", g.platform, g.format || "", g.hours ?? "", g.score ?? "", g.genre || "", g.completed || "", g.type || ""].join(" | ")).join("\n");
+  return `You're helping me manage my game backlog app, Masterlog. My library is below (one game per line).
+
+My request: ${ask}
+
+Answer normally (recommendations, thoughts) for me to read. If my request means changing my library, end your reply with ONE fenced code block labelled masterlog containing JSON like this:
+\`\`\`masterlog
+{"actions": [
+  {"do": "update", "game": "<exact name from my library>", "set": {"status": "Completed", "score": 7, "hours": 10.5}},
+  {"do": "add", "game": "<new game's official name>", "set": {"status": "Wishlist", "platform": "Steam", "priority": "High"}}
+]}
+\`\`\`
+Rules: use exact names from my library for updates. Fields you may set: ${CLAUDE_FIELDS.join(", ")}.
+Allowed values: status ${JSON.stringify(opts.status || ["Library", "Playing", "Paused", "Wishlist", "Completed", "Dropped"])}, priority ${JSON.stringify(opts.priority || ["Extreme", "High", "Medium", "Low"])}, platform ${JSON.stringify(opts.platform || Object.keys(PLAT))}, format ["Digital","Physical"], type ["Live service","Modded"]. Scores are out of 10, hours are numbers. Completion dates fill in automatically. Rankings and favourites aren't supported yet, so just mention them in text.
+
+My library (name | status | priority | platform | format | hours | score | genre | finished | type):
+${rows}`;
+}
+function parseClaude(text) {
+  const m = /\`\`\`\s*masterlog\s*([\s\S]*?)\`\`\`/i.exec(text) || /\`\`\`(?:json)?\s*(\{[\s\S]*?"actions"[\s\S]*?\})\s*\`\`\`/i.exec(text);
+  if (!m) return { actions: [], say: text.trim() };
+  let data;
+  try { data = JSON.parse(m[1]); } catch { return { error: "Claude's change list isn't valid JSON. Ask Claude to send the masterlog block again." }; }
+  const actions = (data.actions || []).filter(a => a && (a.do === "update" || a.do === "add") && a.game).map(a => {
+    const set = {};
+    for (const [k, v] of Object.entries(a.set || {})) if (CLAUDE_FIELDS.includes(k)) set[k] = v;
+    const g = a.do === "update" ? state.games.find(x => x.name.toLowerCase() === String(a.game).toLowerCase()) : null;
+    return { ...a, set, target: g, ok: a.do === "add" || !!g };
+  });
+  return { actions, say: text.replace(m[0], "").trim() };
+}
+function claudePreview() {
+  const r = parseClaude($("#claudeReply").value || "");
+  const box = $("#claudePreview");
+  $("#claudeApply").disabled = !(r.actions || []).some(a => a.ok);
+  if (r.error) { box.innerHTML = `<p class="nerr">${esc(r.error)}</p>`; return r; }
+  if (!r.actions.length) { box.innerHTML = $("#claudeReply").value.trim() ? `<p class="muted">No library changes in this answer.</p>` : ""; return r; }
+  box.innerHTML = `<h3>Changes Claude suggests</h3><ul class="claudeacts">${r.actions.map(a => `<li class="${a.ok ? "" : "bad"}"><b>${a.do === "add" ? "Add" : "Update"} ${esc(a.game)}</b>
+    <span>${Object.entries(a.set).map(([k, v]) => `${esc(k.replace(/_/g, " "))}: ${esc(v)}`).join(" · ") || "—"}</span>${a.ok ? "" : `<small>Not in your library, skipped</small>`}</li>`).join("")}</ul>`;
+  return r;
+}
+async function claudeApply() {
+  const r = claudePreview();
+  const acts = (r.actions || []).filter(a => a.ok);
+  if (!acts.length) return;
+  $("#claudeApply").disabled = true;
+  let done = 0;
+  for (const a of acts) {
+    const res = a.do === "add" ? await api.add("games", { name: a.game, status: "Library", format: "Digital", ...a.set }).catch(e => ({ error: String(e) }))
+      : await api.edit("games", a.target.row, a.target.name, a.set).catch(e => ({ error: String(e) }));
+    if (res && !res.error) done++;
+  }
+  try { FX.play.save(); } catch {}
+  toast(`Applied ${done} of ${acts.length} change${acts.length === 1 ? "" : "s"} from Claude.`, done === acts.length ? "ok" : "err");
+  $("#claudeDialog").close(); $("#claudeReply").value = ""; $("#claudePreview").innerHTML = "";
+  sync(true);
+}
+
+/* fetch everything about a game again, in case something came out wrong */
+async function refreshGame() {
+  const g = findItem(panelItem?.kind, panelItem?.id);
+  if (!g || !api) return;
+  toast(`Fetching ${g.name} again…`);
+  await api.refresh_game(g);
+  covers.delete(coverKey(g));
+  const uri = await api.cover(g.name, g.platform || "").catch(() => null);
+  covers.set(coverKey(g), uri || null);
+  closePanel(); render(); openPanel("game", g.id, "overview");
+  toast(`${g.name} refreshed.`, "ok");
+}
+
 /* ---------- choosing a cover inside the app ---------- */
 let coverFor = null;
 async function openCoverPicker(query = "") {
@@ -1728,9 +2063,8 @@ function dealsHTML() {
 function maybeSaleEvent(force) {
   const s = dealState.data?.sale;
   if (!s || !s.live) return;
-  let seen = null; try { seen = localStorage.getItem("ml-sale-seen"); } catch {}
-  if (!force && seen === s.id) return;
-  try { localStorage.setItem("ml-sale-seen", s.id); } catch {}
+  if (!force && uiGet("sale_seen") === s.id) return;
+  uiSet("sale_seen", s.id);
   const el = document.createElement("div");
   el.className = "saleevent"; el.setAttribute("role", "dialog"); el.setAttribute("aria-label", s.name);
   const tags = Array.from({ length: 34 }, (_, i) => `<i style="--x:${Math.random() * 100}%;--d:${(Math.random() * 2.4).toFixed(2)}s;--r:${Math.round(Math.random() * 60 - 30)}deg;--s:${(0.7 + Math.random() * 0.8).toFixed(2)}">-${[10, 20, 25, 33, 40, 50, 60, 67, 75, 80, 90][i % 11]}%</i>`).join("");
@@ -1759,6 +2093,31 @@ async function pollRenames() {
   }
 }
 
+/* ---------- What's New on Home, like Steam's: updates and events for the games you have ---------- */
+async function fillWhatsNew() {
+  const box = $("#whatsNew");
+  if (!box || !api) return;
+  let d = newsState.data.yours;
+  if (!d || Date.now() - d.t > 10 * 60 * 1000) {
+    try { d = { ...(await api.news_section("yours")), t: Date.now() }; newsState.data.yours = d; } catch { return; }
+  }
+  if (!$("#whatsNew")) return;
+  const cutoff = Date.now() / 1000 - 21 * 86400;
+  const rank = { major: 0, release: 0, update: 1, minor: 2, news: 3 };
+  const seen = new Set();
+  const items = (d.items || []).filter(i => (i.date >= cutoff || i.upcoming) && (i.kind !== "news" || i.thumb) && i.status !== "Wishlist")
+    .sort((a, b) => (rank[a.kind] ?? 3) - (rank[b.kind] ?? 3) || b.date - a.date)
+    .filter(i => { if (seen.has(i.game + i.kind)) return false; seen.add(i.game + i.kind); return true; }).slice(0, 10)
+    .sort((a, b) => (b.upcoming ? b.start : b.date) - (a.upcoming ? a.start : a.date));
+  if (!items.length) { box.hidden = true; return; }
+  box.hidden = false;
+  box.innerHTML = `<div class="wn-head"><h2>What's new</h2><button class="ghost small" data-catalog-go="news">All updates</button></div>
+    <div class="wn-row">${items.map(i => `<article class="wn" data-url="${esc(i.url || "")}" tabindex="0">
+      <div class="wn-art">${i.thumb ? `<img alt="" loading="lazy" decoding="async" referrerpolicy="no-referrer" src="${esc(i.thumb)}">` : `<span>${esc(i.game)}</span>`}</div>
+      <div class="wn-text"><span class="wn-kind k-${esc(i.kind || "news")}">${esc(KIND_LABEL[i.kind] || "News")}</span><h3>${esc(i.title)}</h3>
+      <small>${esc(i.game)} · ${esc(i.upcoming && i.start ? `starts ${fmtDateTime(i.start)}` : ago(i.date))}</small></div></article>`).join("")}</div>`;
+}
+
 /* ---------- News ---------- */
 const NEWS_INFO = {
   leaks: "Newest posts from r/GamingLeaksAndRumours. Rumours aren't confirmed until a studio says so.",
@@ -1768,7 +2127,12 @@ const NEWS_INFO = {
 };
 const KIND_LABEL = { major: "Major update", update: "Update", minor: "Patch", release: "Release", news: "News" };
 const newsState = { data: {}, source: {}, loading: {}, seen: {} };
-try { Object.assign(newsState.seen, JSON.parse(localStorage.getItem("ml-news-seen") || "{}")); } catch {}
+/* small things to remember between runs (what you've seen), kept in Masterlog's settings */
+function uiGet(k, d) { return (state.settings.ui_state || {})[k] ?? d; }
+function uiSet(k, v) {
+  state.settings.ui_state = { ...(state.settings.ui_state || {}), [k]: v };
+  clearTimeout(uiSet.t); uiSet.t = setTimeout(() => api?.set_pref("ui_state", state.settings.ui_state), 500);
+}
 function newsShellHTML(sec) {
   return `<section class="news" data-sec="${sec}"><header class="news-head"><div><h1>${esc(TABS.news.find(t => t[0] === sec)?.[1] || "News")}</h1><p class="muted">${esc(NEWS_INFO[sec] || "")}</p></div>
     <button class="ghost small" id="newsRefresh">Refresh</button></header>
@@ -1818,7 +2182,7 @@ function paintNews(sec) {
   const rest = items.filter(i => i !== lead);
   body.innerHTML = errs + `<div class="news-grid">${newsItemHTML(lead, true, sec, seenBefore)}${rest.slice(0, 90).map(i => newsItemHTML(i, false, sec, seenBefore)).join("")}</div>`;
   newsState.seen[sec] = Math.max(seenBefore, ...items.map(i => i.date || 0));
-  try { localStorage.setItem("ml-news-seen", JSON.stringify(newsState.seen)); } catch {}
+  uiSet("news_seen", newsState.seen);
 }
 function fmtDateTime(ts) {
   return new Date(ts * 1000).toLocaleString(undefined, { month: "short", day: "numeric", hour: "2-digit", minute: "2-digit" });
@@ -1833,13 +2197,19 @@ async function checkNewsDot() {
   } catch {}
 }
 
+/* animations rest when Masterlog isn't the window you're using */
+addEventListener("blur", () => document.body.classList.add("away"));
+addEventListener("focus", () => document.body.classList.remove("away"));
+
 /* ---------- start ---------- */
 async function start() {
   api = window.pywebview?.api || null;
   bindGlobal(); tick(); setInterval(tick, 15000);
   if (!api) { $("#intro")?.remove(); towers(); render(); return; }
   state.settings = await api.get_settings();
-  applySound();
+  applySound(); applyScale(state.settings.scale || 1);
+  Object.assign(newsState.seen, uiGet("news_seen", {}));
+  state.dlcMarks = await Promise.resolve(api.dlc_marks()).catch(() => ({})) || {};
   document.body.classList.toggle("bigpic", !!state.settings.big_picture);
   if (state.settings.intro !== false && !window.SKIP_INTRO) await new Promise(r => playIntro(r));
   else $("#intro")?.remove();

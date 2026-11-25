@@ -19,6 +19,7 @@ from datetime import datetime, timezone
 
 from art import _norm, numerals, same_title
 import feeds
+import saver
 
 UA = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/130.0 Safari/537.36"
 HOUR = 3600
@@ -260,12 +261,7 @@ class Deals:
             pass
 
     def _remember(self):
-        import os
-        with self.lock:
-            tmp = self.path + ".tmp"
-            with open(tmp, "w", encoding="utf-8") as f:
-                json.dump(self.state, f, ensure_ascii=False)
-            os.replace(tmp, self.path)
+        saver.save_later(self.path, lambda: self.state, lock=self.lock)
 
     def rates(self):
         r = self.state.get("rates")

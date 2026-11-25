@@ -20,6 +20,7 @@ GAME_FIELDS = {
     "dlc_owned": "dlc owned", "dlc_done": "dlc done", "platinum": "100% plat", "modded": "modded",
     "hours": "hours", "score": "score", "genre": "genre", "developer": "developer",
     "publisher": "publisher", "migrate_to": "migrate to", "notes": "notes", "store_link": "store link", "type": "type",
+    "upgrade_owned": "upgrade owned",
 }
 PLAY_FIELDS = {
     "game": "game", "platform": "platform", "play_on": "play on", "modded": "modded", "dlc": "with dlc",
@@ -133,6 +134,7 @@ def parse_games(header, rows):
             "play_on": get(r, "play on"),
             "format": get(r, "format"),
             "upgrade": get(r, "upgrade"),
+            "upgrade_owned": _bool(get(r, "upgrade owned")),
             "dlc_owned": _bool(get(r, "dlc owned")),
             "dlc_done": _bool(get(r, "dlc done")),
             "platinum": _bool(get(r, "100 % plat", "100% plat")),

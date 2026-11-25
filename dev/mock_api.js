@@ -35,7 +35,8 @@
     set_cover: async () => null, clear_cover: async n => art(n, 1),
     accounts_status: async () => ({ steam: { linked: true, who: "Breakinger", games: 412, synced: Date.now() / 1000 - 300 }, psn: { linked: false }, heroic: { linked: false, found: true }, itch: { linked: false } }),
     account_data: async () => ({ facts: { "Elden Ring": { sources: ["steam"], minutes: 10600, achievements: { done: 42, total: 42 }, complete: "100%" }, "Astro Bot": { sources: ["psn"], minutes: 1020, complete: "Platinum", trophies: { progress: 100, platinum: true } }, "Baldur's Gate 3": { sources: ["steam"], minutes: 5400, achievements: { done: 21, total: 54 } } },
-      candidates: [{ id: "steam:1", name: "Hollow Knight", platform: "Steam", minutes: 1800, source: "steam" }, { id: "steam:2", name: "Celeste", platform: "Steam", minutes: 0, source: "steam" }], new: [], unreviewed: window.MOCK_IMPORT ? ["steam"] : [] }),
+      candidates: [{ id: "steam:1", name: "Hollow Knight", platform: "Steam", minutes: 1800, source: "steam" }, { id: "steam:2", name: "Celeste", platform: "Steam", minutes: 0, source: "steam" }],
+      wishlist: [{ id: "steamwish:9", name: "Hollow Knight: Silksong", platform: "Steam", source: "steam", appid: 9 }], wish_appids: [9], new: [], unreviewed: window.MOCK_IMPORT ? ["steam"] : [] }),
     accounts_seen: async () => true, accounts_sync: async () => true, import_games: async l => wait({ added: l.map(x => x.name), failed: [] }),
     link_account: async () => wait({ who: "test", games: 10 }), unlink_account: async () => ({}),
     update_check: async () => ({ current: "1.0.4", latest: "1.0.5", available: true, can_install: true, page: "x" }),
@@ -61,6 +62,12 @@
     renamed: async () => [], undo_rename: async () => ({}), apply_rename: async () => ({ ok: true }),
     cover_options: async (n) => wait({ items: [{ url: art(n + " steam", 1), thumb: art(n + " steam", 1), source: "Steam", note: "official library cover" }, { url: art(n + " ps", 2), thumb: art(n + " ps", 2), source: "PlayStation Store", note: "official" }, { url: art(n + " igdb", 3), thumb: art(n + " igdb", 3), source: "IGDB", note: "box art" }].concat([4,5,6,7,8].map(k => ({ url: art(n + k, k), thumb: art(n + k, k), source: "SteamGridDB", note: "fan" }))) }),
     pick_cover: async (n) => wait({ uri: art(n + " picked", 5) }), choose_ambience: async () => null, clear_ambience: async () => ({ ambience: null }), set_youtube_key: async () => ({ ok: true }),
+    watch: async g => wait({ host: "localhost", twitch: { items: [1,2,3,4].map(k => ({ login: "streamer" + k, name: "Streamer" + k, title: `Blind run of ${g.name}, day ${k}`, viewers: 1200 / k | 0, thumb: art("stream" + k, k) })) },
+      youtube: [1,2,3,4,5].map(k => ({ youtube: "abc" + k, name: `${g.name} gameplay part ${k}`, channel: "Channel " + k, published: k + " days ago", seconds: 600 + k * 37, thumb: art("yt" + k, k + 2) })) }),
+    modpacks_scan: async () => wait({ items: [{ name: "Minecraft: Ascendra", manager: "CurseForge", game: "Minecraft", profile: "Ascendra", mods: 214, detail: "1.20.1 · forge", last: Date.now() / 1000 - 86400, added: false },
+      { name: "The Elder Scrolls V: Skyrim Special Edition: Lorerim", manager: "Mod Organizer 2", mods: 1450, detail: "enabled mods", last: Date.now() / 1000 - 3 * 86400, added: true }] }),
+    add_modpack: async () => wait({ ok: true }), candidate_cover: async n => art(n, 3), hide_games: async () => ({ hidden: [] }), hidden_games: async () => [],
+    dlc_marks: async () => ({}), mark_dlc: async (g, d, o) => ({ [g]: { [d]: o } }), refresh_game: async () => true,
     connection_script: async () => "// script", clear_covers: async () => true, open: async () => true, open_sheet: async () => true,
   } };
 })();

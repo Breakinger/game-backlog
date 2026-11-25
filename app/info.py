@@ -13,13 +13,15 @@ import xml.etree.ElementTree as ET
 from email.utils import parsedate_to_datetime
 
 from art import similar, _norm
+import saver
 import youtube
 
 BROWSER_UA = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/130.0 Safari/537.36"
 MC = "https://backend.metacritic.com"
 DAY = 86400
-TTL = {"about": 30 * DAY, "media": 7 * DAY, "ratings": 3 * DAY, "dlcs": 7 * DAY, "wiki": 30 * DAY, "news": 6 * 3600, "trailers": 14 * DAY, "updated": 12 * 3600, "book": 30 * DAY}
+TTL = {"about": 30 * DAY, "media": 7 * DAY, "ratings": 3 * DAY, "dlcs": 7 * DAY, "wiki": 30 * DAY, "news": 6 * 3600, "trailers": 14 * DAY, "watch": 2 * DAY, "updated": 12 * 3600, "book": 30 * DAY}
 NEW_UPDATE_DAYS = 14
+CACHE_VERSION = 3
 PATCH_RE = re.compile(r"\b(patch|update|hotfix|hot-fix|version\s*\d|v\d+\.\d+|release notes)\b", re.I)
 JUNK_DLC_RE = re.compile(r"soundtrack|\bost\b|art ?book|wallpaper|avatar|theme|\bskin|costume|outfit|cosmetic|bonus content|digital extras|pre-?order", re.I)
 
@@ -56,9 +58,12 @@ class Cache:
                 self.data = json.load(f)
         except Exception:
             self.data = {}
+        if self.data.get("_v") != CACHE_VERSION:
+            # matching got stricter: forget info that may belong to a similarly named game
+            self.data = {"_v": CACHE_VERSION}
 
     def get(self, kind, key):
-        e = self.data.get(kind, {}).get(key)
+        e = (self.data.get(kind) or {}).get(key) if isinstance(self.data.get(kind), dict) else None
         if e and time.time() - e["t"] < TTL[kind]:
             return e["v"]
         return None
@@ -66,10 +71,17 @@ class Cache:
     def put(self, kind, key, value):
         with self.lock:
             self.data.setdefault(kind, {})[key] = {"t": time.time(), "v": value}
-            tmp = self.path + ".tmp"
-            with open(tmp, "w", encoding="utf-8") as f:
-                json.dump(self.data, f, ensure_ascii=False)
-            os.replace(tmp, self.path)
+        saver.save_later(self.path, lambda: self.data, lock=self.lock)
+
+    def forget(self, key):
+        """Drop everything cached about one game (Refresh info)."""
+        with self.lock:
+            for kind in self.data.values():
+                if isinstance(kind, dict):
+                    kind.pop(key, None)
+                    for k in [k for k in kind if k.startswith(key + "|")]:
+                        kind.pop(k, None)
+        saver.save_later(self.path, lambda: self.data, lock=self.lock)
 
 
 # ---------------- Metacritic ----------------
@@ -426,7 +438,7 @@ class Info:
                 pass
         if not text:
             try:
-                w = wikipedia(game.get("name", ""), "video game")
+                w = wikipedia(game.get("name", ""), ("video game " + (game.get("developer") or "")).strip())
                 if w and w.get("extract"):
                     sentences = re.split(r"(?<=[.!?])\s+", w["extract"])
                     text, source = " ".join(sentences[:3]), "Wikipedia"
@@ -498,7 +510,7 @@ class Info:
         if hit is not None:
             return hit
         try:
-            w = wikipedia(game.get("name", ""), "video game")
+            w = wikipedia(game.get("name", ""), ("video game " + (game.get("developer") or "")).strip())
         except Exception:
             return None
         q = urllib.parse.quote(game.get("name", ""))

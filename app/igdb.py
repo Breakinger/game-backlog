@@ -17,6 +17,7 @@ class IGDB:
         self.vault = vault
         self.lock = threading.Lock()
         self.cache = {}
+        self.meta_lookup = lambda name: None
 
     def configured(self):
         c = self.vault.get("igdb") or {}
@@ -64,6 +65,11 @@ class IGDB:
                                     f'involved_companies.company.name,involved_companies.developer; limit 8;')
         # the same game only: never the sequel or the original ('Red Dead Redemption 2' vs 'Red Dead Redemption')
         rows = [r for r in rows or [] if same_title(name, r.get("name", ""), 0.8)]
+        meta = self.meta_lookup(name) or {}
+        if meta.get("developer") or meta.get("publisher"):
+            from art import companies_agree
+            agreeing = [r for r in rows if companies_agree(meta, [(c.get("company") or {}).get("name", "") for c in r.get("involved_companies") or []], [])]
+            rows = agreeing
         best = max(rows, key=lambda r: (_norm(r.get("name", "")) == _norm(name), similar(name, r.get("name", ""))), default=None)
         self.cache[key] = best
         return best

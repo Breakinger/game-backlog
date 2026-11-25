@@ -16,6 +16,8 @@ import secrets
 import youtube
 import feeds
 import deals
+import modpacks
+import twitch
 import socketserver
 import sheet
 import updater
@@ -46,9 +48,9 @@ def resource(rel):
 DEFAULTS = {"sheet_url": sheet.DEFAULT_SHEET, "sheet_key": "", "sgdb_key": "", "refresh_minutes": 2,
             "view_mode": "covers", "sound_on": True, "ambient_volume": 0.35, "fx_volume": 0.5, "intro": True,
             "heroic_linked": False, "big_picture": False, "ambience_path": "", "steam_cc": "GE", "ps_locale": "en-us",
-            "money": "native", "auto_names": True}
+            "money": "native", "auto_names": True, "scale": 1, "ui_state": {}}
 PREFS = ("view_mode", "refresh_minutes", "sound_on", "ambient_volume", "fx_volume", "intro", "big_picture",
-         "steam_cc", "ps_locale", "money", "auto_names")
+         "steam_cc", "ps_locale", "money", "auto_names", "scale", "ui_state")
 PRIVATE = ("sgdb_key", "sheet_key", "ambience_path")
 AUDIO_TYPES = {".mp3": "audio/mpeg", ".ogg": "audio/ogg", ".opus": "audio/ogg", ".m4a": "audio/mp4", ".aac": "audio/aac",
                ".wav": "audio/wav", ".flac": "audio/flac", ".webm": "audio/webm"}
@@ -88,9 +90,12 @@ class Api:
         self._vault = vault.Vault(self._dir)
         self._igdb = igdb.IGDB(self._vault)
         self._art.igdb = self._igdb
+        self._art.meta_lookup = self._meta
+        self._igdb.meta_lookup = self._meta
         self._info = info.Info(self._dir, self._art, self._igdb)
         self._info.youtube_key = lambda: (self._vault.get("youtube") or {}).get("key")
         self._feeds = feeds.Feeds()
+        self._twitch = twitch.Twitch(self._igdb)
         self._deals = deals.Deals(self._art, self._dir)
         self._renamed = []   # official-title renames done in the background, for the page to announce
         threading.Thread(target=self._deals_loop, daemon=True).start()
@@ -111,7 +116,26 @@ class Api:
             def do_GET(self):
                 if self.path.split("?", 1)[0] == f"/{token}/~ambience":
                     return self._ambience()
+                if self.path.startswith("/ui/"):
+                    return self._ui()
                 return super().do_GET()
+
+            def _ui(self):
+                """The app's own page, served from http://localhost so embedded Twitch and YouTube players accept it."""
+                name = os.path.basename(urllib.parse.unquote(self.path[4:].split("?", 1)[0])) or "index.html"
+                types = {".html": "text/html; charset=utf-8", ".js": "text/javascript; charset=utf-8", ".css": "text/css; charset=utf-8"}
+                ext = os.path.splitext(name)[1].lower()
+                path = resource(os.path.join("ui", name))
+                if ext not in types or not os.path.isfile(path):
+                    return self.send_error(404)
+                with open(path, "rb") as f:
+                    body = f.read()
+                self.send_response(200)
+                self.send_header("Content-Type", types[ext])
+                self.send_header("Content-Length", str(len(body)))
+                self.send_header("Cache-Control", "no-store")
+                http.server.BaseHTTPRequestHandler.end_headers(self)
+                self.wfile.write(body)
 
             def _ambience(self):
                 path = app._ambience_file()
@@ -179,6 +203,8 @@ class Api:
             threading.Thread(target=srv.serve_forever, daemon=True).start()
             self._art.url_base = f"http://127.0.0.1:{srv.server_address[1]}/{token}/"
             self._ambience_url = self._art.url_base + "~ambience"
+            self._ui_url = f"http://localhost:{srv.server_address[1]}/ui/index.html"
+            self._ui_host = "localhost"
         except Exception:
             self._art.url_base = None  # fall back to inline images
 
@@ -414,6 +440,14 @@ class Api:
         return self.cover(name)
 
     # ----- linked accounts -----
+    def _meta(self, name):
+        """Developer and publisher from your sheet, used to double-check every store match."""
+        c = getattr(self, "_meta_cache", None)
+        if not c or time.time() - c[0] > 60:
+            c = (time.time(), {art._norm(g["name"]): {"developer": g.get("developer"), "publisher": g.get("publisher")} for g in self._sheet_games()})
+            self._meta_cache = c
+        return c[1].get(art._norm(name))
+
     def _sheet_games(self):
         data = self.cached() or {}
         return data.get("games") or []
@@ -470,6 +504,26 @@ class Api:
         self._accounts.mark_seen()
         return True
 
+    def candidate_cover(self, name, platform="", appid=None, art_url=None):
+        """Cover for a game that's on your account but not in the sheet yet, so you can recognise it."""
+        try:
+            return self._art.cover(name, platform or "", {"appid": appid, "ps_art": art_url})
+        except Exception:
+            return None
+
+    def hide_games(self, ids, restore=False):
+        """Never suggest these again (or bring them back)."""
+        return {"hidden": self._accounts.blacklist(ids or [], remove=bool(restore))}
+
+    def hidden_games(self):
+        bl = set(self._accounts.state.get("blacklist") or [])
+        out = []
+        for src, e in self._accounts.state["sources"].items():
+            for a in (e.get("games") or []) + (e.get("wishlist") or []):
+                if a["id"] in bl:
+                    out.append(dict(a, source=src))
+        return out
+
     def import_games(self, items):
         """Adds games found on your accounts to the sheet."""
         client = self._script()
@@ -479,7 +533,7 @@ class Api:
         if not client.headers:
             client.read()
         for it in items or []:
-            values = {"name": it["name"], "status": it.get("status") or "Library", "platform": it.get("platform") or "Steam",
+            values = {"name": it["name"], "status": "Wishlist" if it.get("wishlist") else (it.get("status") or "Library"), "platform": it.get("platform") or "Steam",
                       "format": "Digital"}
             if it.get("platform") in ("Steam", "GOG", "Epic Games", "EA", "Ubisoft Connect", "itch.io", "PC (Other)"):
                 values["play_on"] = "PC"
@@ -585,6 +639,84 @@ class Api:
                          if g.get("platform") in deals.PHYSICAL_LABEL}
         snap["running"] = self._deals.running or force
         return snap
+
+    # ----- DLC you own (Steam doesn't share DLC ownership, so you tick it once; Steam wishlist DLC is spotted on its own) -----
+    def _dlc_path(self):
+        return os.path.join(self._dir, "dlc_owned.json")
+
+    def dlc_marks(self):
+        try:
+            with open(self._dlc_path(), encoding="utf-8") as f:
+                return json.load(f)
+        except Exception:
+            return {}
+
+    def mark_dlc(self, game, dlc, owned):
+        marks = self.dlc_marks()
+        g = marks.setdefault(game, {})
+        if owned:
+            g[dlc] = True
+        else:
+            g.pop(dlc, None)
+        tmp = self._dlc_path() + ".tmp"
+        with open(tmp, "w", encoding="utf-8") as f:
+            json.dump(marks, f, ensure_ascii=False)
+        os.replace(tmp, self._dlc_path())
+        return marks
+
+    # ----- watch: Twitch streams and YouTube videos inside the app -----
+    def watch(self, game):
+        name = (game or {}).get("name", "")
+        out = {"twitch": {"items": []}, "youtube": [], "host": getattr(self, "_ui_host", "127.0.0.1")}
+        try:
+            out["twitch"] = self._twitch.streams(name)
+        except Exception as e:
+            out["twitch"] = {"items": [], "error": str(e)}
+        key = info.Info._key(game) + "|watch"
+        hit = self._info.cache.get("watch", key)
+        if hit is None:
+            try:
+                hit = youtube.videos(name, self._info.youtube_key())
+                if hit:
+                    self._info.cache.put("watch", key, hit)
+            except Exception:
+                hit = []
+        out["youtube"] = hit or []
+        return out
+
+    # ----- modpacks from your mod managers -----
+    def modpacks_scan(self):
+        found = modpacks.scan()
+        have = {art._norm(g["name"]) for g in self._sheet_games()}
+        for p in found["items"]:
+            p["name"] = f"{p['game']}: {p['profile']}"
+            p["added"] = art._norm(p["name"]) in have
+        return found
+
+    def add_modpack(self, p):
+        client = self._script()
+        if not client:
+            return {"error": "Adding needs the sheet connection. Open Settings to set it up."}
+        if not client.headers:
+            client.read()
+        notes = f"{p.get('manager')} profile" + (f" · {p.get('mods')} mods" if p.get("mods") else "") + (f" · {p.get('detail')}" if p.get("detail") else "")
+        values = {"name": p["name"], "status": "Playing", "platform": "PC (Other)" if p.get("game") == "Minecraft" else "Steam",
+                  "play_on": "PC", "format": "Digital", "type": "Modded", "modded": True, "notes": notes}
+        try:
+            client.add("games", values)
+            return {"ok": True}
+        except Exception as e:
+            return {"error": str(e)}
+
+    def refresh_game(self, game):
+        """Fetch everything about one game again: cover, art, synopsis, ratings, DLC, trailers, news."""
+        name = (game or {}).get("name", "")
+        if not name:
+            return False
+        self._info.cache.forget(info.Info._key(game))
+        self._art.forget(name)
+        self._facts_cache = None
+        return True
 
     def apply_rename(self, old):
         hit = (self._deals.state.get("renames") or {}).get(old)
@@ -709,14 +841,15 @@ def main():
     os.environ.setdefault("WEBVIEW2_ADDITIONAL_BROWSER_ARGUMENTS", "--autoplay-policy=no-user-gesture-required")
     import webview  # imported here so the rest can be tested without a GUI
     api = Api()
+    ui_url = getattr(api, "_ui_url", None)
     api._window = webview.create_window(
-        "Masterlog", resource(os.path.join("ui", "index.html")), js_api=api,
+        "Masterlog", ui_url or resource(os.path.join("ui", "index.html")), js_api=api,
         width=1480, height=920, min_size=(1100, 700), background_color="#0A1430",
         fullscreen=bool(api._settings.get("big_picture")),
     )
     api._fullscreen = bool(api._settings.get("big_picture"))
     # served over http://127.0.0.1 rather than file://, so embedded YouTube trailers know where they're playing
-    webview.start(gui="edgechromium" if sys.platform == "win32" else None, http_server=True)
+    webview.start(gui="edgechromium" if sys.platform == "win32" else None, http_server=not ui_url)
 
 
 if __name__ == "__main__":

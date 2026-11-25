@@ -10,6 +10,8 @@ import time
 import urllib.parse
 import urllib.request
 
+import saver
+
 UA = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) GameBacklog/1.0"
 MISS_RETRY_DAYS = 7
 
@@ -56,7 +58,26 @@ def same_title(a, b, threshold=0.86):
 
 EDITION_WORDS = {"intergrade", "deluxe", "complete", "enhanced", "ultimate", "gold", "premium", "directors", "director", "s",
                  "cut", "anniversary", "hd", "standard", "digital", "for", "ps4", "ps5", "nintendo", "switch", "2", "pc"}
-COVER_VERSION = 2  # raising this re-downloads every cover you didn't pick yourself
+def _company_words(names):
+    stop = {"inc", "ltd", "llc", "co", "corp", "studio", "studios", "games", "entertainment", "interactive", "the", "software",
+            "productions", "digital", "sa", "gmbh", "ab", "and", "pc", "port", "team"}
+    out = set()
+    for n in names:
+        out |= {w for w in re.findall(r"[a-z0-9]+", (n or "").lower()) if w not in stop and len(w) > 1}
+    return out
+
+
+def companies_agree(meta, developers, publishers):
+    """True unless your sheet names a developer/publisher and the store lists completely different ones."""
+    mine = _company_words([meta.get("developer"), meta.get("publisher")])
+    theirs = _company_words(list(developers) + list(publishers))
+    if not mine or not theirs:
+        return True
+    return bool(mine & theirs)
+
+
+COVER_VERSION = 3
+APPID_VERSION = 2  # raising this re-downloads every cover you didn't pick yourself
 PC_PLATFORMS = {"Steam", "GOG", "Epic Games", "EA", "EA App", "Ubisoft Connect", "PC (Other)", "itch.io", "Emulation", ""}
 PS_PLATFORMS = {"PS5", "PS4", "PS2"}
 NINTENDO = {"Switch 2", "Switch"}
@@ -80,8 +101,11 @@ class Art:
         self.lock = threading.Lock()
         self.index = self._read(self.index_path)
         self.appids = self._read(self.appid_path)
+        if self.appids.get("_v") != APPID_VERSION:
+            self.appids = {"_v": APPID_VERSION}   # earlier matches were looser; your linked accounts fill exact IDs back in
         self.sgdb_key = ""
         self.igdb = None      # set by the app when IGDB is configured
+        self.meta_lookup = lambda name: None  # the app supplies developer/publisher from your sheet
         self.url_base = None  # set by the app: covers are served as local files instead of inline data
 
     @staticmethod
@@ -93,12 +117,8 @@ class Art:
             return {}
 
     def _save(self):
-        with self.lock:
-            for p, d in ((self.index_path, self.index), (self.appid_path, self.appids)):
-                tmp = p + ".tmp"
-                with open(tmp, "w", encoding="utf-8") as f:
-                    json.dump(d, f, ensure_ascii=False, indent=0)
-                os.replace(tmp, p)
+        saver.save_later(self.index_path, lambda: self.index, lock=self.lock)
+        saver.save_later(self.appid_path, lambda: self.appids, lock=self.lock)
 
     # ---------- Steam ----------
     def steam_appid(self, name):
@@ -110,9 +130,20 @@ class Art:
             q = urllib.parse.quote(name)
             body, _ = _get(f"https://store.steampowered.com/api/storesearch/?term={q}&l=english&cc=US")
             items = [it for it in json.loads(body).get("items", []) if same_title(name, it.get("name", ""), 0.8)]
-            best = max(items, key=lambda it: (_norm(it.get("name", "")) == key, similar(name, it.get("name", ""))), default=None)
-            if best:
-                appid = int(best["id"])
+            items.sort(key=lambda it: (_norm(it.get("name", "")) != key, -similar(name, it.get("name", ""))))
+            meta = self.meta_lookup(name) or {}
+            for it in items[:4]:
+                # cross-check with the developer and publisher in your sheet, so a same-named game never slips in
+                if meta.get("developer") or meta.get("publisher"):
+                    try:
+                        d = json.loads(_get(f"https://store.steampowered.com/api/appdetails?appids={it['id']}&l=english")[0]).get(str(it["id"])) or {}
+                        d = d.get("data") or {}
+                    except Exception:
+                        d = {}
+                    if d and not companies_agree(meta, d.get("developers") or [], d.get("publishers") or []):
+                        continue
+                appid = int(it["id"])
+                break
         except Exception:
             return None  # network problem: don't cache
         self.appids[key] = appid or 0
@@ -438,6 +469,23 @@ class Art:
                 pass
         uri = self._store(key, img, "custom", suffix="-custom")
         return uri
+
+    def forget(self, name):
+        """Refresh info: drop the downloaded cover, wide art and Steam match for one game (your own picks stay)."""
+        key = _norm(name)
+        for k in (key, "hero|" + key):
+            e = self.index.get(k)
+            if e and e.get("src") not in USER_CHOSEN:
+                self.index.pop(k, None)
+                if e.get("file"):
+                    try:
+                        os.remove(os.path.join(self.dir, e["file"]))
+                    except OSError:
+                        pass
+        self.appids.pop(key, None)
+        if self.igdb:
+            self.igdb.cache.pop(name.lower().strip(), None)
+        self._save()
 
     def rename_custom(self, old, new):
         e = self.index.get(_norm(old))

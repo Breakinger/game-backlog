@@ -165,3 +165,25 @@ def trailers(game, steam_names=(), owners=(), igdb_ids=(), api_key=None, limit=6
             if len(out) >= 3:
                 break
     return out
+
+
+def videos(game, api_key=None, limit=12):
+    """Recent and popular videos about a game (gameplay, reviews, guides), for watching in the app."""
+    find = (lambda q: search_api(q, api_key, limit)) if api_key else (lambda q: search_page(q, limit + 6))
+    out, seen = [], set()
+    for q in (f"{game} gameplay", f"{game}"):
+        try:
+            res = find(q)
+        except Exception:
+            continue
+        need = _tokens(game)
+        for v in res:
+            words = set(_norm(v.get("title", "")).split())
+            if v["id"] in seen or not all(t in words for t in need) or (numerals(game) - numerals(v.get("title", ""))):
+                continue
+            seen.add(v["id"])
+            out.append({"youtube": v["id"], "name": v.get("title"), "channel": v.get("channel"), "published": v.get("published"),
+                        "seconds": v.get("seconds"), "thumb": f"https://i.ytimg.com/vi/{v['id']}/mqdefault.jpg"})
+        if len(out) >= limit:
+            break
+    return out[:limit]

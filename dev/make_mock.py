@@ -32,6 +32,16 @@ games += [dict(games[0], id=len(games)+i, row=300+i, name=n, status="Playing", t
 games.append(dict(games[0], id=len(games), row=310, name="Skyrim: Lorerim", status="Playing", type="Modded", platform="Steam", play_on="PC", completed=None, score=None))
 for g in games:
     if g["name"] in ("Assassin's Creed II", "Watch_Dogs"): g["migrate_to"] = "Steam"
+# MOCK_FX: duplicates and status effects for previews
+base = dict(games[0]); n = len(games)
+games += [dict(base, id=n, row=400, name="The Elder Scrolls V: Skyrim", status="Completed", platform="Steam", completed="2015-05-02", type="", priority=""),
+          dict(base, id=n+1, row=401, name="The Elder Scrolls V: Skyrim Special Edition", status="Library", platform="Steam", completed=None, type="", priority="High"),
+          dict(base, id=n+2, row=402, name="God of War: Ragnarok", status="Library", platform="PS4", format="Physical", upgrade="Paid upgrade", upgrade_owned=True, completed=None, type="", priority="Extreme"),
+          dict(base, id=n+3, row=403, name="God of War: Ragnarok", status="Library", platform="Steam", format="Digital", completed=None, type="", priority="")]
+for g in games:
+    if g["name"] == "Starfield": g["status"] = "Dropped"; g["second_chance"] = False
+    if g["status"] == "Library" and g["name"][:1] in "AB": g["status"] = "Paused"
+
 plays_csv = "Game,Run #,Platform,Play on,Modded,With DLC,100% / Plat,✓ Finished,Finished on,Hours,Notes\nThe Witcher 3: Wild Hunt,Run 2,PS4,,FALSE,FALSE,FALSE,TRUE,unknown date,,First run\nElden Ring,Run 2,,,FALSE,FALSE,FALSE,TRUE,✓  2024-03-02,,Replay\n"
 ph, pr = sheet._table(list(csv.reader(io.StringIO(plays_csv))))
 plays = sheet.parse_playthroughs(ph, pr)

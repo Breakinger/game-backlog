@@ -26,6 +26,9 @@
       <svg viewBox="0 0 24 24" width="20" height="20"><path fill="currentColor" d="M4 4h6v2H6v4H4V4zm10 0h6v6h-2V6h-4V4zM4 14h2v4h4v2H4v-6zm14 4v-4h2v6h-6v-2h4z"/></svg>
     </button>
     <button class="icon" id="soundBtn" title="Sound" aria-label="Sound"></button>
+    <button class="icon" id="claudeBtn" title="Ask Claude about your library" aria-label="Ask Claude">
+      <svg viewBox="0 0 24 24" width="20" height="20"><path fill="currentColor" d="M12 2l1.8 6.2L20 10l-6.2 1.8L12 18l-1.8-6.2L4 10l6.2-1.8zM19 15l.9 2.1L22 18l-2.1.9L19 21l-.9-2.1L16 18l2.1-.9z"/></svg>
+    </button>
     <button class="icon" id="addBtn" title="Add" aria-label="Add">
       <svg viewBox="0 0 24 24" width="20" height="20"><path fill="currentColor" d="M11 5h2v6h6v2h-6v6h-2v-6H5v-2h6z"/></svg>
     </button>
@@ -151,6 +154,20 @@
     <div class="row"><input id="coverQuery" type="search" placeholder="Search a different name" aria-label="Search covers by name"><button type="button" class="ghost small" id="coverSearch">Search</button></div>
     <div id="coverGrid" class="covergrid" role="list"></div>
     <div class="row"><button type="button" class="ghost small" id="coverFile">Use a file from this PC…</button><button type="button" class="ghost small" id="coverAuto">Back to automatic</button><span class="spacer"></span><button class="ghost" value="close">Close</button></div>
+  </form>
+</dialog>
+
+<dialog id="claudeDialog" class="settings wide">
+  <form method="dialog" id="claudeForm">
+    <h2>Ask Claude</h2>
+    <p class="fine">Free, through your Claude.ai account: Masterlog copies your request together with your library, you paste it into Claude, then paste Claude's answer back here. Nothing changes until you press Apply.</p>
+    <label>What do you want?
+      <textarea id="claudeAsk" rows="3" placeholder="Completed Sonic Unleashed, 7/10, 10.5 hours. Recommend me something similar."></textarea></label>
+    <div class="row"><button type="button" class="primary" id="claudeCopy">Copy for Claude and open Claude.ai</button><span class="muted" id="claudeCopied"></span></div>
+    <label>Paste Claude's answer
+      <textarea id="claudeReply" rows="6" placeholder="Paste the whole reply here"></textarea></label>
+    <div id="claudePreview"></div>
+    <div class="row"><span class="spacer"></span><button value="close" class="ghost">Close</button><button type="button" class="primary" id="claudeApply" disabled>Apply changes</button></div>
   </form>
 </dialog>
 
