@@ -1027,3 +1027,17 @@ body.away *, body.away *::before, body.away *::after { animation-play-state: pau
 .rankfield small { color: var(--muted); }
 .case .typetag { left: auto; right: 5%; }
 .rkcell .rankchip { display: none; }
+
+/* outlines: drawn inside the case so they always show (the glow outside was being trimmed), and twice as bold */
+.fx-high .box::before, .fx-done .box::before, .fx-extreme .box::before { content: ""; position: absolute; inset: 0; z-index: 8; pointer-events: none; border-radius: inherit; border: 3px solid var(--fxc); }
+.fx-high { --fxc: #F5C542; }
+.fx-done { --fxc: #5BD38A; }
+.fx-extreme { --fxc: #FF8A3D; }
+.fx-high .box::before { animation: goldline 3.2s ease-in-out infinite; }
+@keyframes goldline { 0%, 100% { border-color: rgba(245, 197, 66, .7); } 50% { border-color: #FFE08A; } }
+@keyframes goldpulse { 0%, 100% { box-shadow: 0 0 0 3px rgba(245, 197, 66, .55), 0 0 18px rgba(245, 197, 66, .3), 0 10px 24px rgba(0,0,0,.45); }
+  50% { box-shadow: 0 0 0 4px rgba(255, 214, 102, .95), 0 0 34px rgba(245, 197, 66, .6), 0 10px 24px rgba(0,0,0,.45); } }
+.fx-done .box { box-shadow: 0 0 0 3px rgba(91, 211, 138, .8), 0 0 26px rgba(91, 211, 138, .45), 0 10px 24px rgba(0,0,0,.45); }
+.fx-extreme .box { box-shadow: 0 0 0 3px rgba(255, 140, 60, .8), 0 -8px 30px rgba(255, 110, 40, .45), 0 10px 24px rgba(0,0,0,.45); }
+.grid .case.fx-high, .shelf-row .case.fx-high, .grid .case.fx-done, .shelf-row .case.fx-done { content-visibility: visible; }
+@media (prefers-reduced-motion: reduce) { .fx-high .box::before { animation: none; } }
