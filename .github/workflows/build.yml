@@ -36,11 +36,10 @@ jobs:
           path: dist/GameBacklog.exe
 
       - name: Publish release
-        uses: softprops/action-gh-release@v2
-        with:
-          tag_name: v1.0.${{ github.run_number }}
-          name: Game Backlog v1.0.${{ github.run_number }}
-          body: |
-            Download **GameBacklog.exe** below and run it. No install needed.
-            Windows may show a SmartScreen warning because the app isn't signed: click **More info → Run anyway**.
-          files: dist/GameBacklog.exe
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release create "v1.0.${{ github.run_number }}" dist/GameBacklog.exe \
+            --title "Game Backlog v1.0.${{ github.run_number }}" \
+            --notes "Download GameBacklog.exe below and run it. No install needed. If Windows SmartScreen warns you, click More info, then Run anyway (the app isn't signed)."
