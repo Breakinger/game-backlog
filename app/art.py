@@ -246,8 +246,14 @@ class Art:
         saver.save_later(self.appid_path, lambda: self.appids, lock=self.lock)
 
     # ---------- Steam ----------
+    def release_year(self, name):
+        """The release year you set for this game in your sheet, if any: it decides between same-named games."""
+        m = re.match(r"((?:19|20)\d\d)", str((self.meta_lookup(name) or {}).get("release") or ""))
+        return int(m.group(1)) if m else None
+
     def steam_appid(self, name):
-        key = _norm(name)
+        year = self.release_year(name)
+        key = _norm(name) + (f"|{year}" if year else "")
         if key in self.appids:
             return self.appids[key] or None
         appid = None
@@ -255,8 +261,19 @@ class Art:
             q = urllib.parse.quote(name)
             body, _ = _get(f"https://store.steampowered.com/api/storesearch/?term={q}&l=english&cc=US")
             items = [it for it in json.loads(body).get("items", []) if same_title(name, it.get("name", ""), 0.8)]
-            items.sort(key=lambda it: (_norm(it.get("name", "")) != key, -similar(name, it.get("name", ""))))
+            items.sort(key=lambda it: (_norm(it.get("name", "")) != _norm(name), -similar(name, it.get("name", ""))))
             meta = self.meta_lookup(name) or {}
+            if year and len(items) > 1:
+                # two games with this name (an original and its remake): the one released the year you set
+                dated = []
+                for it in items[:5]:
+                    try:
+                        d = (json.loads(_get(f"https://store.steampowered.com/api/appdetails?appids={it['id']}&l=english")[0]).get(str(it["id"])) or {}).get("data") or {}
+                        m = re.search(r"((?:19|20)\d\d)", (d.get("release_date") or {}).get("date") or "")
+                        dated.append((abs(int(m.group(1)) - year) if m else 99, it))
+                    except Exception:
+                        dated.append((99, it))
+                items = [it for _, it in sorted(dated, key=lambda x: x[0])]
             for it in items[:4]:
                 # cross-check with the developer and publisher in your sheet, so a same-named game never slips in
                 if meta.get("developer") or meta.get("publisher"):
@@ -298,8 +315,11 @@ class Art:
         games = [g for g in json.loads(body).get("data", [])[:8] if same_title(name, g.get("name", ""))]
         if not games:
             return None
-        # same name, several games (Deadlock 1996 vs Deadlock 2024): the exact, verified, newest one
-        return max(games, key=lambda g: (_norm(g.get("name", "")) == _norm(name), bool(g.get("verified")), g.get("release_date") or 0))
+        # same name, several games (Deadlock 1996 vs Deadlock 2024): the one from the year you set, else the exact,
+        # verified, newest one
+        year = self.release_year(name)
+        near = lambda g: year is not None and bool(g.get("release_date")) and abs(time.gmtime(g["release_date"]).tm_year - year) <= 1
+        return max(games, key=lambda g: (near(g), _norm(g.get("name", "")) == _norm(name), bool(g.get("verified")), g.get("release_date") or 0))
 
     def sgdb_grids(self, name, appid=None, limit=1):
         if not self.sgdb_key:
@@ -520,18 +540,19 @@ class Art:
                             self._save()
                 except OSError:
                     pass
-            current = entry.get("v", 1) >= COVER_VERSION and plat_group(entry.get("plat", "")) == plat_group(platform or "")
+            current = entry.get("v", 1) >= COVER_VERSION and plat_group(entry.get("plat", "")) == plat_group(platform or "") \
+                and entry.get("year") == self.release_year(name)   # a release year you set picks the right one of two same-named games
             if have and (entry.get("src") in USER_CHOSEN or current):
                 return self._data_uri(os.path.join(self.dir, fname))
             if not fname and current and time.time() - entry.get("t", 0) < MISS_RETRY_DAYS * 86400:
                 return None
-            if have and entry.get("v", 1) >= COVER_VERSION and time.time() - entry.get("t", 0) < 86400:
+            if have and entry.get("v", 1) >= COVER_VERSION and time.time() - entry.get("t", 0) < 86400 and entry.get("year") == self.release_year(name):
                 return self._data_uri(os.path.join(self.dir, fname))   # asked for under another platform today: don't flip-flop
         img, src = self._official(name, platform or "", hints)
         if not img:
             if entry and entry.get("file") and os.path.exists(os.path.join(self.dir, entry["file"])):
                 # nothing better found: keep the old one, but don't keep searching on every start
-                entry.update({"v": COVER_VERSION, "plat": platform or "", "t": time.time()})
+                entry.update({"v": COVER_VERSION, "plat": platform or "", "t": time.time(), "year": self.release_year(name)})
                 self._save()
                 return self._data_uri(os.path.join(self.dir, entry["file"]))
             self.index[key] = {"file": "", "t": time.time(), "src": "none", "v": COVER_VERSION, "plat": platform or ""}
@@ -544,7 +565,7 @@ class Art:
                 os.remove(os.path.join(self.dir, old))
             except OSError:
                 pass
-        self.index[key].update({"v": COVER_VERSION, "plat": platform or ""})
+        self.index[key].update({"v": COVER_VERSION, "plat": platform or "", "year": self.release_year(name)})
         self._save()
         return uri
 

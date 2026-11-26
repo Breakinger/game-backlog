@@ -88,6 +88,7 @@ function gotyYearHTML(y, { nav = false } = {}) {
     <header class="ghead">${nav ? `<button type="button" class="gnav" data-gstep="-1" aria-label="Newer year" ${i <= 0 ? "disabled" : ""}><svg viewBox="0 0 24 24"><path d="M15 5l-7 7 7 7"/></svg></button>` : ""}
       <h2><span>Game of the Year</span> <b>${y.year}</b></h2>
       ${nav ? `<button type="button" class="gnav" data-gstep="1" aria-label="Older year" ${i >= years.length - 1 ? "disabled" : ""}><svg viewBox="0 0 24 24"><path d="M9 5l7 7-7 7"/></svg></button>` : ""}
+      ${nav ? `<button type="button" class="gfold" data-gfold aria-label="Hide or show Game of the Year" title="Hide or show"><svg viewBox="0 0 24 24"><path d="M6 15l6-6 6 6"/></svg></button>` : ""}
       ${y.year < 2014 ? `<span class="gnote">The Game Awards began in 2014; this year's crowns come from the other ceremonies.</span>` : pending ? `<span class="gnote">The Game Awards ${y.year} haven't been held yet: these are the nominees.</span>` : ""}</header>
     <div class="gstage">
       ${official ? gotySlot(official, "gold", y.year) : ""}

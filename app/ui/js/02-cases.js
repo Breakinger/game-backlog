@@ -40,14 +40,14 @@ function caseHTML(g, o = {}) {
   const stack = dups.length ? `<div class="fancards" aria-hidden="true">${dups.map((d, i) => { const dp = plat(d.platform), c = covers.get(coverKey(d)) || covers.get(coverKey(g)); return `<i style="--i:${i + 1};--n:${dups.length};--dc:${dp.band};--dt:${dp.text || "#fff"};--ds:${dp.shell || "#10162A"}"><em>${esc(dp.label)}</em>${c ? `<img alt="" src="${c}">` : ""}</i>`; }).join("")}</div><span class="copies" title="${esc(dups.map(d => `${d.name} (${plat(d.platform).label}, ${d.status})`).join(" · "))}">×${dups.length + 1}</span>` : "";
   return `<button class="case p-${(g.platform || "x").replace(/\W+/g, "")} ${isSel("game", g.virtual ? state.games.find(x => x.row === g.row) || g : g) ? "sel" : ""} ${g.status === "Wishlist" ? "unowned" : ""} ${dups.length ? "stacked" : ""} ${effectClass(g)} ${gotyClass(g)} ${ach ? "honored" : ""}" data-id="${g.id}" data-kind="game"
     style="--band:${p.band};--band-text:${p.text};--shell:${p.shell};--accent:${p.accent};--plat:${p.chip}" aria-label="${esc(g.name)}">
-    <div class="stage">${stack}${media}${effectLayer(g)}${gotyLayer(g)}
+    <div class="stage">${stack}${media}${effectLayer(g)}${gotyLayer(g)}${o.noLabel ? "" : fresh}
       <div class="box"><div class="shell"></div>
         <div class="band">${emblem(g.platform)}<span class="wm">${esc(bandLabel(g.platform, p))}</span>${deck}${up}</div>
         <div class="art" data-kind="game" data-id="${g.id}">${art}</div>
         <div class="hinge"></div><div class="sheen"></div>${typeTag}${quick}
       </div>
     </div>
-    ${o.noLabel ? "" : `<div class="label">${fresh}<div class="ltop"><div class="name">${esc(g.name)}</div>${medals}</div><div class="sub">${badge}${esc(o.sub ?? subline(g))}</div>${g.status === "Wishlist" ? priceTag(g) : ""}</div>`}
+    ${o.noLabel ? "" : `<div class="label"><div class="ltop"><div class="name">${esc(g.name)}</div>${medals}</div><div class="sub">${badge}${esc(o.sub ?? subline(g))}</div>${g.status === "Wishlist" ? priceTag(g) : ""}</div>`}
   </button>`;
 }
 function factsOf(g) { return state.facts[g.name] || {}; }

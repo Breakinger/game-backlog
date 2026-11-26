@@ -143,6 +143,11 @@ function bindGlobal() {
     const evs = e.target.closest("[data-evstep]"); if (evs) { try { FX.play.move(); } catch {} return eventGo(eventState.i + +evs.dataset.evstep); }
     const evg = e.target.closest("[data-evgo]"); if (evg) return eventGo(+evg.dataset.evgo);
     if (e.target.closest("[data-evdeals]")) return go("deals");
+    if (e.target.closest("[data-gfold]")) {
+      const box = $("#gotyHome"), folded = !box.classList.contains("folded");
+      box.classList.toggle("folded", folded); uiSet("goty_folded", folded); try { FX.play.move(); } catch {}
+      return;
+    }
     const gstep = e.target.closest("[data-gstep]");
     if (gstep) {
       const ys = (gotyState.data?.years || []).map(y => y.year), cur = state.gotyYear || gotyDefaultYear();
@@ -259,7 +264,7 @@ function bindGlobal() {
   view.addEventListener("change", e => {
     if (e.target.id === "rankAdd" && e.target.value.trim()) { const n = e.target.value.trim(); if (!state.ranking.some(x => rankKey(x) === rankKey(n))) { state.ranking.push(n); saveRanking(`${n} added at #${state.ranking.length}. Drag it where it belongs.`); } return; }
     if (e.target.id === "scale") applyScale(+e.target.value, true);
-    if (e.target.id === "sort") { state.filter.sort = e.target.value; render(); }
+    if (e.target.id === "sort") { state.filter.sort = e.target.value; render(); if (["newest", "oldest"].includes(e.target.value)) loadReleaseDates(); }
     if (e.target.id === "bsort") { state.bfilter.sort = e.target.value; render(); }
     if (e.target.classList.contains("cellsel")) {
       const tr = e.target.closest("tr"), item = findItem(tr.dataset.kind, tr.dataset.id);

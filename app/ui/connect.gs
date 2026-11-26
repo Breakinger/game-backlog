@@ -136,14 +136,30 @@ function table_(tab) {
   return { headers: headers, rows: rows, options: options_(sh, h, cols) };
 }
 
+/* script 8: a 'Release date' column at the end of the Games tab. Masterlog only writes a date there when you set
+   one (in Modify); it tells same-named games apart (an original and its remake) and sorts your games by age. */
+function ensureReleaseColumn_() {
+  const sh = sheetFor_('games');
+  const h = headerRow_(sh);
+  const cols = sh.getLastColumn();
+  const headers = sh.getRange(h, 1, 1, cols).getDisplayValues()[0];
+  if (headers.some(x => /^release date$/i.test(String(x).trim()))) return;
+  sh.insertColumnAfter(cols);
+  const cell = sh.getRange(h, cols + 1);
+  sh.getRange(h, cols).copyTo(cell, SpreadsheetApp.CopyPasteType.PASTE_FORMAT, false);
+  cell.setValue('Release date');
+  sh.getRange(h + 1, cols + 1, Math.max(1, sh.getMaxRows() - h), 1).setNumberFormat('yyyy-mm-dd');
+}
+
 function read_() {
+  try { ensureReleaseColumn_(); } catch (e) {}
   return {
     title: SpreadsheetApp.getActive().getName(),
     games: table_('games'),
     plays: table_('plays'),
     books: table_('books'),
     ranking: ranking_(),
-    script: 7,
+    script: 8,
   };
 }
 

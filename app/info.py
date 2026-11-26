@@ -19,7 +19,7 @@ import youtube
 BROWSER_UA = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/130.0 Safari/537.36"
 MC = "https://backend.metacritic.com"
 DAY = 86400
-TTL = {"awards": 30 * 86400, "about": 30 * DAY, "media": 7 * DAY, "ratings": 3 * DAY, "dlcs": 7 * DAY, "wiki": 30 * DAY, "wiki2": 14 * DAY, "awards2": 30 * DAY, "news": 6 * 3600, "trailers": 14 * DAY, "watch": 2 * DAY, "updated": 12 * 3600, "book": 30 * DAY, "ryear": 365 * DAY}
+TTL = {"awards": 30 * 86400, "about": 30 * DAY, "media": 7 * DAY, "ratings": 3 * DAY, "dlcs": 7 * DAY, "wiki": 30 * DAY, "wiki2": 14 * DAY, "awards2": 30 * DAY, "news": 6 * 3600, "trailers": 14 * DAY, "watch": 2 * DAY, "updated": 12 * 3600, "book": 30 * DAY, "ryear": 365 * DAY, "rinfo": 30 * DAY}
 NEW_UPDATE_DAYS = 14
 CACHE_VERSION = 3
 PATCH_RE = re.compile(r"\b(patch|update|hotfix|hot-fix|version\s*\d|v\d+\.\d+|release notes)\b", re.I)
@@ -284,7 +284,9 @@ class Info:
 
     @staticmethod
     def _key(game):
-        return _norm(game.get("name", ""))
+        # a release year you set keeps the remake's details apart from the original's ('Resident Evil 4|2023')
+        y = str(game.get("release") or "")[:4]
+        return _norm(game.get("name", "")) + (f"|{y}" if y.isdigit() else "")
 
     def _appid(self, game):
         try:

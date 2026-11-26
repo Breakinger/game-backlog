@@ -186,7 +186,10 @@ function homeHTML() {
         <button class="more" data-go="${s.view}" data-shelf="${i}">See all</button>${s.title === "Modpacks" ? `<button class="more" data-modpacks>Find modpacks on this PC</button>` : ""}</div>
       ${lazyCases(s.items, "shelf-row", 10)}
     </section>`).join("");
-  return `<section class="events" id="eventsHome" hidden></section><section class="whatsnew" id="whatsNew" hidden></section><section class="hero"><div class="hero-bg" id="heroBg"></div><div id="heroCase"></div><div id="heroText"></div></section><section class="gotyhome" id="gotyHome" hidden></section>${rows}`;
+  // the hero and the shelf right under it belong together; Game of the Year comes after them
+  const cut = rows.indexOf("</section>") + "</section>".length;
+  const goty = `<section class="gotyhome ${uiGet("goty_folded") ? "folded" : ""}" id="gotyHome" hidden></section>`;
+  return `<section class="events" id="eventsHome" hidden></section><section class="whatsnew" id="whatsNew" hidden></section><section class="hero"><div class="hero-bg" id="heroBg"></div><div id="heroCase"></div><div id="heroText"></div></section>${cut > 20 ? rows.slice(0, cut) + goty + rows.slice(cut) : goty + rows}`;
 }
 
 function updateHero(g, force) {
@@ -364,6 +367,8 @@ function filtered() {
     score: (a, b) => (b.score ?? -1) - (a.score ?? -1) || a.name.localeCompare(b.name),
     recent: (a, b) => byDone(a, b) || a.name.localeCompare(b.name),
     hours: (a, b) => (b.hours ?? -1) - (a.hours ?? -1),
+    newest: (a, b) => (releaseOf(b) ?? -1) - (releaseOf(a) ?? -1) || a.name.localeCompare(b.name),
+    oldest: (a, b) => (releaseOf(a) ?? 9e12) - (releaseOf(b) ?? 9e12) || a.name.localeCompare(b.name),
     platform: (a, b) => order.indexOf(a.platform) - order.indexOf(b.platform) || byPrio(a, b),
   };
   list.sort(sorts[f.sort] || byPrio);
@@ -453,7 +458,7 @@ function libraryHTML() {
       <div class="line">
         <input class="search" id="search" type="search" placeholder="Search games, genres, studios" value="${esc(f.q)}">
         ${scaleSlider()}
-        <select class="pick" id="sort">${[["priority", "Sort by priority"], ["name", "Sort by name"], ["score", "Sort by score"], ["recent", "Recently finished"], ["hours", "Most hours"], ["platform", "Sort by platform"]].map(([v, l]) => `<option value="${v}" ${f.sort === v ? "selected" : ""}>${l}</option>`).join("")}</select>
+        <select class="pick" id="sort">${[["priority", "Sort by priority"], ["name", "Sort by name"], ["score", "Sort by score"], ["recent", "Recently finished"], ["hours", "Most hours"], ["newest", "Newest release"], ["oldest", "Oldest release"], ["platform", "Sort by platform"]].map(([v, l]) => `<option value="${v}" ${f.sort === v ? "selected" : ""}>${l}</option>`).join("")}</select>
         ${modeSwitch()}
         <button class="ghost small walkbtn" data-walk title="Walk through your library (Ctrl+L)">Walk the shelves</button>
         <span class="total">${list.length} ${list.length === 1 ? "game" : "games"}</span>

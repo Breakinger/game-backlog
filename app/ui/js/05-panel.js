@@ -326,6 +326,7 @@ function showPanelTab(tab) {
     Promise.resolve(api?.media(item)).then(m => { if (still()) renderGallery(m || { shots: [], videos: [] }); }).catch(() => renderGallery({ shots: [], videos: [] }));
     Promise.resolve(api?.about(item)).then(a => { const box = $("#aboutLong"); if (box && still() && a?.long) { box.hidden = false; box.querySelector("div").textContent = a.long; } }).catch(() => {});
     Promise.resolve(api?.awards(item)).then(r => { const box = $("#ovAwards"), html = awardsHTML(r); if (box && still() && html) { box.innerHTML = `<h3>Awards</h3>${html}`; box.hidden = false; } }).catch(() => {});
+    Promise.resolve(api?.release_info?.({ name: item.name, release: item.release || "" })).then(r => { const box = $("#ovRelease"); if (box && still() && r?.date) { box.innerHTML = releaseHTML(item, r); box.hidden = false; } }).catch(() => {});
     getRatings(item).then(r => { const box = $("#ovScores"); if (box && still()) box.innerHTML = r && (r.metacritic || r.steam || r.playstation) ? `${miniScoresHTML(r)}<button class="linkish" data-ptab="ratings">View more</button>` : `<span class="muted">No ratings found.</span>`; });
   }
   if (tab === "ratings") { body.innerHTML = loading("Fetching scores…"); getRatings(item).then(r => { if (still()) body.innerHTML = ratingsHTML(item, r); }); }
@@ -392,6 +393,7 @@ function gameOverviewHTML(g) {
     ${quick}
     <div class="kv">${kv.map(([k, v]) => `<div><small>${esc(k)}</small><span>${esc(v)}</span></div>`).join("")}</div>
     <div class="flags">${flags.map(([k, on]) => `<span class="flag ${on ? "on" : ""}">${on ? "✓ " : ""}${esc(k)}</span>`).join("")}</div>
+    <section class="ovrelease" id="ovRelease" hidden></section>
     <section class="ovawards" id="ovAwards" hidden></section>
     ${g.notes ? `<h3>Notes</h3><p class="notes">${esc(g.notes)}</p>` : ""}
     <details class="more about-long" id="aboutLong" hidden><summary>About this game</summary><div></div></details>
@@ -585,7 +587,7 @@ function bookAboutHTML(b, i) {
 const GAME_FORM = [["name", "Name", "text"], ["status", "Status", "select"], ["priority", "Priority", "select"], ["platform", "Platform", "select"], ["play_on", "Play on", "select"],
   ["format", "Format", "select"], ["upgrade", "Upgrade", "select"], ["hours", "Hours", "number"], ["score", "Score (0–10)", "number"],
   ["type", "Category", "select"], ["migrate_to", "Migrate to", "select"],
-  ["genre", "Genre", "text"], ["store_link", "Store link", "text"], ["notes", "Notes", "textarea"],
+  ["release", "Release date", "date"], ["genre", "Genre", "text"], ["store_link", "Store link", "text"], ["notes", "Notes", "textarea"],
   ["second_chance", "Second chance", "check"], ["upgrade_owned", "Upgrade owned", "check"], ["dlc_owned", "DLC owned", "check"], ["dlc_done", "DLC done", "check"], ["platinum", "100% / Platinum", "check"], ["modded", "Modded", "check"]];
 const BOOK_FORM = [["name", "Title", "text"], ["author", "Author", "text"], ["series", "Series", "text"], ["number", "Number in series", "number"],
   ["status", "Status", "select"], ["priority", "Priority", "select"], ["format", "Format", "select"], ["score", "Score (0–10)", "number"],
@@ -593,7 +595,7 @@ const BOOK_FORM = [["name", "Title", "text"], ["author", "Author", "text"], ["se
 /* ---------- Modify: the game's details, laid out the way you think about them ---------- */
 const CHIP_FIELDS = new Set(["status", "priority", "play_on", "format", "type"]);
 const FORM_GROUPS = {
-  games: [["Progress", ["status", "priority"]], ["Where you play it", ["platform", "play_on", "format", "type", "upgrade", "migrate_to"]], ["Your take", ["hours", "score"]], ["Details", ["genre", "store_link", "notes"]]],
+  games: [["Progress", ["status", "priority"]], ["Where you play it", ["platform", "play_on", "format", "type", "upgrade", "migrate_to"]], ["Your take", ["hours", "score"]], ["Details", ["release", "genre", "store_link", "notes"]]],
   books: [["Progress", ["status", "priority"]], ["The book", ["author", "series", "number", "format"]], ["Your take", ["score"]], ["Details", ["store_link", "notes"]]],
 };
 const NONE_LABEL = { priority: "None", type: "Normal", play_on: "Any", format: "Not set" };
@@ -612,6 +614,7 @@ function fieldHTML(cat, [k, label, type], item) {
       <button type="button" class="mclear" data-scoreclear title="No score">Clear</button></div><input type="hidden" name="score" value="${has ? v : ""}"></div>`;
   }
   if (type === "number") return `<label class="mf num" data-field="${k}">${label}<span class="stepper"><button type="button" data-step="-1" aria-label="Less">−</button><input name="${k}" type="number" step="${k === "number" ? 1 : 0.1}" min="0" value="${v ?? ""}" placeholder="–"><button type="button" data-step="1" aria-label="More">+</button></span></label>`;
+  if (type === "date") return `<label class="mf" data-field="${k}">${label}<input name="${k}" type="date" value="${esc(v || "")}" max="2100-12-31"><small class="mhint">Set it when two games share a name (an original and its remake): it picks the right cover and details.</small></label>`;
   if (type === "textarea") return `<label class="mf wide" data-field="${k}">${label}<textarea name="${k}" rows="3" placeholder="Anything worth remembering">${esc(v || "")}</textarea></label>`;
   if (type === "check") return `<label class="mswitch" data-field="${k}"><input name="${k}" type="checkbox" ${v ? "checked" : ""}><i aria-hidden="true"></i><span>${label}</span></label>`;
   return `<label class="mf ${k === "store_link" ? "wide" : ""}" data-field="${k}">${label}<input name="${k}" type="text" value="${esc(v ?? "")}" ${k === "store_link" ? 'placeholder="https://"' : ""}></label>`;
@@ -649,7 +652,7 @@ function readForm(form, cat, item) {
   for (const [k, , type] of fields) {
     const el = form.elements[k];
     if (!el) continue;
-    let v = type === "check" ? el.checked : el.value.trim();
+    let v = type === "check" ? el.checked : (el.value || "").trim();
     if (type === "number") v = v === "" ? "" : +v;
     const old = item?.[k] ?? (type === "check" ? false : "");
     if (type === "number" ? String(v) !== String(old ?? "") : v !== old) changes[k] = v;
@@ -780,4 +783,18 @@ async function submitAdd(form) {
   if (!res || res.error) return toast(`Couldn't add: ${res?.error || "no connection"}`, "err");
   toast(`Added ${values.name}.`, "ok");
   sync(true);
+}
+
+/* when it came out: the first release and where, later ports, and newer versions of it */
+function releaseHTML(g, r) {
+  const plats = (r.platforms || []).join(", ");
+  const newer = (r.newer || []).map(n => {
+    const m = rankMatch(n.name), own = m && m.via !== "collection" && rankKey(m.g.name) !== rankKey(g.name) ? m.g : null;
+    const y = n.date ? new Date(n.date * 1000).getUTCFullYear() : "";
+    return `<button type="button" class="relnewer" ${own ? `data-open="${own.id}" data-kind="game"` : `data-url="https://store.steampowered.com/search/?term=${encodeURIComponent(n.name)}"`}>
+      <b>${esc(n.name)}</b><small>${esc(n.kind)}${y ? `, ${y}` : ""}${own ? " · in your library" : ""}</small></button>`;
+  }).join("");
+  return `<div class="relmain"><small>Released</small><b>${esc(fmtRelease(r.date, r.precision))}</b>${plats ? `<span>on ${esc(plats)}</span>` : ""}${r.manual ? `<i class="relset" title="The release date you set">set by you</i>` : ""}</div>
+    ${(r.ports || []).map(p => `<div class="relport"><span class="relarrow" aria-hidden="true">↳</span>${esc(p.platform)} port <b>${esc(fmtRelease(p.date, p.precision))}</b></div>`).join("")}
+    ${newer ? `<div class="relnew"><span>Newer version${(r.newer || []).length > 1 ? "s" : ""}:</span>${newer}</div>` : ""}`;
 }

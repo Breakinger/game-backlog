@@ -787,7 +787,8 @@ class Api:
         """Developer and publisher from your sheet, used to double-check every store match."""
         c = getattr(self, "_meta_cache", None)
         if not c or time.time() - c[0] > 60:
-            c = (time.time(), {art._norm(g["name"]): {"developer": g.get("developer"), "publisher": g.get("publisher")} for g in self._sheet_games()})
+            c = (time.time(), {art._norm(g["name"]): {"developer": g.get("developer"), "publisher": g.get("publisher"),
+                                                       "release": g.get("release")} for g in self._sheet_games()})
             self._meta_cache = c
         return c[1].get(art._norm(name))
 
@@ -1389,6 +1390,79 @@ class Api:
         stamp = time.time() - (7 * 86400 - 3600 if not y and failed else 0)
         self._info.cache.put("ryear", key, {"y": y, "t": stamp})
         return y
+
+    def release_info(self, game):
+        """When it came out, where first, later ports, and newer versions (see releases.py)."""
+        import releases
+        import lore
+        name = (game or {}).get("name") or ""
+        manual = (game or {}).get("release")
+        year = int(str(manual)[:4]) if manual and str(manual)[:4].isdigit() else None
+        key = info._norm(name) + f"|{year or ''}"
+        hit = self._info.cache.get("rinfo", key)
+        if hit is not None:
+            out = dict(hit)
+        else:
+            out = _safe(releases.from_igdb, self._igdb, name, year)
+            if not out:
+                entries = []
+                try:
+                    w = lore.wikipedia(name + (f" {year}" if year else ""))
+                    if w and w.get("title"):
+                        facts = lore.article(w["title"]).get("facts") or []
+                        rel = next((f["value"] for f in facts if re.match(r"release", f["label"], re.I)), "")
+                        entries = releases.from_wikipedia_release(rel)
+                except Exception:
+                    pass
+                out = releases.combine(entries) or {}
+                if out:
+                    out["source"] = "Wikipedia"
+            # Steam's date is the PC one: a port when it came later than the first release
+            try:
+                steam = (self._info.about({"name": name, "release": manual}) or {}).get("release")
+                st = (releases.parse_dates(steam) or [(None, None)])[0]
+                if st[0]:
+                    if not out:
+                        out = {"date": st[0], "precision": st[1], "platforms": ["PC"], "ports": [], "source": "Steam"}
+                    elif "PC" not in out.get("platforms", []) and not any(p["platform"] == "PC" for p in out.get("ports", [])) and st[0] - out["date"] > 31 * 86400:
+                        out.setdefault("ports", []).append({"platform": "PC", "date": st[0], "precision": st[1]})
+                        out["ports"].sort(key=lambda x: x["date"])
+            except Exception:
+                pass
+            out.setdefault("newer", [])
+            self._info.cache.put("rinfo", key, out)
+        if year:
+            ts = releases.parse_dates(str(manual).replace("-", " "))
+            d = releases._ts(*[int(x) for x in str(manual).split("-")[:3]]) if re.match(r"\d{4}-\d{2}-\d{2}", str(manual)) else None
+            out = {**out, "date": d or (ts[0][0] if ts else out.get("date")), "precision": "day", "manual": True}
+        return out
+
+    def release_dates(self, games):
+        """{name: unix time} for sorting by release date: the date you set, else a known one; the rest are looked up
+        quietly in the background, a few at a time."""
+        out, missing = {}, []
+        for g in (games or [])[:800]:
+            name, manual = g.get("name"), g.get("release")
+            if manual and re.match(r"\d{4}-\d{2}-\d{2}", manual):
+                import releases
+                out[name] = releases._ts(*[int(x) for x in manual.split("-")[:3]])
+                continue
+            hit = self._info.cache.get("rinfo", info._norm(name) + "|")
+            if hit is not None:
+                if hit.get("date"):
+                    out[name] = hit["date"]
+            else:
+                missing.append(g)
+        if missing and not getattr(self, "_dates_busy", False):
+            def fill(batch):
+                self._dates_busy = True
+                try:
+                    for g in batch:
+                        _safe(self.release_info, {"name": g.get("name")})
+                finally:
+                    self._dates_busy = False
+            threading.Thread(target=fill, args=(missing[:30],), daemon=True).start()
+        return {"dates": out, "pending": len(missing)}
 
     def release_year(self, name):
         return _safe(self._release_year, name)

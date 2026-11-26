@@ -56,7 +56,8 @@ class IGDB:
     def game(self, name):
         if not self.configured():
             return None
-        key = name.lower().strip()
+        _m = (self.meta_lookup(name) or {}) if getattr(self, "meta_lookup", None) else {}
+        key = name.lower().strip() + "|" + str(_m.get("release") or "")[:4]
         if key in self.cache:
             return self.cache[key]
         safe = name.replace('"', "")
@@ -70,7 +71,16 @@ class IGDB:
             from art import companies_agree
             agreeing = [r for r in rows if companies_agree(meta, [(c.get("company") or {}).get("name", "") for c in r.get("involved_companies") or []], [])]
             rows = agreeing
-        best = max(rows, key=lambda r: (_norm(r.get("name", "")) == _norm(name), similar(name, r.get("name", ""))), default=None)
+        year = None
+        try:
+            import re as _re
+            m = _re.match(r"((?:19|20)\d\d)", str(meta.get("release") or ""))
+            year = int(m.group(1)) if m else None
+        except Exception:
+            pass
+        import time as _t
+        near = lambda r: year is not None and bool(r.get("first_release_date")) and abs(_t.gmtime(r["first_release_date"]).tm_year - year) <= 1
+        best = max(rows, key=lambda r: (near(r), _norm(r.get("name", "")) == _norm(name), similar(name, r.get("name", ""))), default=None)
         self.cache[key] = best
         return best
 

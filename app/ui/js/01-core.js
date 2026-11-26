@@ -220,3 +220,28 @@ async function loadFamily() {
   familyState.data = d;
   if (changed && d.apps?.length && ["home", "library"].includes(state.view)) render();
 }
+
+/* ---------- release dates: the one you set (sheet's Release date), else what was found ---------- */
+const releaseState = { dates: {}, pending: 0, asked: 0 };
+function releaseOf(g) {
+  if (g?.release) { const t = Date.parse(g.release + "T00:00:00Z"); if (!isNaN(t)) return t / 1000; }
+  return releaseState.dates[g?.name] ?? null;
+}
+/* sorting by release date fills in dates for the whole library in the background, then sorts again */
+async function loadReleaseDates() {
+  if (!api?.release_dates || Date.now() - releaseState.asked < 4000) return;
+  releaseState.asked = Date.now();
+  const r = await Promise.resolve(api.release_dates(state.games.filter(g => !g.virtual).map(g => ({ name: g.name, release: g.release || "" })))).catch(() => null);
+  if (!r) return;
+  const before = Object.keys(releaseState.dates).length;
+  Object.assign(releaseState.dates, r.dates || {});
+  releaseState.pending = r.pending;
+  const sorting = ["newest", "oldest"].includes(state.filter.sort);
+  if (sorting && Object.keys(releaseState.dates).length !== before) render();
+  if (sorting && r.pending) setTimeout(loadReleaseDates, 5000);
+}
+function fmtRelease(ts, precision) {
+  if (!ts) return "";
+  const d = new Date(ts * 1000), o = precision === "year" ? { year: "numeric", timeZone: "UTC" } : precision === "month" ? { month: "short", year: "numeric", timeZone: "UTC" } : { day: "numeric", month: "short", year: "numeric", timeZone: "UTC" };
+  return d.toLocaleDateString("en-GB", o);
+}
