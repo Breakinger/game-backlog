@@ -3982,7 +3982,8 @@ function eventCard(e, i) {
     e.url ? `<button type="button" class="linkish ev-src" data-url="${esc(e.url)}" title="${esc(e.headline || "")}">Announced on ${esc(e.source || "the news")}</button>` : "",
   ].join("");
   const n = PARTICLES[e.theme] || 0;
-  return `<article class="ev ev-${esc(e.theme)} ${e.state}" data-ev="${i}" aria-roledescription="slide">
+  return `<article class="ev ev-${esc(e.theme)} ${e.state} ${e.art ? "has-art" : ""}" data-ev="${i}" aria-roledescription="slide">
+    ${e.art ? `<div class="ev-art" aria-hidden="true"><img alt="" decoding="async" referrerpolicy="no-referrer" src="${esc(e.art)}"></div>` : ""}
     ${n ? `<div class="ev-fx" aria-hidden="true">${Array.from({ length: n }, (_, k) => `<i style="--k:${k};--x:${(k * 53) % 100}%;--d:${(k * 0.7) % 6}s"></i>`).join("")}</div>` : ""}
     <div class="ev-main">
       <div class="ev-kicker">${e.state === "live" ? `<span class="ev-live"><i></i>LIVE</span>` : e.state === "ended" ? `<span class="ev-ended">Ended</span>` : `<span class="ev-soon">Coming up</span>`}<span>${esc(e.kind)}</span></div>
@@ -4009,6 +4010,8 @@ function fillEvents() {
     </div>
     ${list.length > 1 ? `<div class="ev-dots">${list.map((e, i) => `<button type="button" class="${i === eventState.i ? "on" : ""}" data-evgo="${i}" aria-label="${esc(e.title)}"></button>`).join("")}</div>` : ""}`;
   box.querySelectorAll(".ev").forEach(el => fxObserver.observe(el));
+  // official art that doesn't load leaves the event's own colours
+  box.querySelectorAll(".ev-art img").forEach(img => img.addEventListener("error", () => { img.closest(".ev")?.classList.remove("has-art"); img.parentElement.remove(); }, { once: true }));
   activateArt(box); loadVirtualArt(box);
   eventsTick();
 }

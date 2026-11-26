@@ -2125,3 +2125,13 @@ body.calm .glint { animation-play-state: paused; }
 .ev-halloween { --a: #E0620F; --b: #1E0A2E; --c: #FF9F3A; }
 .ev-epic { --a: #3A3A3A; --b: #121212; --c: #F0F0F0; }
 @media (max-width: 1200px) { .ev { grid-template-columns: 1fr; } .ev-side { align-items: stretch; } .ev-noms h5 { text-align: left; } }
+
+/* the event's official promotional art, behind the banner, fading into its colours on the text side */
+.ev-art { position: absolute; inset: 0; z-index: -2; }
+.ev-art img { position: absolute; inset: 0; width: 100%; height: 100%; object-fit: cover; object-position: center 30%;
+  -webkit-mask-image: linear-gradient(90deg, transparent 0%, rgba(0,0,0,.35) 28%, #000 62%); mask-image: linear-gradient(90deg, transparent 0%, rgba(0,0,0,.35) 28%, #000 62%); }
+.ev.has-art::before { content: ""; position: absolute; inset: 0; z-index: -1; pointer-events: none;
+  background: linear-gradient(90deg, color-mix(in srgb, var(--b) 92%, transparent) 0%, color-mix(in srgb, var(--b) 55%, transparent) 45%, rgba(0, 0, 0, .1) 75%),
+              linear-gradient(0deg, rgba(0, 0, 0, .45), transparent 45%); }
+.ev.has-art .ev-glyph { display: none; }
+.ev.has-art .ev-noms { padding: 12px; border-radius: 12px; background: rgba(0, 0, 0, .45); }

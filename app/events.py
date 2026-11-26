@@ -10,7 +10,9 @@ Where the dates come from:
   and a date ('State of Play returns tomorrow at 2pm PT'). A sighting is remembered, so it stays after the
   article scrolls off the feed. Only events from a few days before they start until just after they end are shown.
 
-Every event links to its official streams and site, and sales to their store."""
+Every event links to its official streams and site, and sales to their store. Its banner shows the event's own
+promotional art, loaded live from the official page or the announcement (like game covers are), never stored in
+the app itself."""
 import html
 import json
 import os
@@ -194,6 +196,24 @@ def extract_when(text, published):
     return int((local - timedelta(hours=_offset("PT", local))).replace(tzinfo=timezone.utc).timestamp()), False
 
 
+def og_image(page, base):
+    """The picture a page shares for itself (og:image / twitter:image): an event site's key art."""
+    for rx in (r'<meta[^>]+property=["\']og:image(?::secure_url)?["\'][^>]+content=["\']([^"\']+)',
+               r'<meta[^>]+content=["\']([^"\']+)["\'][^>]+property=["\']og:image["\']',
+               r'<meta[^>]+name=["\']twitter:image["\'][^>]+content=["\']([^"\']+)'):
+        m = re.search(rx, page or "", re.I)
+        if m:
+            url = html.unescape(m.group(1)).strip()
+            if url.startswith("//"):
+                url = "https:" + url
+            elif url.startswith("/"):
+                from urllib.parse import urljoin
+                url = urljoin(base, url)
+            if url.startswith("https://"):
+                return url
+    return None
+
+
 def _iso(s):
     return int(datetime.fromisoformat(s.replace("Z", "+00:00")).timestamp())
 
@@ -271,7 +291,7 @@ def sightings(items):
             if not start or not (published - DAY <= start <= published + 120 * DAY):
                 continue
             out.append({"series": key, "title": s["name"], "start": start, "timed": timed,
-                        "url": it.get("url"), "source": it.get("source"), "headline": title})
+                        "url": it.get("url"), "source": it.get("source"), "headline": title, "thumb": it.get("thumb")})
     return out
 
 
@@ -328,6 +348,25 @@ class Events:
                 seen.append(s)
             store["seen"] = seen
             store["t"] = now
+            # the official promotional art for each event on show: the announcement's own picture, or the image the
+            # official site shares for itself (its og:image), looked up at most once a day per page
+            art = dict(store.get("art") or {})
+            self.store = {**self.store, **store}
+            for e in self.current(now, refresh=False)["events"]:
+                for page in [e.get("url")] + [u for _, u in (e.get("links") or [])][:1]:
+                    if not page:
+                        continue
+                    hit = art.get(page)
+                    if hit and now - hit.get("t", 0) < DAY:
+                        break
+                    try:
+                        img = og_image(self._get(page, timeout=15), page)
+                    except Exception:
+                        img = None
+                    art[page] = {"img": img, "t": now}
+                    if img:
+                        break
+            store["art"] = art
             with self.lock:
                 self.store = store
                 tmp = self.path + ".tmp"
@@ -337,10 +376,19 @@ class Events:
         finally:
             self.busy = False
 
-    def current(self, now=None):
+    def _art(self, e):
+        if e.get("thumb"):
+            return e["thumb"]
+        arts = self.store.get("art") or {}
+        for page in [e.get("url")] + [u for _, u in (SERIES.get(e["series"], {}).get("links") or [])][:1]:
+            if page and (arts.get(page) or {}).get("img"):
+                return arts[page]["img"]
+        return None
+
+    def current(self, now=None, refresh=True):
         """Events live now or starting soon, most important first."""
         now = now or time.time()
-        if time.time() - (self.store.get("t") or 0) > 3 * 3600 and not self.busy:
+        if refresh and time.time() - (self.store.get("t") or 0) > 3 * 3600 and not self.busy:
             threading.Thread(target=self.refresh, daemon=True).start()
         pool = []
         for k in KNOWN:
@@ -367,7 +415,7 @@ class Events:
                         "kind": ser.get("kind", "Event"), "theme": theme, "sale": bool(ser.get("sale")), "start": e["start"],
                         "end": e["end"], "timed": bool(e.get("timed", True)), "state": state, "note": e.get("note") or "",
                         "watch": ser.get("watch") or [], "links": ser.get("links") or [],
-                        "source": e.get("source"), "url": e.get("url"), "headline": e.get("headline")})
+                        "source": e.get("source"), "url": e.get("url"), "headline": e.get("headline"), "art": self._art(e)})
         rank = {"live": 0, "soon": 1, "ended": 2}
         prio = lambda e: 0 if e["series"] == "tga" else 1 if not e["sale"] else 2
         out.sort(key=lambda e: (rank[e["state"]], prio(e), e["start"]))
