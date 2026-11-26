@@ -3665,27 +3665,45 @@ async function pollRenames() {
 
 /* ---------- What's New on Home, like Steam's: updates and events for the games you have ---------- */
 async function fillWhatsNew() {
-  const box = $("#whatsNew");
+  let box = $("#whatsNew");
   if (!box || !api) return;
   let d = newsState.data.yours;
   if (!d || Date.now() - d.t > 10 * 60 * 1000) {
     try { d = { ...(await api.news_section("yours")), t: Date.now() }; newsState.data.yours = d; } catch { return; }
   }
-  if (!$("#whatsNew")) return;
+  box = $("#whatsNew");   // home may have been redrawn while the news loaded
+  if (!box) return;
   const cutoff = Date.now() / 1000 - 21 * 86400;
   const rank = { major: 0, release: 0, update: 1, minor: 2, news: 3 };
   const seen = new Set();
   const items = (d.items || []).filter(i => (i.date >= cutoff || i.upcoming) && (i.kind !== "news" || i.thumb) && i.status !== "Wishlist")
     .sort((a, b) => (rank[a.kind] ?? 3) - (rank[b.kind] ?? 3) || b.date - a.date)
-    .filter(i => { if (seen.has(i.game + i.kind)) return false; seen.add(i.game + i.kind); return true; }).slice(0, 10)
+    .filter(i => { if (seen.has(i.game + i.kind)) return false; seen.add(i.game + i.kind); return true; }).slice(0, 16)
     .sort((a, b) => (b.upcoming ? b.start : b.date) - (a.upcoming ? a.start : a.date));
   if (!items.length) { box.hidden = true; return; }
   box.hidden = false;
-  box.innerHTML = `<div class="wn-head"><h2>What's new</h2><button class="ghost small" data-catalog-go="news">All updates</button></div>
-    <div class="wn-row">${items.map(i => `<article class="wn" data-url="${esc(i.url || "")}" tabindex="0">
-      <div class="wn-art">${i.thumb ? `<img alt="" loading="lazy" decoding="async" referrerpolicy="no-referrer" src="${esc(i.thumb)}">` : `<span>${esc(i.game)}</span>`}</div>
-      <div class="wn-text"><span class="wn-kind k-${esc(i.kind || "news")}">${esc(KIND_LABEL[i.kind] || "News")}</span><h3>${esc(i.title)}</h3>
-      <small>${esc(i.game)} · ${esc(i.upcoming && i.start ? `starts ${fmtDateTime(i.start)}` : ago(i.date))}</small></div></article>`).join("")}</div>`;
+  // newest on the left; the arrows page through to older ones, three or four at a time
+  box.innerHTML = `<div class="wn-head"><h2>What's new</h2><span class="wn-count">${items.length} updates in the last three weeks</span><button class="ghost small" data-catalog-go="news">All updates</button></div>
+    <div class="wn-car">
+      <button type="button" class="wn-arrow prev" data-wn="-1" aria-label="Newer updates" title="Newer" disabled><svg viewBox="0 0 24 24"><path d="M15 5l-7 7 7 7"/></svg></button>
+      <div class="wn-row">${items.map(i => `<article class="wn" data-url="${esc(i.url || "")}" tabindex="0">
+        <div class="wn-art">${i.thumb ? `<img alt="" loading="lazy" decoding="async" referrerpolicy="no-referrer" src="${esc(i.thumb)}">` : `<span>${esc(i.game)}</span>`}<span class="wn-kind k-${esc(i.kind || "news")}">${esc(KIND_LABEL[i.kind] || "News")}</span></div>
+        <div class="wn-text"><h3>${esc(i.title)}</h3>
+        <small><b>${esc(i.game)}</b><span>${esc(i.upcoming && i.start ? `starts ${fmtDateTime(i.start)}` : ago(i.date))}</span></small></div></article>`).join("")}</div>
+      <button type="button" class="wn-arrow next" data-wn="1" aria-label="Older updates" title="Older"><svg viewBox="0 0 24 24"><path d="M9 5l7 7-7 7"/></svg></button>
+    </div>`;
+  const row = box.querySelector(".wn-row");
+  const paint = () => {
+    const max = row.scrollWidth - row.clientWidth - 2;
+    box.querySelector(".wn-arrow.prev").disabled = row.scrollLeft <= 2;
+    box.querySelector(".wn-arrow.next").disabled = row.scrollLeft >= max;
+  };
+  row.addEventListener("scroll", () => { cancelAnimationFrame(paint.f); paint.f = requestAnimationFrame(paint); }, { passive: true });
+  box.querySelectorAll(".wn-arrow").forEach(b => b.addEventListener("click", () => {
+    row.scrollBy({ left: +b.dataset.wn * row.clientWidth, behavior: "smooth" });
+    try { FX.play.move(); } catch {}
+  }));
+  requestAnimationFrame(paint);
 }
 
 /* ---------- Coming soon: release dates for your wishlist ---------- */
