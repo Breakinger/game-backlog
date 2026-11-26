@@ -9,7 +9,7 @@ permissions:
   contents: write
 
 env:
-  IMPORTS: "import sheet, art, info, igdb, updater, vault, accounts, youtube, feeds, deals, modpacks, twitch, saver, names, guides, pair, lore, family, chrome, platforms, goty, main, version"
+  IMPORTS: "import sheet, art, info, igdb, updater, vault, accounts, youtube, feeds, deals, modpacks, twitch, saver, names, guides, pair, lore, family, chrome, platforms, goty, events, main, version"
 
 jobs:
   windows:

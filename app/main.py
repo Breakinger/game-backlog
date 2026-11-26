@@ -190,6 +190,8 @@ class Api:
         self._goty = goty.Goty(self._dir, lore._json)
         self._info.youtube_key = lambda: (self._vault.get("youtube") or {}).get("key")
         self._feeds = feeds.Feeds()
+        import events
+        self._events = events.Events(self._dir, self._feeds)
         feeds.REDDIT_APP["id"] = (self._vault.get("reddit") or {}).get("id")
         self._family = family.Family(self._dir, self._vault)
         self._browser = BrowserFetch()
@@ -1314,6 +1316,13 @@ class Api:
 
     def updated(self, games):
         return _safe(self._info.updated, games) or {}
+
+    def events(self):
+        """Big events live now or starting within a few days (showcases, The Game Awards, sales)."""
+        try:
+            return self._events.current()
+        except Exception as e:
+            return {"events": [], "error": str(e)}
 
     def goty(self):
         """Every year's Game of the Year winners (The Game Awards, Golden Joysticks, BAFTA, Steam Awards)."""

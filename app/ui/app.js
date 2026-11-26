@@ -1000,7 +1000,7 @@ function renderView() {
   else v.innerHTML = libraryHTML();
   activateArt(v);
   drainLazy(v);
-  if (state.view === "home") { updateHero(heroGame(), true); fillWhatsNew(); fillGotyHome(); }
+  if (state.view === "home") { updateHero(heroGame(), true); fillWhatsNew(); fillGotyHome(); loadEvents(); }
   if (state.view === "stats") { fillGotyHistory(); loadVirtualArt(v); }
   if (state.view === "shelf") updateBookHero(bookHero(), true);
 }
@@ -1135,7 +1135,7 @@ function homeHTML() {
         <button class="more" data-go="${s.view}" data-shelf="${i}">See all</button>${s.title === "Modpacks" ? `<button class="more" data-modpacks>Find modpacks on this PC</button>` : ""}</div>
       ${lazyCases(s.items, "shelf-row", 10)}
     </section>`).join("");
-  return `<section class="whatsnew" id="whatsNew" hidden></section><section class="hero"><div class="hero-bg" id="heroBg"></div><div id="heroCase"></div><div id="heroText"></div></section><section class="gotyhome" id="gotyHome" hidden></section>${rows}`;
+  return `<section class="events" id="eventsHome" hidden></section><section class="whatsnew" id="whatsNew" hidden></section><section class="hero"><div class="hero-bg" id="heroBg"></div><div id="heroCase"></div><div id="heroText"></div></section><section class="gotyhome" id="gotyHome" hidden></section>${rows}`;
 }
 
 function updateHero(g, force) {
@@ -2870,6 +2870,9 @@ function bindGlobal() {
     const bup = e.target.closest("[data-bunpin]"); if (bup) { state.bfilter[bup.dataset.bunpin] = null; return render(); }
     const bseg = e.target.closest("[data-bseg] button");
     if (bseg) { state.bfilter[bseg.parentElement.dataset.bseg] = bseg.dataset.v; return render(); }
+    const evs = e.target.closest("[data-evstep]"); if (evs) { try { FX.play.move(); } catch {} return eventGo(eventState.i + +evs.dataset.evstep); }
+    const evg = e.target.closest("[data-evgo]"); if (evg) return eventGo(+evg.dataset.evgo);
+    if (e.target.closest("[data-evdeals]")) return go("deals");
     const gstep = e.target.closest("[data-gstep]");
     if (gstep) {
       const ys = (gotyState.data?.years || []).map(y => y.year), cur = state.gotyYear || gotyDefaultYear();
@@ -3931,6 +3934,104 @@ async function pollRenames() {
     } });
     sync(true);
   }
+}
+
+/* ---------- Events on Home, like Steam's big banner: showcases, The Game Awards and sales, live or starting soon ---------- */
+const eventState = { data: null, t: 0, i: 0 };
+const PARTICLES = { winter: 18, autumn: 14, spring: 14, halloween: 10, tga: 16, summer: 8 };
+async function loadEvents(force) {
+  if (!api?.events) return;
+  if (!force && eventState.data && Date.now() - eventState.t < 10 * 60 * 1000) return fillEvents();
+  const d = await Promise.resolve(api.events()).catch(() => null);
+  if (!d) return;
+  eventState.data = d; eventState.t = Date.now();
+  fillEvents();
+  if (!d.checked && !loadEvents.retry) { loadEvents.retry = true; setTimeout(() => loadEvents(true), 25000); }   // first look still running
+}
+function eventWhen(e) {
+  const local = new Date(e.start * 1000);
+  const opts = e.timed ? { weekday: "long", day: "numeric", month: "long", hour: "2-digit", minute: "2-digit" } : { weekday: "long", day: "numeric", month: "long" };
+  const when = local.toLocaleString(undefined, opts);
+  if (e.state === "live") return e.sale ? `On now · ends in ${countdown(e.end)}` : `Live now · started ${new Date(e.start * 1000).toLocaleTimeString(undefined, { hour: "2-digit", minute: "2-digit" })}`;
+  if (e.state === "ended") return "Just ended · watch the replay";
+  return `${when}${e.timed ? " your time" : ""} · in ${countdown(e.start)}`;
+}
+function eventSide(e) {
+  if (e.series === "tga") {
+    const y = (gotyState.data?.years || []).find(y => y.year === new Date(e.start * 1000).getUTCFullYear() || y.year === new Date(e.start * 1000).getUTCFullYear() - 0);
+    const noms = y?.tga?.nominees || [];
+    if (!noms.length) return "";
+    return `<div class="ev-noms"><h5>Game of the Year nominees</h5><div class="ev-nomrow">${noms.map(n => {
+      const m = rankMatch(n), g = m && m.via !== "collection" ? m.g : null;
+      return `<button type="button" class="ev-nom" ${g ? `data-open="${g.id}" data-kind="game"` : `data-url="https://store.steampowered.com/search/?term=${encodeURIComponent(n)}"`} title="${esc(n)}${g ? "" : " · find it on Steam"}">
+        <div class="art ${g ? "" : "virtual"}" ${g ? `data-kind="game" data-id="${g.id}"` : `data-vname="${esc(n)}"`}>${g ? "" : `<span>${esc(n)}</span>`}</div><b>${esc(n)}</b></button>`;
+    }).join("")}</div></div>`;
+  }
+  if (e.sale) {
+    const on = Object.values(dealState.data?.games || {}).filter(x => x?.steam?.discount > 0).length;
+    const spots = [[4, 18, -8], [30, 2, 6], [56, 26, -4], [16, 58, 9], [44, 62, -10], [72, 54, 5]];
+    return `<div class="ev-tags" aria-hidden="true">${["-90%", "-75%", "-50%", "-33%", "-60%", "-20%"].map((t, i) => `<i style="left:${spots[i][0]}%;top:${spots[i][1]}%;transform:rotate(${spots[i][2]}deg)">${t}</i>`).join("")}</div>${on ? `<p class="ev-onsale"><b>${on}</b> of your wishlist games are discounted right now</p>` : ""}`;
+  }
+  return `<div class="ev-glyph" aria-hidden="true"></div>`;
+}
+function eventCard(e, i) {
+  const btns = [
+    ...(e.watch || []).map(([l, u]) => `<button type="button" class="${e.state === "live" ? "primary" : "ghost"} ev-btn" data-url="${esc(u)}">${e.state === "ended" ? "Replay on" : "Watch on"} ${esc(l)}</button>`),
+    ...(e.links || []).map(([l, u]) => `<button type="button" class="ghost ev-btn" data-url="${esc(u)}">${esc(l)}</button>`),
+    e.sale ? `<button type="button" class="ghost ev-btn" data-evdeals>Your wishlist deals</button>` : "",
+    e.url ? `<button type="button" class="linkish ev-src" data-url="${esc(e.url)}" title="${esc(e.headline || "")}">Announced on ${esc(e.source || "the news")}</button>` : "",
+  ].join("");
+  const n = PARTICLES[e.theme] || 0;
+  return `<article class="ev ev-${esc(e.theme)} ${e.state}" data-ev="${i}" aria-roledescription="slide">
+    ${n ? `<div class="ev-fx" aria-hidden="true">${Array.from({ length: n }, (_, k) => `<i style="--k:${k};--x:${(k * 53) % 100}%;--d:${(k * 0.7) % 6}s"></i>`).join("")}</div>` : ""}
+    <div class="ev-main">
+      <div class="ev-kicker">${e.state === "live" ? `<span class="ev-live"><i></i>LIVE</span>` : e.state === "ended" ? `<span class="ev-ended">Ended</span>` : `<span class="ev-soon">Coming up</span>`}<span>${esc(e.kind)}</span></div>
+      <h2 class="ev-title">${esc(e.title)}</h2>
+      <p class="ev-when" data-evwhen="${i}">${esc(eventWhen(e))}</p>
+      ${e.note ? `<p class="ev-note">${esc(e.note)}</p>` : ""}
+      <div class="ev-actions">${btns}</div>
+    </div>
+    <div class="ev-side">${eventSide(e)}</div>
+  </article>`;
+}
+function fillEvents() {
+  const box = $("#eventsHome");
+  if (!box) return;
+  const list = eventState.data?.events || [];
+  if (!list.length) { box.hidden = true; box.innerHTML = ""; return; }
+  box.hidden = false;
+  eventState.i = Math.min(eventState.i, list.length - 1);
+  box.innerHTML = `<div class="ev-head"><h2>Events</h2><span class="ev-count">${list.filter(e => e.state === "live").length ? `${list.filter(e => e.state === "live").length} live now` : `${list.length} coming up`}</span></div>
+    <div class="ev-car">
+      ${list.length > 1 ? `<button type="button" class="wn-arrow prev ev-arrow" data-evstep="-1" aria-label="Previous event"><svg viewBox="0 0 24 24"><path d="M15 5l-7 7 7 7"/></svg></button>` : ""}
+      <div class="ev-track" style="--i:${eventState.i}">${list.map(eventCard).join("")}</div>
+      ${list.length > 1 ? `<button type="button" class="wn-arrow next ev-arrow" data-evstep="1" aria-label="Next event"><svg viewBox="0 0 24 24"><path d="M9 5l7 7-7 7"/></svg></button>` : ""}
+    </div>
+    ${list.length > 1 ? `<div class="ev-dots">${list.map((e, i) => `<button type="button" class="${i === eventState.i ? "on" : ""}" data-evgo="${i}" aria-label="${esc(e.title)}"></button>`).join("")}</div>` : ""}`;
+  box.querySelectorAll(".ev").forEach(el => fxObserver.observe(el));
+  activateArt(box); loadVirtualArt(box);
+  eventsTick();
+}
+function eventGo(i) {
+  const list = eventState.data?.events || [], box = $("#eventsHome");
+  if (!box || !list.length) return;
+  eventState.i = (i + list.length) % list.length;
+  box.querySelector(".ev-track")?.style.setProperty("--i", eventState.i);
+  box.querySelectorAll(".ev-dots button").forEach((b, k) => b.classList.toggle("on", k === eventState.i));
+}
+/* countdowns stay current while Home is open; the banner turns to the next event every 12 seconds unless you're on it */
+function eventsTick() {
+  clearInterval(eventsTick.t);
+  eventsTick.t = setInterval(() => {
+    const box = $("#eventsHome");
+    if (!box || box.hidden || document.hidden) { if (!box) clearInterval(eventsTick.t); return; }
+    const list = eventState.data?.events || [];
+    box.querySelectorAll("[data-evwhen]").forEach(p => { const e = list[+p.dataset.evwhen]; if (e) p.textContent = eventWhen(e); });
+    const now = Date.now() / 1000;
+    if (list.some(e => (e.state === "soon" && now >= e.start) || (e.state === "live" && now >= e.end))) loadEvents(true);
+    eventsTick.n = (eventsTick.n || 0) + 1;
+    if (list.length > 1 && eventsTick.n % 4 === 0 && !box.matches(":hover, :focus-within")) eventGo(eventState.i + 1);
+  }, 3000);
 }
 
 /* ---------- What's New on Home, like Steam's: updates and events for the games you have ---------- */
