@@ -1373,8 +1373,9 @@ class Api:
             return False
         self._window.toggle_fullscreen()
         self._fullscreen = not getattr(self, "_fullscreen", bool(self._settings.get("big_picture")))
-        if not self._fullscreen and getattr(self, "_chrome", None) and self._chrome.applied:
-            threading.Timer(0.4, self._chrome.apply).start()   # leaving fullscreen brings the caption back
+        c = getattr(self, "_chrome", None)
+        if not self._fullscreen and c and not self._settings.get("native_titlebar"):
+            threading.Timer(0.4, c.apply).start()   # leaving fullscreen brings the caption back; take it off again
         return self._fullscreen
 
     # ----- Masterlog's own title bar (Windows) -----
