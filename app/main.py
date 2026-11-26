@@ -1774,9 +1774,40 @@ def selftest():
     return 0
 
 
+def smoketest():
+    """CI check: open the real window with the real page, wait for the page to talk to Python, then quit."""
+    if platforms.LINUX:
+        os.environ.setdefault("QT_API", "pyqt6")
+    import webview
+    result = {"ok": False}
+
+    class Probe:
+        def hello(self):
+            result["ok"] = True
+            threading.Timer(0.5, lambda: os._exit(0)).start()
+            return True
+
+    win = webview.create_window("Masterlog smoke test", resource(os.path.join("ui", "index.html")), js_api=Probe(), width=1024, height=700)
+
+    def watch():
+        end = time.time() + 90
+        while time.time() < end:
+            time.sleep(1)
+            try:
+                win.evaluate_js("window.pywebview && window.pywebview.api && window.pywebview.api.hello && window.pywebview.api.hello(); 1")
+            except Exception:
+                pass
+        print("smoketest: the page never reached Python")
+        os._exit(1)
+    webview.start(watch, gui="edgechromium" if platforms.WINDOWS else "qt" if platforms.LINUX else None, http_server=True)
+    os._exit(0 if result["ok"] else 1)
+
+
 def main():
     if "--selftest" in sys.argv:
         sys.exit(selftest())
+    if "--smoketest" in sys.argv:
+        smoketest()
     api = Api()
     # let the startup sound and ambience play without waiting for a click; scroll smoothly on the graphics card
     flags = ["--autoplay-policy=no-user-gesture-required",

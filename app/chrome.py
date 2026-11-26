@@ -35,8 +35,8 @@ if ok:
     user32.IsZoomed.argtypes = [wintypes.HWND]
     user32.IsIconic.argtypes = [wintypes.HWND]
     user32.SendMessageW.argtypes = [wintypes.HWND, ctypes.c_uint, wintypes.WPARAM, wintypes.LPARAM]
-    user32.GetKeyState.argtypes = [ctypes.c_int]
-    user32.GetKeyState.restype = ctypes.c_short
+    user32.GetAsyncKeyState.argtypes = [ctypes.c_int]
+    user32.GetAsyncKeyState.restype = ctypes.c_short
     dwm.DwmSetWindowAttribute.argtypes = [wintypes.HWND, wintypes.DWORD, ctypes.c_void_p, wintypes.DWORD]
 
 
@@ -117,7 +117,8 @@ class Chrome:
             return False
 
         def go():
-            if user32.GetKeyState(VK_LBUTTON) & 0x8000:
+            # the press happened inside the page (another process's window), so ask about the physical button
+            if user32.GetAsyncKeyState(VK_LBUTTON) & 0x8000:
                 user32.ReleaseCapture()
                 user32.SendMessageW(hwnd, WM_NCLBUTTONDOWN, HTCAPTION, 0)   # Windows' own move loop: snap and shake work
         threading.Thread(target=lambda: self._on_ui(go), daemon=True).start()

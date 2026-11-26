@@ -98,6 +98,16 @@ jobs:
           ARCH=x86_64 APPIMAGE_EXTRACT_AND_RUN=1 ./appimagetool --no-appstream AppDir dist/Masterlog-SteamDeck.AppImage
           ls -la dist/Masterlog-SteamDeck.AppImage
 
+      - name: Open the real window and page (virtual screen)
+        env:
+          APPIMAGE_EXTRACT_AND_RUN: "1"
+          QTWEBENGINE_DISABLE_SANDBOX: "1"   # GitHub's Ubuntu blocks the sandbox's namespaces; SteamOS allows them
+          QT_QUICK_BACKEND: software
+          LIBGL_ALWAYS_SOFTWARE: "1"
+        run: |
+          sudo apt-get install -y --no-install-recommends xvfb xauth
+          timeout 150 xvfb-run -a -s "-screen 0 1280x800x24" dist/Masterlog-SteamDeck.AppImage --smoketest
+
       - name: Upload build
         uses: actions/upload-artifact@v4
         with:
