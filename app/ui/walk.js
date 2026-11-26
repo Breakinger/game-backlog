@@ -12,7 +12,7 @@ const Walk = (() => {
   const AISLE = 1.0;           // the spines line up at x = ±AISLE
   const UNIT = 2.3, LEVELS = [0.16, 0.6, 1.04, 1.48, 1.92], LEVEL_ORDER = [2, 3, 1, 4, 0];
   const CASE = { d: 0.235, h: 0.36, t: 0.034, gap: 0.006 };
-  const TIER_COLOR = { classic: "#2B47FF", crimson: "#E8263A", diamond: "#8FE9FF", gold: "#FFC93C", silver: "#C9D1DC", bronze: "#C8834E" };
+  const TIER_COLOR = { classic: "#2B6BFF", crimson: "#E8263A", diamond: "#8FE9FF", gold: "#FFC93C", silver: "#C9D1DC", bronze: "#C8834E" };
   const SW = 30, SH = 300, SIGN_W = 512, SIGN_H = 80;
   let ATLAS = 2048, SCOLS = 68, SIGN_Y = 1800;   // grows to 4096 for big libraries
 

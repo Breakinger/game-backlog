@@ -38,9 +38,9 @@ const FALLBACK_OPTIONS = {
   books: { status: ["To read", "Reading", "Read", "Dropped", "Wishlist"], priority: ["Extreme", "High", "Medium", "Low"], format: ["Physical", "eBook", "Audiobook"] },
 };
 const TABS = {
-  games: [["home", "Home"], ["library", "Library"], ["wishlist", "Wishlist"], ["deals", "Deals"], ["played", "Completed"], ["ranking", "Top 100"], ["stats", "Your years"]],
+  games: [["home", "Home"], ["backlog", "Backlog"], ["library", "Library"], ["wishlist", "Wishlist"], ["deals", "Deals"], ["played", "Completed"], ["ranking", "Top 100"], ["stats", "Your years"]],
   books: [["shelf", "Shelf"], ["books", "All books"], ["bookyears", "Read"]],
-  news: [["breaking", "Breaking news"], ["yours", "Your games"]],
+  news: [["breaking", "Breaking news"], ["yours", "Your games"], ["soon", "Coming soon"]],
 };
 
 const state = {
@@ -207,7 +207,7 @@ function effectLayer(g) {
   const st = statusOf(g);
   let out = "";
   const rk = rankOf(g);
-  if (isClassic(g)) out += `<div class="flames classic-flames" aria-hidden="true"><i></i><i></i><i></i><i></i><i></i></div><div class="cosmos aura" aria-hidden="true"><i></i><i></i></div><span class="classic-award oncover" title="All Time Classic${rk ? ` · #${rk} in your Top 100` : ""}">${CLASSIC_IMG}</span>`;
+  if (isClassic(g)) out += `<div class="flames classic-flames" aria-hidden="true"><i></i><i></i><i></i><i></i><i></i><i></i><i></i></div>${SPARKS}<div class="cosmos aura" aria-hidden="true"><i></i><i></i></div><span class="classic-award oncover" title="All Time Classic · Mythical">${CLASSIC_IMG}</span>`;
   else if (rk && rk <= 10) { const t = rankTier(rk); out += `<span class="favstar award t-${t}" title="${TIER_NAME[t]} · #${rk} in your Top 100">${awardSVG(t)}<b>${rk}</b></span>`; }
   if (g.priority === "Extreme" && g.status !== "Completed" && g.status !== "Dropped") out += `<div class="flames" aria-hidden="true"><i></i><i></i><i></i><i></i><i></i></div>`;
   if ((st === "Paused" || g.status === "Paused") && st !== "Second chance") out += `<div class="cobweb" aria-hidden="true"><svg viewBox="0 0 60 60"><path d="M0 0L60 60M0 0L60 22M0 0L22 60M0 0L60 0M0 0L0 60M10 0Q8 8 0 10M22 0Q18 18 0 22M36 0Q30 30 0 36M52 0Q42 42 0 52"/></svg></div><div class="dust" aria-hidden="true"></div>`;
@@ -360,14 +360,15 @@ function dice(a, b) {
 function rankedGame(name) { if (!rankIndex) rankOf({ name: "" }); const m = rankMatches.has(name) ? rankMatches.get(name) : rankMatch(name); return m ? m.g : null; }
 /* award tiers: crimson for the podium, diamond for 4-5, gold to 10, silver to 50, bronze for the rest */
 function rankTier(n) { return !n ? "" : n <= 3 ? "crimson" : n <= 5 ? "diamond" : n <= 10 ? "gold" : n <= 50 ? "silver" : "bronze"; }
-const TIER_NAME = { crimson: "Crimson award", diamond: "Diamond award", gold: "Gold award", silver: "Silver", bronze: "Bronze" };
+const TIER_NAME = { classic: "Mythical", crimson: "Legendary", diamond: "Diamond", gold: "Gold", silver: "Silver", bronze: "Bronze" };
 function awardSVG(t) {
-  const star = "M12 3.2l2.6 5.4 5.9.8-4.3 4.1 1.1 5.8L12 16.6l-5.3 2.7 1.1-5.8-4.3-4.1 5.9-.8z";
-  if (t === "crimson") return `<svg viewBox="0 0 24 24" class="aw"><path class="flare" d="M12 .6c1.5 2 3.6 2.4 4.6 4.6 1.6-1 3.4-.6 4.3.6-1.7.6-1.9 2.4-1.2 4 1.4 3.3.4 7.4-2.6 9.6-1.4 1.1-3.2 1.8-5.1 1.8s-3.7-.7-5.1-1.8c-3-2.2-4-6.3-2.6-9.6.7-1.6.5-3.4-1.2-4 .9-1.2 2.7-1.6 4.3-.6C8.4 3 10.5 2.6 12 .6z"/><path class="core" d="${star}"/></svg>`;
+  if (t === "crimson") return `<svg viewBox="0 0 24 24" class="aw"><path class="flare" d="M12 .4c1.6 2.2 3.9 2.6 5 5 1.7-1.1 3.6-.6 4.6.7-1.8.6-2 2.6-1.3 4.3 1.5 3.6.4 8-2.8 10.4-1.5 1.2-3.5 1.9-5.5 1.9s-4-.7-5.5-1.9C3.3 18.4 2.2 14 3.7 10.4c.7-1.7.5-3.7-1.3-4.3 1-1.3 2.9-1.8 4.6-.7 1.1-2.4 3.4-2.8 5-5z"/><g class="swords"><path d="M5.2 4.6l1.6-.4 10.6 10.6-1.2 1.2z"/><path d="M18.8 4.6l-1.6-.4L6.6 14.8l1.2 1.2z"/><path class="hilt" d="M14.6 16.4l3.2-3.2 1 1-1.1 1.1 1.9 1.9-1.2 1.2-1.9-1.9-1 1zM9.4 16.4l-3.2-3.2-1 1 1.1 1.1-1.9 1.9 1.2 1.2 1.9-1.9 1 1z"/></g></svg>`;
   if (t === "diamond") return `<svg viewBox="0 0 24 24" class="aw"><path class="core" d="M6.5 3h11l4.5 6-10 12.5L2 9z"/><path class="facet" d="M2 9h20M6.5 3 9 9l3 12.5L15 9l2.5-6M9 9l3-6 3 6"/></svg>`;
-  return `<svg viewBox="0 0 24 24" class="aw"><path class="core" d="${star}"/></svg>`;
+  // Gold, Silver and Bronze: a medal on a ribbon
+  return `<svg viewBox="0 0 24 24" class="aw medal"><path class="rib" d="M6.5 1.5h4l2 6-3 1.8zM17.5 1.5h-4l-2 6 3 1.8z"/><circle class="core" cx="12" cy="15" r="7.4"/><circle class="ring" cx="12" cy="15" r="5.4"/><path class="star" d="M12 11.2l1.1 2.3 2.5.3-1.8 1.7.5 2.5-2.3-1.2-2.3 1.2.5-2.5-1.8-1.7 2.5-.3z"/></svg>`;
 }
-/* ----- the All Time Classic: one game, crowned by you ----- */
+/* ----- the All Time Classic: one game, crowned by you (its tier: Mythical) ----- */
+const SPARKS = `<div class="sparks" aria-hidden="true">${Array.from({ length: 10 }, (_, i) => `<i style="--i:${i}"></i>`).join("")}</div>`;
 function classicGame() {
   const n = state.settings.classic;
   if (!n) return null;
@@ -389,7 +390,14 @@ function setClassic(g) {
   if (g) { try { FX.play.notify(); } catch {} toast(`${g.name} is your All Time Classic.`, "party", before && rankKey(before) !== rankKey(g.name) ? { label: "Undo", run: () => setClassic(state.games.find(x => x.name === before) || { name: before }) } : null); }
   else toast("The All Time Classic award is free again.");
 }
-const CLASSIC_IMG = `<img class="classic-logo" alt="" src="img/classic.png" draggable="false">`;
+const CLASSIC_IMG = `<svg class="classic-logo" viewBox="0 0 140 120" aria-hidden="true">
+  <g class="wing"><path d="M58 70 C40 62 22 48 6 22 C24 34 40 40 56 44 Z"/><path d="M57 80 C38 76 20 66 4 46 C22 56 38 60 56 60 Z"/><path d="M58 90 C42 90 26 84 12 70 C28 76 42 78 57 76 Z"/></g>
+  <g class="wing" transform="translate(140 0) scale(-1 1)"><path d="M58 70 C40 62 22 48 6 22 C24 34 40 40 56 44 Z"/><path d="M57 80 C38 76 20 66 4 46 C22 56 38 60 56 60 Z"/><path d="M58 90 C42 90 26 84 12 70 C28 76 42 78 57 76 Z"/></g>
+  <path class="crest" d="M70 8 L96 30 L90 86 L70 112 L50 86 L44 30 Z"/>
+  <path class="crest-in" d="M70 18 L88 34 L83 82 L70 99 L57 82 L52 34 Z"/>
+  <path class="flame" d="M70 92 C58 88 54 76 59 66 C61 72 64 74 66 74 C62 62 66 50 76 42 C74 52 80 58 84 66 C88 76 82 88 70 92 Z"/>
+  <path class="flame-core" d="M70 88 C64 85 63 78 66 73 C68 77 70 78 72 77 C71 71 73 66 77 62 C78 70 82 74 80 80 C79 85 75 88 70 88 Z"/>
+  <path class="star" d="M70 22 L72.4 29.6 L80 32 L72.4 34.4 L70 42 L67.6 34.4 L60 32 L67.6 29.6 Z"/></svg>`;
 function classicHTML() {
   const g = classicGame();
   if (!g) return `<section class="classic empty"><div class="cosmos" aria-hidden="true"></div><div class="classic-award small">${CLASSIC_IMG}</div>
@@ -402,10 +410,11 @@ function classicHTML() {
   const cover = covers.get(coverKey(g));
   const stat = (v, l) => v ? `<div class="cstat"><b>${v}</b><span>${l}</span></div>` : "";
   return `<section class="classic" data-open="${g.id}" data-kind="game">
+    <div class="classic-bg" id="classicBg" aria-hidden="true"></div>
     <div class="cosmos" aria-hidden="true"><i></i><i></i><i></i></div>
-    <div class="classic-cover"><div class="art" data-kind="game" data-id="${g.id}">${cover ? `<img alt="" src="${cover}">` : `<div class="fallback"><div class="t">${esc(g.name)}</div></div>`}</div><div class="classic-award">${CLASSIC_IMG}</div></div>
+    <div class="classic-cover"><div class="flames classic-flames big" aria-hidden="true"><i></i><i></i><i></i><i></i><i></i><i></i><i></i></div>${SPARKS}<div class="art" data-kind="game" data-id="${g.id}">${cover ? `<img alt="" src="${cover}">` : `<div class="fallback"><div class="t">${esc(g.name)}</div></div>`}</div><div class="classic-award">${CLASSIC_IMG}</div></div>
     <div class="classic-body">
-      <div class="classic-kicker">All Time Classic</div>
+      <div class="classic-kicker"><span class="mythical">Mythical</span> All Time Classic</div>
       <h2>${esc(g.name)}</h2>
       <p class="muted">${esc([g.developer, g.publisher && g.publisher !== g.developer ? g.publisher : "", plat(g.platform).label].filter(Boolean).join("  ·  "))}</p>
       <div class="cstats">${stat(hours ? `${Math.round(hours * 10) / 10} h` : "", "played")}${stat(runs.length || g.runs || "", (runs.length || g.runs) === 1 ? "run" : "runs")}${stat(done, "finished")}${stat(g.score != null ? scoreText(g.score) : "", "your score")}${stat(rankOf(g) ? `#${rankOf(g)}` : "", "in your Top 100")}</div>
@@ -417,6 +426,7 @@ function classicHTML() {
 }
 async function fillClassicAwards() {
   const box = $("#classicAwards"), g = classicGame();
+  if (g && $("#classicBg")) Promise.resolve(api?.hero(g.name)).catch(() => null).then(u => u || loadCover(g)).then(u => { const bg = $("#classicBg"); if (u && bg) bg.style.backgroundImage = `url("${u}")`; });
   if (!box || !g || !api) return;
   const r = await Promise.resolve(api.awards(g)).catch(() => null);
   if (!$("#classicAwards") || classicGame() !== g) return;
@@ -474,7 +484,7 @@ function rankingHTML() {
   const body = state.mode === "list" ? `<ol class="rklist" id="rkList">${list.map(row).join("")}</ol>`
     : `<div class="grid rkgrid">${list.map(cell).join("")}</div>`;
   return `<section class="ranking ${state.mode === "list" ? "" : "wide"}"><header class="deals-head"><div><h1>Top 100</h1><p class="muted">Drag to reorder (or use the arrows). Every place earns an award that shows on the game's cover everywhere in Masterlog.</p>
-      <div class="tiers" aria-label="Award tiers">${[["crimson", "1–3"], ["diamond", "4–5"], ["gold", "6–10"], ["silver", "11–50"], ["bronze", "51–100"]].map(([t, r]) => `<span class="tier t-${t}"><i class="rk-aw">${awardSVG(t)}</i>${TIER_NAME[t]}<small>${r}</small></span>`).join("")}</div><p class="muted fine">${state.rankingLocal ? " Saved on this PC until you update the connection script (Settings)." : " Saved to the Ranking tab in your sheet."}</p></div>
+      <div class="tiers" aria-label="Award tiers">${[["classic", "All Time Classic"], ["crimson", "1–3"], ["diamond", "4–5"], ["gold", "6–10"], ["silver", "11–50"], ["bronze", "51–100"]].map(([t, r]) => `<span class="tier t-${t}"><i class="rk-aw">${t === "classic" ? CLASSIC_IMG : awardSVG(t)}</i>${TIER_NAME[t]}<small>${r}</small></span>`).join("")}</div><p class="muted fine">${state.rankingLocal ? " Saved on this PC until you update the connection script (Settings)." : " Saved to the Ranking tab in your sheet."}</p></div>
     <div class="deals-actions">${modeSwitch()}${scaleSlider()}<input class="search" id="rankAdd" list="rankAddList" placeholder="Add a game to the ranking"><datalist id="rankAddList">${state.games.filter(g => !rankOf(g)).map(g => `<option value="${esc(g.name)}">`).join("")}</datalist></div></header>
     ${classicHTML()}
     ${body}</section>`;
@@ -587,6 +597,7 @@ function render() {
   renderTabs();
   const v = $("#view");
   hidePeek();
+  if (state.catalog === "news" && state.view === "soon") { v.innerHTML = soonShellHTML(); fillSoon(); return; }
   if (state.catalog === "news") { v.innerHTML = newsShellHTML(state.view); loadNews(state.view); return; }
   const empty = isBooks() ? !state.books.length && !state.games.length : !state.games.length;
   if (empty) { v.innerHTML = welcomeHTML(); bindWelcome(); return; }
@@ -594,6 +605,7 @@ function render() {
   else if (state.view === "stats") v.innerHTML = yearsHTML();
   else if (state.view === "ranking") { v.innerHTML = rankingHTML(); activateArt(v); loadVirtualArt(v); fillClassicAwards(); return; }
   else if (state.view === "deals") { v.innerHTML = dealsHTML(); activateArt(v); loadDeals(false); return; }
+  else if (state.view === "backlog") v.innerHTML = backlogHTML();
   else if (state.view === "shelf") v.innerHTML = bookShelfHTML();
   else if (state.view === "books") v.innerHTML = bookLibraryHTML();
   else if (state.view === "bookyears") v.innerHTML = bookYearsHTML();
@@ -879,6 +891,7 @@ function filtered() {
   f.status = asSet(f.status); f.prio = asSet(f.prio); f.formats = asSet(f.formats);
   const list = withCopies(state.games).filter(g => {
     if (state.view === "wishlist" && g.status !== "Wishlist") return false;
+    if (state.view === "backlog" && !inBacklog(g)) return false;
     if (state.view === "played" && !["Completed", "Dropped"].includes(g.status)) return false;
     if (state.view === "library" && g.status === "Wishlist" && !f.status.has("Wishlist")) return false;
     // inside one group any match counts; across groups every group has to match
@@ -943,6 +956,38 @@ function platPicker(f) {
       ? `<span class="psub" style="--c:${i.c}"><button type="button" class="psubhead" data-pgroup="${i.items.map(x => x.key).join(",")}" aria-pressed="${allOn(i.items.map(x => x.key))}">${i.sub}</button>${i.items.map(x => leaf(x, i.c)).join("")}</span>`
       : leaf(i)).join("")}</div>`;
   }).join("")}</div>`;
+}
+/* ----- your backlog: every game you own that has a priority, by priority ----- */
+const inBacklog = g => !!g.priority && g.status !== "Completed" && g.status !== "Wishlist" && !g.virtual;
+const PRIO_LANE = { Extreme: { c: "#FF3D6E", say: "Play these first" }, High: { c: "#FF922B", say: "Next up" }, Medium: { c: "#FFD43B", say: "When there's time" }, Low: { c: "#4DABF7", say: "Someday" } };
+function backlogHTML() {
+  const f = state.filter;
+  const list = filtered();
+  const all = state.games.filter(inBacklog);
+  const counts = Object.keys(PRIO_ORDER).map(p => [p, all.filter(g => g.priority === p).length]);
+  const total = all.length || 1;
+  const playing = list.filter(g => g.status === "Playing");
+  const lanes = Object.keys(PRIO_ORDER).map(p => [p, list.filter(g => g.priority === p && g.status !== "Playing")]).filter(([, l]) => l.length);
+  const lane = (title, items, c, say) => `<section class="blane" style="--c:${c}"><header><h2>${esc(title)}</h2><span class="count">${items.length}</span>${say ? `<small>${say}</small>` : ""}</header>
+    ${state.mode === "list" ? gameListHTML(items) : `<div class="grid">${items.map(g => caseHTML(g)).join("")}</div>`}</section>`;
+  return `<div class="toolbar">
+      <div class="line">
+        <input class="search" id="search" type="search" placeholder="Search your backlog" value="${esc(f.q)}">
+        ${scaleSlider()}${modeSwitch()}
+        <span class="total">${list.length} ${list.length === 1 ? "game" : "games"} to play</span>
+        ${f.plats.size || f.q ? `<button class="ghost small" id="clearFilters">Clear filters</button>` : ""}
+      </div>
+      <div class="line frow frow-plats">${platPicker(f)}</div>
+    </div>
+    <section class="bsummary">
+      <div class="btotal"><b>${all.length}</b><span>games in your backlog</span></div>
+      <div class="bbar" role="img" aria-label="${counts.map(([p, n]) => `${n} ${p}`).join(", ")}">${counts.filter(([, n]) => n).map(([p, n]) => `<i style="--c:${PRIO_LANE[p].c};flex:${n}" title="${n} ${p}"></i>`).join("")}</div>
+      <div class="bcounts">${counts.map(([p, n]) => `<span style="--c:${PRIO_LANE[p].c}"><i></i>${p} <b>${n}</b></span>`).join("")}</div>
+      <p class="fine">Give any game a priority (right-click → Priority) and it lands here. Finishing it takes it off.</p>
+    </section>
+    ${!list.length ? `<p class="empty">${all.length ? "Nothing matches these filters." : "No games with a priority yet. Right-click a game in your Library and set its Priority."}</p>` : ""}
+    ${playing.length ? lane("Playing now", playing, "#5BD38A", "On the go") : ""}
+    ${lanes.map(([p, items]) => lane(p, items, PRIO_LANE[p].c, PRIO_LANE[p].say)).join("")}`;
 }
 function libraryHTML() {
   const f = state.filter;
@@ -2983,6 +3028,42 @@ async function fillWhatsNew() {
       <div class="wn-art">${i.thumb ? `<img alt="" loading="lazy" decoding="async" referrerpolicy="no-referrer" src="${esc(i.thumb)}">` : `<span>${esc(i.game)}</span>`}</div>
       <div class="wn-text"><span class="wn-kind k-${esc(i.kind || "news")}">${esc(KIND_LABEL[i.kind] || "News")}</span><h3>${esc(i.title)}</h3>
       <small>${esc(i.game)} · ${esc(i.upcoming && i.start ? `starts ${fmtDateTime(i.start)}` : ago(i.date))}</small></div></article>`).join("")}</div>`;
+}
+
+/* ---------- Coming soon: release dates for your wishlist ---------- */
+function soonShellHTML() {
+  return `<section class="news soon"><header class="news-head"><h1>Coming soon</h1><p class="muted">Release dates for the games on your wishlist, soonest first, with a countdown. Dates come from Steam, or IGDB for console games.</p></header>
+    <div id="soonBody"><p class="news-loading"><span class="spinner"></span> Checking release dates…</p></div></section>`;
+}
+async function fillSoon() {
+  if (!api) return;
+  if (!dealState.data || Date.now() - dealState.t > 5 * 60 * 1000) { try { dealState.data = await api.deals(false); dealState.t = Date.now(); } catch {} }
+  const box = $("#soonBody");
+  if (!box || state.view !== "soon") return;
+  const d = dealState.data || { games: {} }, now = Date.now() / 1000;
+  const wish = collapse(state.games.filter(g => g.status === "Wishlist"));
+  const rows = wish.map(g => ({ g, r: d.games?.[g.name]?.release })).filter(x => x.r && (x.r.coming || (x.r.ts && now - x.r.ts < 30 * 86400)));
+  const out = rows.filter(x => x.r.ts && x.r.ts <= now).sort((a, b) => b.r.ts - a.r.ts);
+  const dated = rows.filter(x => x.r.ts && x.r.ts > now).sort((a, b) => a.r.ts - b.r.ts);
+  const vague = rows.filter(x => !x.r.ts).sort((a, b) => (a.r.text || "~").localeCompare(b.r.text || "~"));
+  const groups = new Map();
+  for (const x of dated) {
+    const days = (x.r.ts - now) / 86400, dt = new Date(x.r.ts * 1000);
+    const key = days < 7 ? "This week" : days < 31 ? "This month" : dt.toLocaleDateString(undefined, { month: "long", year: "numeric" });
+    (groups.get(key) || groups.set(key, []).get(key)).push(x);
+  }
+  const card = ({ g, r }) => {
+    const days = r.ts ? Math.ceil((r.ts - now) / 86400) : null;
+    const when = r.ts ? new Date(r.ts * 1000).toLocaleDateString(undefined, { day: "numeric", month: "short", year: "numeric" }) : (r.text || "To be announced");
+    const pill = r.ts ? (r.ts <= now ? `<span class="spill out">Out now</span>` : days <= 1 ? `<span class="spill hot">${countdown(r.ts)}</span>` : `<span class="spill">${days} days</span>`) : `<span class="spill vague">${esc(r.text || "TBA")}</span>`;
+    return `<button class="sitem" data-open="${g.id}" data-kind="game"><div class="sart"><div class="art" data-kind="game" data-id="${g.id}"></div></div>
+      <div class="stext"><b>${esc(g.name)}</b><small>${esc(plat(g.platform).label)}${g.priority ? ` · ${esc(g.priority)}` : ""}</small><span class="swhen">${esc(when)}</span></div>${pill}</button>`;
+  };
+  const sec = (title, list) => list.length ? `<section class="sgroup"><h2>${esc(title)}</h2><div class="slist">${list.map(card).join("")}</div></section>` : "";
+  box.innerHTML = rows.length ? [sec("Just out", out), ...[...groups].map(([k, l]) => sec(k, l)), sec("Dates still to come", vague)].join("")
+    : `<p class="muted">${d.running ? "Still checking release dates; this fills in over the next minute." : "Nothing on your wishlist has a release date coming up."}</p>`;
+  activateArt(box);
+  if (d.running) setTimeout(() => { if (state.view === "soon") { dealState.t = 0; fillSoon(); } }, 15000);
 }
 
 /* ---------- News ---------- */
