@@ -38,9 +38,10 @@ const FALLBACK_OPTIONS = {
   books: { status: ["To read", "Reading", "Read", "Dropped", "Wishlist"], priority: ["Extreme", "High", "Medium", "Low"], format: ["Physical", "eBook", "Audiobook"] },
 };
 const TABS = {
-  games: [["home", "Home"], ["backlog", "Backlog"], ["library", "Library"], ["wishlist", "Wishlist"], ["deals", "Deals"], ["played", "Completed"], ["ranking", "Top 100"], ["stats", "Your years"]],
+  // three groups: what the app is for, everything you have or want, and your history with games
+  games: [["home", "Home"], ["backlog", "Backlog"], "|", ["played", "Completed"], ["library", "Library"], ["wishlist", "Wishlist"], "|", ["ranking", "Top 100"], ["stats", "History"]],
   books: [["shelf", "Shelf"], ["books", "All books"], ["bookyears", "Read"]],
-  news: [["breaking", "Breaking news"], ["yours", "Your games"], ["soon", "Coming soon"]],
+  news: [["breaking", "Breaking news"], ["yours", "Your games"]],
 };
 
 const state = {
@@ -591,13 +592,19 @@ function heroGame() {
 function renderTabs() {
   document.body.dataset.catalog = state.catalog;
   document.querySelectorAll(".catalog").forEach(c => c.setAttribute("aria-selected", String(c.dataset.catalog === state.catalog)));
-  $("#tabs").innerHTML = TABS[state.catalog].map(([v, l]) => `<button class="tab" data-view="${v}" role="tab" aria-selected="${state.view === v}">${l}</button>`).join("");
+  const on = v => state.view === v || (v === "wishlist" && WISH_VIEWS.includes(state.view));
+  $("#tabs").innerHTML = TABS[state.catalog].map(t => t === "|" ? `<span class="tabsep" aria-hidden="true"></span>`
+    : `<button class="tab" data-view="${t[0]}" role="tab" aria-selected="${on(t[0])}">${t[1]}</button>`).join("");
 }
+/* the Wishlist has three faces: the games, their deals, and when the unreleased ones come out */
+const WISH_VIEWS = ["wishlist", "deals", "soon"];
+const wishTabs = () => `<nav class="subtabs" role="tablist" aria-label="Wishlist">${[["wishlist", "Wishlist"], ["deals", "Deals"], ["soon", "Coming soon"]].map(([v, l]) =>
+  `<button class="subtab" data-view="${v}" role="tab" aria-selected="${state.view === v}">${l}</button>`).join("")}</nav>`;
 function render() {
   renderTabs();
   const v = $("#view");
   hidePeek();
-  if (state.catalog === "news" && state.view === "soon") { v.innerHTML = soonShellHTML(); fillSoon(); return; }
+  if (state.catalog === "games" && state.view === "soon") { v.innerHTML = soonShellHTML(); fillSoon(); return; }
   if (state.catalog === "news") { v.innerHTML = newsShellHTML(state.view); loadNews(state.view); return; }
   const empty = isBooks() ? !state.books.length && !state.games.length : !state.games.length;
   if (empty) { v.innerHTML = welcomeHTML(); bindWelcome(); return; }
@@ -995,7 +1002,7 @@ function libraryHTML() {
   const list = filtered();
   const active = f.status.size + f.prio.size + f.formats.size + f.plats.size + !!f.q + !!f.genre + !!f.studio;
   const pinned = [f.genre ? `<button class="chip on" data-unpin="genre">Genre: ${esc(f.genre.join(", "))} ✕</button>` : "", f.studio ? `<button class="chip on" data-unpin="studio">Made by: ${esc(f.studio.join(", "))} ✕</button>` : ""].join("");
-  return `<div class="toolbar">
+  return `${state.view === "wishlist" ? wishTabs() : ""}<div class="toolbar">
       <div class="line">
         <input class="search" id="search" type="search" placeholder="Search games, genres, studios" value="${esc(f.q)}">
         ${scaleSlider()}
@@ -1077,7 +1084,7 @@ function yearsHTML() {
   const dmax = Math.max(1, ...dev.map(x => x[2]));
   return `<div class="years">
     <div>
-      <h2>Your years</h2>
+      <h2>History</h2>
       <p class="intro">Every game you finished, year by year. Click a year to see the games. Replays come from the Playthroughs tab.</p>
       <div class="legend"><span><i style="background:#66C0F4"></i>First finishes</span><span><i style="background:#5BD38A"></i>Replays</span></div>
       ${rows}
@@ -2088,6 +2095,7 @@ function towers() {
 /* ---------- navigation: mouse, keyboard, controller ---------- */
 function bindGlobal() {
   $("#tabs").addEventListener("click", e => { const t = e.target.closest(".tab"); if (t) go(t.dataset.view); });
+  $("#view").addEventListener("click", e => { const t = e.target.closest(".subtab"); if (t && t.dataset.view !== state.view) { try { FX.play.tab(); } catch {} go(t.dataset.view); } });
   document.querySelectorAll(".catalog").forEach(c => c.addEventListener("click", () => switchCatalog(c.dataset.catalog)));
   $("#syncBtn").addEventListener("click", () => sync(true));
   $("#settingsBtn").addEventListener("click", () => openSettings(false));
@@ -2805,7 +2813,7 @@ function switchCatalog(cat) {
 }
 function go(v) { state.view = v; closePanel(); state.focusId = null; render(); $("#view").scrollTop = 0; }
 function cycleTab(d) {
-  const tabs = TABS[state.catalog].map(t => t[0]);
+  const tabs = TABS[state.catalog].filter(t => t !== "|").map(t => t[0]);
   go(tabs[(tabs.indexOf(state.view) + d + tabs.length) % tabs.length]);
 }
 function move(dir) {
@@ -2949,7 +2957,7 @@ function dealsHTML() {
   const toggle = `<div class="seg" role="group" aria-label="Currency"><button data-money="native" aria-pressed="${state.settings.money !== "GEL"}">Store prices</button><button data-money="GEL" aria-pressed="${state.settings.money === "GEL"}">₾ GEL</button></div>`;
   const head = `<header class="deals-head"><div><h1>Deals</h1><p class="muted">Your wishlist across Steam (your region), GOG, Humble, Fanatical, Epic and more, the PlayStation Store, and the deal subreddits. ${d?.rates?.date ? `GEL at the ${esc(d.rates.source)} rate of ${new Date(d.rates.date).toLocaleDateString()}.` : ""}</p></div>
     <div class="deals-actions">${toggle}<button class="ghost small" id="dealsRefresh">${d?.running ? `<span class="spinner"></span> Checking prices…` : "Check prices now"}</button></div></header>`;
-  if (!d) return `<section class="deals">${head}<div class="news-loading"><span class="spinner"></span> Checking prices for your wishlist…</div></section>`;
+  if (!d) return `${wishTabs()}<section class="deals">${head}<div class="news-loading"><span class="spinner"></span> Checking prices for your wishlist…</div></section>`;
   const onSale = wish.filter(g => offersFor(g.name).some(o => o.off > 0));
   const soon = wish.filter(g => d.games[g.name]?.release?.coming).sort((a, b) => (d.games[a.name].release.ts || 9e12) - (d.games[b.name].release.ts || 9e12));
   const waiting = wish.filter(g => !onSale.includes(g) && !soon.includes(g) && offersFor(g.name).length);
@@ -2960,7 +2968,7 @@ function dealsHTML() {
   const dlc = (d.dlc || []).map(x => `<li data-url="${esc(x.url)}">${x.art ? `<img alt="" loading="lazy" src="${esc(x.art)}">` : ""}<div><b>${esc(x.name)}</b><small>${esc(x.game || "")}${x.wishlisted ? " · on your Steam wishlist" : ""}</small>${x.alt ? `<small class="altstore" data-url="${esc(x.alt.url)}">Cheaper at ${esc(x.alt.store)}: ${esc(money(x.alt.price, "USD"))}</small>` : ""}</div><span><i>-${x.price.discount}%</i> ${esc(money(x.price.final, x.price.currency))}</span></li>`).join("");
   const bundles = (d.bundles || []).map(b => `<li data-url="${esc(b.url)}"><div><b>${esc(b.name)}</b><small>${esc(b.store)} · has ${esc(b.game)}${b.owned ? " (you own it)" : ""}${b.count ? ` · ${b.count} items` : ""}${b.ends ? ` · ends in ${countdown(b.ends)}` : ""}</small></div><span class="ghost small">Open</span></li>`).join("");
   const sec = (title, sub, list) => list.length ? `<section class="dsec"><h2>${title}</h2>${sub ? `<p class="muted">${sub}</p>` : ""}<div class="dgrid">${list.map(dealCard).join("")}</div></section>` : "";
-  return `<section class="deals">${head}${saleBanner()}
+  return `${wishTabs()}<section class="deals">${head}${saleBanner()}
     ${renames ? `<section class="dsec"><h2>Official titles found</h2><ul class="renames">${renames}</ul></section>` : ""}
     ${sec("On sale now", "Cheapest place first. Prices from stores other than Steam and PlayStation are in U.S. dollars.", onSale)}
     ${sec("Coming out", "Counting down to release.", soon)}
@@ -3032,7 +3040,7 @@ async function fillWhatsNew() {
 
 /* ---------- Coming soon: release dates for your wishlist ---------- */
 function soonShellHTML() {
-  return `<section class="news soon"><header class="news-head"><h1>Coming soon</h1><p class="muted">Release dates for the games on your wishlist, soonest first, with a countdown. Dates come from Steam, or IGDB for console games.</p></header>
+  return `${wishTabs()}<section class="news soon"><header class="news-head"><h1>Coming soon</h1><p class="muted">Release dates for the games on your wishlist, soonest first, with a countdown. Dates come from Steam, or IGDB for console games.</p></header>
     <div id="soonBody"><p class="news-loading"><span class="spinner"></span> Checking release dates…</p></div></section>`;
 }
 async function fillSoon() {

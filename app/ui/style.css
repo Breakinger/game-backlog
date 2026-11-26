@@ -1447,3 +1447,10 @@ body.bar-away.bar-peek .barpeek svg { transform: rotate(180deg); }
 .case .sparks { top: -52%; height: 56%; }
 .classic-cover .sparks { top: -36%; height: 40%; }
 .classic-award { width: 120px; left: -34px; top: -38px; z-index: 3; }
+
+/* ---------- tab groups and the Wishlist's sub-tabs ---------- */
+.tabsep { width: 1px; align-self: center; height: 18px; margin: 0 10px; background: linear-gradient(180deg, transparent, rgba(201, 209, 220, .35), transparent); }
+.subtabs { display: flex; justify-content: center; gap: 4px; margin: 18px auto 0; padding: 4px; width: max-content; border-radius: 999px; background: rgba(6, 12, 31, .6); border: 1px solid var(--line); }
+.subtab { border: 0; background: none; color: var(--muted); padding: 7px 18px; border-radius: 999px; font: inherit; font-size: 14.5px; cursor: pointer; transition: background .2s, color .2s; }
+.subtab:hover { color: var(--glass); }
+.subtab[aria-selected="true"] { background: linear-gradient(90deg, #6741D9, #B197FC); color: #fff; font-weight: 600; box-shadow: 0 0 14px rgba(177, 151, 252, .45); }
