@@ -235,10 +235,27 @@ class ScriptClient:
             raise err
         return out
 
-    def pair(self):
-        out = self._call({"action": "pair"})
-        self.key = out["key"]
+    def pair(self, name="", pub=""):
+        """The first PC gets its key at once; any other PC gets a code to allow in the sheet's Masterlog PCs tab."""
+        out = self._call(body={"action": "pair", "name": name, "pub": pub})
+        if out.get("key"):
+            self.key = out["key"]
         return out
+
+    def device_poll(self, rid):
+        out = self._call(body={"action": "device_poll", "id": rid})
+        if out.get("key"):
+            self.key = out["key"]
+        return out
+
+    def device_wrap(self, rid, blob):
+        return self._call(body={"action": "device_wrap", "key": self.key, "id": rid, "blob": blob})
+
+    def file_put(self, name, data_b64, mime):
+        return self._call(body={"action": "file_put", "key": self.key, "name": name, "data": data_b64, "mime": mime}, timeout=180)
+
+    def file_get(self, name):
+        return self._call(body={"action": "file_get", "key": self.key, "name": name}, timeout=180)
 
     def read(self):
         out = self._call({"action": "read", "key": self.key})

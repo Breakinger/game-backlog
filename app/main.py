@@ -60,7 +60,7 @@ PREFS = ("view_mode", "refresh_minutes", "sound_on", "ambient_volume", "fx_volum
          "steam_cc", "ps_locale", "money", "auto_names", "scale", "ui_state", "eshop_country", "classic")
 PRIVATE = ("sgdb_key", "sheet_key", "ambience_path")
 # what stays with each PC when you copy Masterlog to another one
-MACHINE_ONLY = ("ambience_path", "heroic_linked", "big_picture", "state_meta")
+MACHINE_ONLY = ("ambience_path", "heroic_linked", "big_picture", "state_meta", "pair_pending", "joined")
 # small things kept the same on all your PCs through your sheet's script (version 3)
 SHARED_PREFS = ("classic", "steam_cc", "ps_locale", "money", "auto_names", "eshop_country", "ranking")
 AUDIO_TYPES = {".mp3": "audio/mpeg", ".ogg": "audio/ogg", ".opus": "audio/ogg", ".m4a": "audio/mp4", ".aac": "audio/aac",
@@ -313,6 +313,7 @@ class Api:
         s["has_youtube"] = self._vault.has("youtube")
         s["has_reddit"] = self._vault.has("reddit")
         s["has_nexus"] = self._vault.has("nexus")
+        s["sealed"] = bool(self._vault.get("sync"))
         s["has_ebay"] = self._deals.ebay.configured() if getattr(self, "_deals", None) else False
         s["connected"] = bool(sheet.is_script_link(self._settings.get("sheet_url")) and self._settings.get("sheet_key"))
         s["link_kind"] = "script" if sheet.is_script_link(self._settings.get("sheet_url")) else ("csv" if self._settings.get("sheet_url") else "")
@@ -340,12 +341,20 @@ class Api:
             self._settings["sheet_url"] = link
             self._settings["sheet_key"] = ""
             self._client = None
+            self._settings.pop("pair_pending", None)
             if sheet.is_script_link(link):
                 try:
                     c = sheet.ScriptClient(link)
-                    out = c.pair()
-                    self._settings["sheet_key"] = c.key
-                    result["paired"] = out.get("title") or True
+                    if not self._vault.get("device"):
+                        self._vault.set("device", pair.new_device())
+                    out = c.pair(socket.gethostname(), self._vault.get("device")["pub"])
+                    if out.get("key"):
+                        self._settings["sheet_key"] = c.key
+                        result["paired"] = out.get("title") or True
+                    elif out.get("pending"):
+                        # another PC already uses this sheet: wait until you allow this one in the sheet
+                        self._settings["pair_pending"] = {"id": out["pending"], "code": out.get("code"), "title": out.get("title"), "tab": out.get("tab")}
+                        result["pending"] = self._settings["pair_pending"]
                 except Exception as e:
                     result["pair_error"] = str(e)
         region = (self._settings.get("steam_cc"), self._settings.get("ps_locale"), self._settings.get("eshop_country"))
@@ -363,6 +372,35 @@ class Api:
         s = self.get_settings()
         s.update(result)
         return s
+
+    def pair_poll(self):
+        """While you're allowing this PC in the sheet: has it been allowed yet?"""
+        pend = self._settings.get("pair_pending")
+        if not pend:
+            return {"none": True}
+        try:
+            c = sheet.ScriptClient(self._settings.get("sheet_url") or "")
+            out = c.device_poll(pend["id"])
+        except Exception as e:
+            if getattr(e, "code", None) in ("denied", "gone"):
+                self._settings.pop("pair_pending", None)
+                self._write_settings()
+                return {"error": str(e)}
+            return {"waiting": True, "code": pend.get("code"), "note": str(e)}
+        if out.get("key"):
+            self._settings["sheet_key"] = out["key"]
+            self._settings["joined"] = True      # account keys come sealed from your other PC
+            self._settings.pop("pair_pending", None)
+            self._client = None
+            self._write_settings()
+            return {"ok": True, "title": out.get("title")}
+        return {"waiting": True, "code": pend.get("code")}
+
+    def pair_cancel(self):
+        self._settings.pop("pair_pending", None)
+        self._settings["sheet_url"] = ""
+        self._write_settings()
+        return True
 
     def set_pref(self, key, value):
         if key in PREFS:
@@ -399,11 +437,11 @@ class Api:
             except Exception as e:  # report, keep showing the last good data
                 return {"error": str(e) or e.__class__.__name__, "code": getattr(e, "code", None)}
             data["can_edit"] = bool(client)
-            if client and (data.get("script_version") or 1) >= 3:
-                try:
-                    data["state_changed"] = self._state_sync(client)
-                except Exception:
-                    pass
+            if client and (data.get("script_version") or 1) >= 4:
+                data["state_changed"] = getattr(self, "_state_changed", False)
+                self._state_changed = False
+                if not getattr(self, "_state_busy", False):
+                    threading.Thread(target=self._state_sync_bg, args=(client,), daemon=True).start()
             if data.get("ranking") is None:
                 data["ranking"] = [{"rank": i + 1, "game": n} for i, n in enumerate(self._local_ranking())]
                 data["ranking_local"] = True
@@ -1179,7 +1217,7 @@ class Api:
                 audio = {"ext": os.path.splitext(p)[1].lower(), "data": base64.b64encode(f.read()).decode()}
         return {"v": 1, "from": socket.gethostname(), "t": time.time(), "version": VERSION,
                 "settings": {k: v for k, v in self._settings.items() if k not in MACHINE_ONLY},
-                "vault": dict(self._vault._data), "files": files, "covers": self._art.mine(with_files=True), "audio": audio}
+                "vault": {k: v for k, v in self._vault._data.items() if k != "device"}, "files": files, "covers": self._art.mine(with_files=True), "audio": audio}
 
     def _apply_bundle(self, b):
         if b.get("v") != 1:
@@ -1267,10 +1305,11 @@ class Api:
         out = {"prefs": {k: self._settings.get(k) for k in SHARED_PREFS if k in self._settings},
                "blacklist": sorted(self._accounts.state.get("blacklist") or []),
                "dlc": self.dlc_marks(), "names": self._names,
-               "covers": {k: {kk: v[kk] for kk in ("src", "url", "t")} for k, v in self._art.mine().items() if v.get("url")}}
+               "covers": {k: {kk: v[kk] for kk in ("src", "url", "t")} for k, v in self._art.mine().items() if v.get("url")},
+               "files": self._files_local()}
         sync = (self._vault.get("sync") or {}).get("key")
         if sync:
-            secret = {k: v for k, v in self._vault._data.items() if k != "sync"}
+            secret = {k: v for k, v in self._vault._data.items() if k not in ("sync", "device")}
             out["secrets"] = {"blob": base64.b64encode(pair.seal(base64.b64decode(sync), secret, b"masterlog secrets")).decode(),
                               "hash": hashlib.sha256(json.dumps(secret, sort_keys=True).encode()).hexdigest()}
         return out
@@ -1293,28 +1332,114 @@ class Api:
         elif name == "covers":
             for k, item in (data or {}).items():
                 _safe(self._art.adopt, k, item)
+        elif name == "files":
+            self._files_pull(self._script(), data)
         elif name == "secrets":
             sync = (self._vault.get("sync") or {}).get("key")
+            if not sync:
+                raise ValueError("no sealing key yet")
             if sync and data and data.get("blob"):
                 secret = pair.unseal(base64.b64decode(sync), base64.b64decode(data["blob"]), b"masterlog secrets")
-                for k in set(self._vault._data) - set(secret) - {"sync"}:
+                for k in set(self._vault._data) - set(secret) - {"sync", "device"}:
                     self._vault.set(k, None)
                 for k, v in secret.items():
-                    if k != "sync":
+                    if k not in ("sync", "device"):
                         self._vault.set(k, v)
                 feeds.REDDIT_APP["id"] = (self._vault.get("reddit") or {}).get("id")
 
+    def _files_local(self):
+        out = {}
+        p = self._ambience_file()
+        if p and os.path.getsize(p) <= 20 * 1024 * 1024:
+            out["ambience" + os.path.splitext(p)[1].lower()] = {"t": int(os.path.getmtime(p)), "size": os.path.getsize(p)}
+        for k, e in self._art.mine().items():
+            if e.get("src") == "custom":
+                path = os.path.join(self._art.dir, e["file"])
+                if os.path.exists(path) and os.path.getsize(path) <= 20 * 1024 * 1024:
+                    out["cover-" + hashlib.sha1(k.encode()).hexdigest()[:16] + os.path.splitext(e["file"])[1]] = {"t": int(e.get("t") or 0), "size": os.path.getsize(path), "key": k}
+        return out
+
+    def _files_push(self, client, local, remote):
+        for name, f in local.items():
+            r = remote.get(name)
+            if r and r.get("t", 0) >= f["t"]:
+                continue
+            path = self._ambience_file() if name.startswith("ambience") else os.path.join(self._art.dir, self._art.index[f["key"]]["file"])
+            with open(path, "rb") as fh:
+                data = base64.b64encode(fh.read()).decode()
+            ext = os.path.splitext(name)[1]
+            mime = AUDIO_TYPES.get(ext) or {".png": "image/png", ".webp": "image/webp"}.get(ext, "image/jpeg")
+            client.file_put(name, data, mime)
+
+    def _files_pull(self, client, remote):
+        local = self._files_local()
+        for name, f in (remote or {}).items():
+            mine = local.get(name)
+            if mine and mine.get("t", 0) >= f.get("t", 0):
+                continue
+            data = (client.file_get(name) or {}).get("data")
+            if not data:
+                continue
+            if name.startswith("ambience"):
+                ext = os.path.splitext(name)[1]
+                if ext not in AUDIO_TYPES:
+                    continue
+                folder = os.path.join(self._dir, "audio")
+                os.makedirs(folder, exist_ok=True)
+                for old in os.listdir(folder):
+                    if old.startswith("ambience"):
+                        try:
+                            os.remove(os.path.join(folder, old))
+                        except OSError:
+                            pass
+                dest = os.path.join(folder, "ambience" + ext)
+                with open(dest, "wb") as fh:
+                    fh.write(base64.b64decode(data))
+                os.utime(dest, (f["t"], f["t"]))
+                self._settings["ambience_path"] = dest
+                self._write_settings()
+            elif f.get("key"):
+                self._art.adopt(f["key"], {"src": "custom", "data": data, "t": f.get("t")})
+
+    def _state_sync_bg(self, client):
+        self._state_busy = True
+        try:
+            if self._state_sync(client):
+                self._state_changed = True
+        except Exception:
+            pass
+        finally:
+            self._state_busy = False
+
     def _state_sync(self, client):
-        if not self._vault.get("sync"):
+        if not self._vault.get("sync") and not self._settings.get("joined"):
             self._vault.set("sync", {"key": base64.b64encode(os.urandom(32)).decode()})
         meta = self._settings.setdefault("state_meta", {})      # section -> {"hash", "t"} as this PC last knew it
+        got = client.state_get() or {}
+        remote = got.get("state") or {}
         local = self._state_sections()
         now = time.time()
         for name, data in local.items():
             h = data["hash"] if name == "secrets" else hashlib.sha256(json.dumps(data, sort_keys=True).encode()).hexdigest()
-            if meta.get(name, {}).get("hash") != h:
+            if name not in meta:
+                # first time this PC takes part: what your other PCs already shared wins over this PC's blank slate
+                meta[name] = {"hash": h, "t": 0 if name in remote else now}
+            elif meta[name].get("hash") != h:
                 meta[name] = {"hash": h, "t": now}             # changed here since last time
-        remote = (client.state_get() or {}).get("state") or {}
+        # a PC you allowed in the sheet gets the sealing key from one of your other PCs, wrapped for it alone
+        if not self._vault.get("sync") and got.get("wrapped") and self._vault.get("device"):
+            try:
+                self._vault.set("sync", {"key": base64.b64encode(pair.unwrap(got["wrapped"], self._vault.get("device"))).decode()})
+                local = self._state_sections()
+                meta.pop("secrets", None)
+            except Exception:
+                pass
+        if self._vault.get("sync"):
+            for want in got.get("keys_wanted") or []:
+                try:
+                    client.device_wrap(want["id"], pair.wrap(base64.b64decode(self._vault.get("sync")["key"]), want["pub"]))
+                except Exception:
+                    continue
         push, changed = {}, False
         for name in set(local) | set(remote):
             mine, theirs = meta.get(name), remote.get(name)
@@ -1329,6 +1454,11 @@ class Api:
                     continue
             elif mine and name in local and (not theirs or mine.get("t", 0) > theirs.get("t", 0)):
                 push[name] = {"t": mine["t"], "data": local[name]}
+        if "files" in push:
+            try:
+                self._files_push(client, local["files"], (remote.get("files") or {}).get("data") or {})
+            except Exception:
+                push.pop("files")
         if push:
             client.state_put(push)
         self._write_settings()

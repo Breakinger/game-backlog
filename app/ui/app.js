@@ -518,12 +518,60 @@ function welcomeHTML() {
       <div class="actions"><button class="primary" id="wSettings">Open settings</button></div></div>`;
   }
   if (!state.settings.sheet_url && api) {
-    return `<div class="welcome"><h1>Welcome</h1><p class="intro">Already using Masterlog on another PC? Copy everything from it in one go: open Masterlog there, then press the button below. Otherwise, connect your Google Sheet. Your sheet stays private.</p>
-      <div class="actions"><button class="primary" id="wPair">Copy from my other PC</button><button class="ghost" id="wSettings">Connect the sheet</button></div></div>`;
+    return `<div class="welcome"><h1>Welcome</h1>
+      <p class="intro">Already using Masterlog on another PC? Open your Google Sheet, go to the <b>Masterlog PCs</b> tab and copy the link at the top. Paste it here and you'll be asked to tick <b>Allow</b> in that tab. Everything else follows on its own.</p>
+      <form class="welcome-link" id="wLinkForm"><input id="wLink" type="url" required placeholder="https://script.google.com/macros/s/…/exec" aria-label="Your sheet's Masterlog link"><button class="primary" type="submit">Connect</button></form>
+      <div class="actions"><button class="ghost" id="wPair">Copy over Wi-Fi from my other PC instead</button><button class="ghost" id="wSettings">First time: set up the sheet</button></div></div>`;
   }
   return `<div class="welcome"><h1>Loading your backlog</h1><p class="intro">Reading the sheet…</p></div>`;
 }
-function bindWelcome() { $("#wSettings")?.addEventListener("click", () => openSettings(true)); $("#wPair")?.addEventListener("click", () => openPair("receive")); }
+function bindWelcome() {
+  $("#wSettings")?.addEventListener("click", () => openSettings(true));
+  $("#wPair")?.addEventListener("click", () => openPair("receive"));
+  $("#wLinkForm")?.addEventListener("submit", async e => {
+    e.preventDefault();
+    const link = $("#wLink").value.trim();
+    if (!link) return;
+    const btn = e.target.querySelector("button"); btn.disabled = true; btn.textContent = "Connecting…";
+    const res = await api.save_settings({ sheet_url: link }).catch(err => ({ pair_error: String(err) }));
+    btn.disabled = false; btn.textContent = "Connect";
+    afterConnect(res);
+  });
+}
+function afterConnect(res) {
+  if (!res) return;
+  if (res.version) state.settings = res;
+  if (res.pair_error) return toast(`Couldn't connect: ${res.pair_error}`, "err");
+  if (res.pending) return openSheetApproval(res.pending);
+  if (res.paired) { toast(`Connected to ${typeof res.paired === "string" ? res.paired : "your sheet"}.`, "ok"); sync(true); }
+}
+
+/* a new PC asked your sheet for access: you tick Allow next to its code in the Masterlog PCs tab */
+function openSheetApproval(p) {
+  pairMode = "sheet";
+  if ($("#settings").open) $("#settings").close();
+  if (!$("#pairDialog").open) $("#pairDialog").showModal();
+  $("#pairBody").dataset.stage = "sheet";
+  $("#pairBody").innerHTML = `<h2 id="pairTitle">Allow this PC in your sheet</h2>
+    <ol class="pairsteps"><li>Open your Google Sheet${p.title ? ` (<b>${esc(p.title)}</b>)` : ""} in a browser, on any device.</li><li>Go to the <b>${esc(p.tab || "Masterlog PCs")}</b> tab.</li><li>Tick <b>Allow</b> next to this code:</li></ol>
+    <div class="paircode">${esc(p.code || "")}</div>
+    <p class="news-loading"><span class="spinner"></span> Waiting for you to allow it…</p>
+    <div class="row"><button type="button" class="ghost small" id="pairCancelSheet">Cancel</button></div>`;
+  clearInterval(pairTimer);
+  pairTimer = setInterval(async () => {
+    if (!$("#pairDialog").open) return clearInterval(pairTimer);
+    const r = await Promise.resolve(api?.pair_poll()).catch(() => null);
+    if (!r || r.waiting) return;
+    clearInterval(pairTimer);
+    if (r.error) { $("#pairBody").innerHTML = `<h2 id="pairTitle">That didn't work</h2><p>${esc(r.error)}</p>`; return; }
+    if (r.ok) {
+      try { FX.play.save(); } catch {}
+      $("#pairBody").innerHTML = `<h2 id="pairTitle">This PC is allowed</h2><p class="pair-ok">✓ Connected to ${esc(r.title || "your sheet")}.</p>
+        <p>Your backlog is loading now, along with your All Time Classic, hidden games, covers and ambience track. Your account keys (Steam, PlayStation and the rest) come sealed from your other PC: they arrive the next time Masterlog is open there.</p>`;
+      state.settings = await api.get_settings(); sync(true);
+    }
+  }, 3000);
+}
 
 /* ---------- your other PCs: copy everything over the home network ---------- */
 let pairTimer = null, pairMode = null;
@@ -1554,6 +1602,7 @@ function openSettings(showHowTo, tab = "sheet") {
   f.youtube_key.value = ""; f.reddit_id.value = "";
   $("#redditState").textContent = st.has_reddit ? "Reddit app connected. Type a single space and Save to remove it." : "Not needed.";
   f.nexus_key.value = "";
+  $("#pcsState").textContent = st.joined && !st.sealed ? "This PC is waiting for your account keys: open Masterlog on your other PC once and they arrive sealed." : st.sealed ? "Account keys are shared between your PCs, sealed." : "";
   $("#nexusState").textContent = st.has_nexus ? "Nexus Mods is connected. Paste a new key to replace it, or type a space to remove it." : "Optional. Collections installed through Vortex show up without it.";
   $("#nexusState").className = st.has_nexus ? "ok" : "";
   $("#redditState").className = st.has_reddit ? "ok" : "";
@@ -1602,6 +1651,7 @@ async function saveSettings() {
   state.settings = res;
   applySound();
   if (res.pair_error) toast(`Couldn't connect: ${res.pair_error}`, "err");
+  else if (res.pending) openSheetApproval(res.pending);
   else if (res.paired) toast(`Connected to ${typeof res.paired === "string" ? res.paired : "your sheet"}.`, "ok");
   if (!hadKey && state.settings.has_sgdb_key) { await api.clear_covers(); covers.clear(); }
   const iid = f.igdb_id.value.trim(), isec = f.igdb_secret.value.trim();
@@ -1912,6 +1962,7 @@ function bindGlobal() {
     if (e.target.closest("#pairRestart")) { $("#pairBody").dataset.stage = ""; Promise.resolve(api?.share_start()).then(paintPair); return; }
     if (e.target.closest("#pairAgain")) { $("#pairBody").dataset.stage = ""; return findPCs(); }
     if (e.target.closest("#pairRestartApp")) { api?.restart_app(); return; }
+    if (e.target.closest("#pairCancelSheet")) { clearInterval(pairTimer); api?.pair_cancel(); $("#pairDialog").close(); state.settings.sheet_url = ""; render(); return; }
     const pc = e.target.closest("[data-pcip]"); if (pc) { api?.receive_start(pc.dataset.pcip, +pc.dataset.pcport); return; }
     if (e.target.closest("#pairIpGo")) { const ip = $("#pairIp").value.trim(); if (ip) Promise.resolve(api?.receive_start(ip)).then(st => st?.stage === "error" && paintPair(st)); }
   });
@@ -2863,6 +2914,7 @@ async function start() {
   const cached = await api.cached();
   if (cached?.games?.length) applyData(cached);
   render(); syncLabel(); scheduleRefresh();
+  if (state.settings.pair_pending) openSheetApproval(state.settings.pair_pending);
   sync(false);
   setTimeout(() => checkForUpdate(false), 4000);
   setInterval(() => checkForUpdate(false), 6 * 3600 * 1000);

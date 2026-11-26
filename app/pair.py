@@ -305,3 +305,29 @@ class Receive:
             self.state = {"stage": "error", "error": str(e) or e.__class__.__name__}
         finally:
             conn.close()
+
+
+# ---------- through your sheet: a new PC's own key pair, and the sealing key wrapped for it ----------
+def new_device():
+    priv = X25519PrivateKey.generate()
+    raw = priv.private_bytes(serialization.Encoding.Raw, serialization.PrivateFormat.Raw, serialization.NoEncryption())
+    return {"priv": base64.b64encode(raw).decode(), "pub": base64.b64encode(_pub_bytes(priv)).decode()}
+
+
+def wrap(secret: bytes, their_pub_b64: str) -> str:
+    """Seal `secret` so only the PC holding the matching private key can open it."""
+    theirs = base64.b64decode(their_pub_b64)
+    eph = X25519PrivateKey.generate()
+    eph_pub = _pub_bytes(eph)
+    k = HKDF(algorithm=hashes.SHA256(), length=32, salt=eph_pub + theirs, info=b"masterlog wrap v1").derive(eph.exchange(X25519PublicKey.from_public_bytes(theirs)))
+    nonce = os.urandom(12)
+    return base64.b64encode(eph_pub + nonce + AESGCM(k).encrypt(nonce, secret, b"masterlog wrap")).decode()
+
+
+def unwrap(blob_b64: str, device: dict) -> bytes:
+    blob = base64.b64decode(blob_b64)
+    priv = X25519PrivateKey.from_private_bytes(base64.b64decode(device["priv"]))
+    mine = base64.b64decode(device["pub"])
+    eph_pub, nonce, ct = blob[:32], blob[32:44], blob[44:]
+    k = HKDF(algorithm=hashes.SHA256(), length=32, salt=eph_pub + mine, info=b"masterlog wrap v1").derive(priv.exchange(X25519PublicKey.from_public_bytes(eph_pub)))
+    return AESGCM(k).decrypt(nonce, ct, b"masterlog wrap")

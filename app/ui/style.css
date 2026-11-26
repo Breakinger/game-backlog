@@ -1258,3 +1258,6 @@ body.away *, body.away *::before, body.away *::after { animation-play-state: pau
 .pair-ok { font-size: 18px; color: #5BD38A; margin: 6px 0; }
 #pairIp { flex: 1; }
 @media (max-width: 760px) { .pcs { grid-template-columns: 1fr; } }
+.welcome-link { display: flex; gap: 10px; margin: 18px 0 8px; max-width: 640px; }
+.welcome-link input { flex: 1; }
+.pcs-h { font-size: 15px; font-weight: 500; margin: 16px 0 4px; }

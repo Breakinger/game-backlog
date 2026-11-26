@@ -1,6 +1,10 @@
 /**
- * Masterlog connection (version 3: keeps your PCs in step: the All Time Classic, hidden games, DLC marks,
- * covers you picked, and your account keys, sealed so only your PCs can open them).
+ * Masterlog connection (version 4). Besides reading and writing the sheet, it lets more PCs use Masterlog:
+ * a new PC asks here, you tick Allow next to its code in the "Masterlog PCs" tab, and it gets its own key.
+ * It also keeps your PCs in step (All Time Classic, hidden games, DLC marks, covers, your ambience track)
+ * and passes your account keys between them sealed, so this script never sees them in the clear.
+ * Deploying asks for Google Drive access: your own covers and ambience track are kept in a private
+ * "Masterlog (app files)" folder in your Drive.
  *
  * Paste this into your sheet (Extensions → Apps Script), then Deploy → New deployment →
  * Web app, Execute as: Me, Who has access: Anyone. Copy the Web app link into the app's Settings.
@@ -42,21 +46,26 @@ function route_(p) {
   const props = PropertiesService.getScriptProperties();
   const key = props.getProperty('KEY');
   if (p.action === 'pair') {
-    if (key) {
-      return { error: 'This sheet is already connected to Masterlog. To use it on another PC, open Masterlog on the PC that is connected and choose Settings → Your PCs → Set up another PC. (To start over instead, run resetConnection in Extensions → Apps Script.)', code: 'paired' };
-    }
-    const fresh = Utilities.getUuid().replace(/-/g, '') + Utilities.getUuid().replace(/-/g, '');
+    if (key) return withLock_(() => requestDevice_(p));   // another PC: wait for you to allow it in the sheet
+    const fresh = newKey_();
     props.setProperty('KEY', fresh);
-    return { key: fresh, title: SpreadsheetApp.getActive().getName() };
+    try { devicesSheet_(); } catch (err) {}
+    return { key: fresh, device: 'main', title: SpreadsheetApp.getActive().getName() };
   }
-  if (!key || p.key !== key) {
+  if (p.action === 'device_poll') return withLock_(() => pollDevice_(p));
+  const device = whoIs_(p.key, key, p.action === 'read');
+  if (!device) {
     return { error: 'The app isn\'t connected to this sheet. Paste the Web app link in Settings again.', code: 'auth' };
   }
+  p.device = device;
+  if (p.action === 'device_wrap') return withLock_(() => wrapFor_(p));
+  if (p.action === 'file_put') return withLock_(() => filePut_(p));
+  if (p.action === 'file_get') return fileGet_(p);
   if (p.action === 'read') return read_();
   if (p.action === 'update') return withLock_(() => update_(p));
   if (p.action === 'add') return withLock_(() => add_(p));
   if (p.action === 'rank') return withLock_(() => rank_(p));
-  if (p.action === 'state_get') return { state: stateRead_() };
+  if (p.action === 'state_get') return stateGet_(p.device);
   if (p.action === 'state_put') return withLock_(() => statePut_(p));
   return { error: 'Unknown action: ' + p.action };
 }
@@ -127,7 +136,7 @@ function read_() {
     plays: table_('plays'),
     books: table_('books'),
     ranking: ranking_(),
-    script: 3,
+    script: 4,
   };
 }
 
@@ -246,4 +255,136 @@ function statePut_(p) {
   props.setProperties(parts);
   for (let i = n; i < old; i++) props.deleteProperty('STATE_' + i);
   return { ok: true };
+}
+
+/* ---------- more PCs: each asks, you allow it in the "Masterlog PCs" tab ---------- */
+const DEVICES_TAB = 'Masterlog PCs';
+
+function newKey_() { return Utilities.getUuid().replace(/-/g, '') + Utilities.getUuid().replace(/-/g, ''); }
+function devicesRead_() { try { return JSON.parse(PropertiesService.getScriptProperties().getProperty('DEVICES') || '{}'); } catch (err) { return {}; } }
+function devicesWrite_(d) { PropertiesService.getScriptProperties().setProperty('DEVICES', JSON.stringify(d)); }
+
+function devicesSheet_() {
+  const ss = SpreadsheetApp.getActive();
+  let sh = ss.getSheetByName(DEVICES_TAB);
+  if (!sh) {
+    sh = ss.insertSheet(DEVICES_TAB);
+    sh.getRange(3, 1, 1, 5).setValues([['PC', 'Code', 'Asked', 'Allow', 'Status']]).setFontWeight('bold');
+    sh.setFrozenRows(3);
+    sh.setColumnWidth(1, 220); sh.setColumnWidth(5, 320);
+  }
+  let url = '';
+  try { url = ScriptApp.getService().getUrl() || ''; } catch (err) {}
+  sh.getRange(1, 1, 1, 2).setValues([['Link for a new PC', url ? url : 'Deploy the script as a web app to see the link here']]);
+  sh.getRange(2, 1).setValue('Paste the link in Masterlog on the new PC, then tick Allow next to the code it shows. Untick to disconnect a PC.');
+  return sh;
+}
+
+function deviceRow_(sh, id) {
+  const last = sh.getLastRow();
+  if (last < 4) return 0;
+  const notes = sh.getRange(4, 6, last - 3, 1).getValues();
+  for (let i = 0; i < notes.length; i++) if (String(notes[i][0]) === id) return i + 4;
+  return 0;
+}
+
+function requestDevice_(p) {
+  const props = PropertiesService.getScriptProperties();
+  const pending = JSON.parse(props.getProperty('PENDING') || '{}');
+  const now = Date.now();
+  Object.keys(pending).forEach(k => { if (now - pending[k].t > 86400000) delete pending[k]; });
+  if (Object.keys(pending).length >= 5) return { error: 'Too many PCs are waiting to be allowed. Allow or delete them in the Masterlog PCs tab first.' };
+  const alphabet = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789';
+  let code = '';
+  for (let i = 0; i < 6; i++) code += alphabet.charAt(Math.floor(Math.random() * alphabet.length));
+  code = code.slice(0, 3) + '-' + code.slice(3);
+  const id = Utilities.getUuid().replace(/-/g, '');
+  const name = String(p.name || 'New PC').slice(0, 60);
+  pending[id] = { name: name, code: code, pub: String(p.pub || '').slice(0, 100), t: now };
+  props.setProperty('PENDING', JSON.stringify(pending));
+  const sh = devicesSheet_();
+  const row = Math.max(sh.getLastRow() + 1, 4);
+  sh.getRange(row, 1, 1, 6).setValues([[name, code, new Date(), false, 'Waiting: tick Allow if this is your PC', id]]);
+  sh.getRange(row, 4).insertCheckboxes();
+  sh.hideColumns(6);
+  return { pending: id, code: code, title: SpreadsheetApp.getActive().getName(), tab: DEVICES_TAB };
+}
+
+function pollDevice_(p) {
+  const props = PropertiesService.getScriptProperties();
+  const pending = JSON.parse(props.getProperty('PENDING') || '{}');
+  const req = pending[p.id];
+  if (!req) return { error: 'That request is gone. Start again from Masterlog on the new PC.', code: 'gone' };
+  const sh = devicesSheet_();
+  const row = deviceRow_(sh, p.id);
+  if (!row) { delete pending[p.id]; props.setProperty('PENDING', JSON.stringify(pending)); return { error: 'The request was removed from the sheet.', code: 'denied' }; }
+  if (sh.getRange(row, 4).getValue() !== true) return { waiting: true, code: req.code };
+  const devices = devicesRead_();
+  const key = newKey_();
+  devices[p.id] = { key: key, name: req.name, pub: req.pub, t: Date.now() };
+  devicesWrite_(devices);
+  delete pending[p.id];
+  props.setProperty('PENDING', JSON.stringify(pending));
+  sh.getRange(row, 5).setValue('Allowed ' + Utilities.formatDate(new Date(), Session.getScriptTimeZone(), 'd MMM yyyy'));
+  return { key: key, device: p.id, title: SpreadsheetApp.getActive().getName() };
+}
+
+/* which PC is asking: the first one (KEY) or one you allowed. Unticking Allow disconnects a PC at its next sync. */
+function whoIs_(given, mainKey, check) {
+  if (!given) return null;
+  if (mainKey && given === mainKey) return 'main';
+  const devices = devicesRead_();
+  const id = Object.keys(devices).find(k => devices[k].key === given);
+  if (!id) return null;
+  if (check) {
+    const sh = SpreadsheetApp.getActive().getSheetByName(DEVICES_TAB);
+    const row = sh ? deviceRow_(sh, id) : 0;
+    if (!row || sh.getRange(row, 4).getValue() !== true) {
+      delete devices[id]; devicesWrite_(devices);
+      PropertiesService.getScriptProperties().deleteProperty('WRAP_' + id);
+      if (row) sh.getRange(row, 5).setValue('Disconnected');
+      return null;
+    }
+  }
+  return id;
+}
+
+/* account keys travel sealed: an allowed PC posts the sealing key wrapped for a new PC's public key */
+function stateGet_(device) {
+  const props = PropertiesService.getScriptProperties();
+  const devices = devicesRead_();
+  const wanted = Object.keys(devices).filter(id => id !== device && devices[id].pub && !props.getProperty('WRAP_' + id))
+    .map(id => ({ id: id, pub: devices[id].pub, name: devices[id].name }));
+  return { state: stateRead_(), keys_wanted: wanted, wrapped: device !== 'main' ? (props.getProperty('WRAP_' + device) || '') : '' };
+}
+
+function wrapFor_(p) {
+  const devices = devicesRead_();
+  if (!devices[p.id] || !p.blob) return { error: 'Unknown PC.' };
+  PropertiesService.getScriptProperties().setProperty('WRAP_' + p.id, String(p.blob).slice(0, 2000));
+  return { ok: true };
+}
+
+/* your own covers and ambience track, in a private folder in your Drive */
+function filesFolder_() {
+  const it = DriveApp.getFoldersByName('Masterlog (app files)');
+  return it.hasNext() ? it.next() : DriveApp.createFolder('Masterlog (app files)');
+}
+
+function filePut_(p) {
+  const name = String(p.name || '').replace(/[^A-Za-z0-9._-]/g, '').slice(0, 80);
+  if (!name || !p.data) return { error: 'Nothing to save.' };
+  const folder = filesFolder_();
+  const old = folder.getFilesByName(name);
+  while (old.hasNext()) old.next().setTrashed(true);
+  const blob = Utilities.newBlob(Utilities.base64Decode(p.data), p.mime || 'application/octet-stream', name);
+  folder.createFile(blob);
+  return { ok: true };
+}
+
+function fileGet_(p) {
+  const name = String(p.name || '').replace(/[^A-Za-z0-9._-]/g, '').slice(0, 80);
+  const files = filesFolder_().getFilesByName(name);
+  if (!files.hasNext()) return { error: 'No such file.' };
+  return { data: Utilities.base64Encode(files.next().getBlob().getBytes()) };
 }
