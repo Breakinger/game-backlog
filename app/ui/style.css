@@ -2157,3 +2157,13 @@ body.calm .glint { animation-play-state: paused; }
 
 /* Modify: "Play on" only for PC games (a console game plays on its console) */
 form:has(select[name="platform"] option:checked:is([value="PS5"], [value="PS4"], [value="PS2"], [value="Switch"], [value="Switch 2"])) [data-field="play_on"] { display: none; }
+
+/* lighter Game of the Year sparks: a soft dot instead of a glow that has to be repainted */
+.goty-sparks.gold i { box-shadow: none; background: radial-gradient(circle, #FFF6D0 0 35%, rgba(255, 179, 0, .6) 55%, transparent 75%); width: 6px; height: 6px; }
+.goty-sparks.white i { box-shadow: none; background: radial-gradient(circle, #FFFFFF 0 35%, rgba(200, 215, 255, .6) 55%, transparent 75%); width: 6px; height: 6px; }
+.goty-flames i { filter: blur(2px); will-change: transform, opacity; }
+/* the LIVE dot pulses on its own layer, so the banner behind it isn't redrawn every frame */
+.ev-live i { will-change: opacity; transform: translateZ(0); }
+.ev { contain: paint; }
+.ev-fx i { backface-visibility: hidden; }
+.ev-live i { animation: none; box-shadow: 0 0 0 2px rgba(255, 255, 255, .35); }

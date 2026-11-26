@@ -250,8 +250,8 @@ class Api:
                 """The app's own page, served from http://localhost so embedded Twitch and YouTube players accept it."""
                 rel = urllib.parse.unquote(self.path[4:].split("?", 1)[0]).strip("/") or "index.html"
                 parts = rel.split("/")
-                # the page's own files, and pictures in its img folder; nothing else, and never outside the ui folder
-                if len(parts) > 2 or (len(parts) == 2 and parts[0] != "img") or any(p in ("", ".", "..") for p in parts):
+                # the page's own files, its scripts (js) and pictures (img); nothing else, and never outside the ui folder
+                if len(parts) > 2 or (len(parts) == 2 and parts[0] not in ("img", "js")) or any(p in ("", ".", "..") for p in parts):
                     return self.send_error(404)
                 name = parts[-1]
                 types = {".html": "text/html; charset=utf-8", ".js": "text/javascript; charset=utf-8", ".css": "text/css; charset=utf-8",
