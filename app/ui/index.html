@@ -13,7 +13,7 @@
   <linearGradient id="mythFlame" x1="0" y1="1" x2="0" y2="0"><stop offset="0" stop-color="#1F4BFF"/><stop offset=".6" stop-color="#5FC8FF"/><stop offset="1" stop-color="#BFEAFF"/></linearGradient>
 </defs></svg>
 <div id="intro" class="intro"><canvas></canvas><div class="intro-name"><span>MASTERLOG</span><small>games · books · everything you've played</small></div></div>
-<canvas id="towers" aria-hidden="true"></canvas>
+<div id="towers" aria-hidden="true"></div>
 
 <header class="bar">
   <div class="brandbox">
@@ -48,6 +48,12 @@
   </div>
 </header>
 
+<div class="winctl" id="winctl" hidden>
+  <button type="button" data-win="min" title="Minimize" aria-label="Minimize"><svg viewBox="0 0 12 12"><path d="M1 6.5h10"/></svg></button>
+  <button type="button" data-win="max" title="Maximize" aria-label="Maximize"><svg viewBox="0 0 12 12"><rect x="1.5" y="1.5" width="9" height="9"/></svg></button>
+  <button type="button" data-win="close" class="close" title="Close" aria-label="Close"><svg viewBox="0 0 12 12"><path d="M2 2l8 8M10 2l-8 8"/></svg></button>
+</div>
+<div class="dragstrip" id="dragStrip" hidden></div>
 <button type="button" id="barPeek" class="barpeek" title="Show the top bar" aria-label="Show the top bar" aria-expanded="false"><svg viewBox="0 0 24 24" width="18" height="18"><path fill="currentColor" d="M7.4 8.6 12 13.2l4.6-4.6L18 10l-6 6-6-6z"/></svg></button>
 <div id="banner" class="banner" hidden></div>
 <main id="view"></main>
@@ -71,6 +77,7 @@
       <button type="button" data-stab="accounts">Accounts</button>
       <button type="button" data-stab="deals">Deals &amp; regions</button>
       <button type="button" data-stab="sound">Sound &amp; look</button>
+      <button type="button" data-stab="pad">Controller</button>
       <button type="button" data-stab="pcs">Your PCs</button>
       <button type="button" data-stab="about">About</button>
     </div>
@@ -164,7 +171,52 @@
       <label>Clicks and chimes <input type="range" name="fx_volume" min="0" max="1" step="0.05"></label>
       <label class="check"><input type="checkbox" name="intro"> Play the startup animation</label>
       <label class="check"><input type="checkbox" name="big_picture"> Start in Big Picture mode (borderless fullscreen; F11 or the controller's Start button toggles it)</label>
+      <label class="check"><input type="checkbox" name="smooth_scroll"> Smooth scrolling (takes effect after a restart)</label>
+      <label class="check win-only"><input type="checkbox" name="native_titlebar"> Use Windows' own title bar instead of Masterlog's (takes effect after a restart)</label>
       <p class="fine">Pick an audio file on this PC (MP3, OGG, M4A, WAV). If it carries intro and loop marks, the intro plays at startup and the rest loops seamlessly. The file stays on this PC. Ambience pauses when Masterlog isn't the window you're using.</p>
+    </div>
+
+    <div class="spane" data-spane="pad" hidden>
+      <div class="padnow" id="padNow"><span class="padglyph" aria-hidden="true"></span><div><b id="padName">No controller found</b><small id="padHelp">Plug one in or pair it, then press any button.</small></div></div>
+      <div class="padtest" id="padTest" aria-live="polite"></div>
+      <label>Right-stick scrolling speed <span class="padval" id="padScrollVal">1.0×</span>
+        <input type="range" name="pad_scroll" min="0.4" max="2.5" step="0.1"></label>
+      <h3 class="padh">Buttons</h3>
+      <table class="padmap"><thead><tr><th>Does</th><th>Xbox</th><th>PlayStation</th><th>Switch</th><th>Steam Deck</th></tr></thead><tbody>
+        <tr><td>Select, open</td><td>A</td><td>✕</td><td>B</td><td>A</td></tr>
+        <tr><td>Back, close</td><td>B</td><td>○</td><td>A</td><td>B</td></tr>
+        <tr><td>Options for the game you're on</td><td>X</td><td>□</td><td>Y</td><td>X</td></tr>
+        <tr><td>Search</td><td>Y</td><td>△</td><td>X</td><td>Y</td></tr>
+        <tr><td>Previous / next tab</td><td>LB / RB</td><td>L1 / R1</td><td>L / R</td><td>L1 / R1</td></tr>
+        <tr><td>Wishlist tabs, game panel tabs</td><td>LT / RT</td><td>L2 / R2</td><td>ZL / ZR</td><td>L2 / R2</td></tr>
+        <tr><td>Move</td><td colspan="4">Left stick or D-pad (hold to keep going)</td></tr>
+        <tr><td>Scroll</td><td colspan="4">Right stick</td></tr>
+        <tr><td>Games / Books</td><td>View</td><td>Share / Create</td><td>−</td><td>View</td></tr>
+        <tr><td>Big Picture</td><td>Menu</td><td>Options</td><td>+</td><td>Menu</td></tr>
+        <tr><td>Walk the shelves</td><td>Right stick click</td><td>R3</td><td>Right stick click</td><td>R3</td></tr>
+      </tbody></table>
+      <h3 class="padh">Setting one up</h3>
+      <details class="howto"><summary>Xbox controller</summary><ol>
+        <li>With a cable: plug it in. That's all.</li>
+        <li>Wireless: open Windows <b>Settings → Bluetooth &amp; devices → Add device → Bluetooth</b>, hold the small pair button on top of the controller until the Xbox button flashes fast, and pick it from the list. An Xbox Wireless Adapter works too.</li></ol></details>
+      <details class="howto"><summary>PlayStation: DualSense (PS5) or DualShock 4 (PS4)</summary><ol>
+        <li>With a USB cable it works straight away.</li>
+        <li>Wireless: in <b>Settings → Bluetooth &amp; devices → Add device → Bluetooth</b>, hold <b>PS</b> and <b>Create</b> (DualSense) or <b>PS</b> and <b>Share</b> (DualShock 4) until the light bar blinks, then pick <b>Wireless Controller</b>.</li>
+        <li>If buttons act strangely while Steam is open, Steam is translating the controller. Either add Masterlog to Steam (below) so Steam Input handles it properly, or turn off <b>PlayStation Controller Support</b> in Steam's Controller settings.</li></ol></details>
+      <details class="howto"><summary>Nintendo Switch Pro Controller or Joy-Con</summary><ol>
+        <li>Pro Controller: plug in with a USB-C cable, or pair over Bluetooth by holding the small sync button on top until the lights run.</li>
+        <li>Joy-Con: pair each one the same way. A single Joy-Con has too few buttons for everything; use both through Steam (below), which joins them into one controller.</li>
+        <li>Masterlog follows button positions, not letters: the bottom button (B on Nintendo) selects and the right one (A) goes back, like everywhere else on PC.</li></ol></details>
+      <details class="howto"><summary>Steam Deck or Steam Controller</summary><ol>
+        <li>In Steam, choose <b>Games → Add a Non-Steam Game to My Library</b>, pick Masterlog, and start Masterlog from Steam. Steam Input then presents the controller as an Xbox controller, so every button above works.</li>
+        <li>In the controller settings Steam shows for Masterlog, choose the <b>Gamepad</b> layout.</li>
+        <li>On the Steam Deck itself, use the Linux version of Masterlog: see <b>Masterlog on the Steam Deck</b> below.</li></ol></details>
+      <details class="howto" id="deckHowto"><summary>Masterlog on the Steam Deck</summary><ol>
+        <li>Switch the Deck to <b>Desktop Mode</b> (Steam button → Power → Switch to Desktop).</li>
+        <li>Open the <b>Releases</b> page (<button type="button" class="linkish" data-url="https://github.com/Breakinger/game-backlog/releases/latest">link</button>) in the browser and download <b>Masterlog-SteamDeck.AppImage</b>.</li>
+        <li>In the file manager, right-click it → <b>Properties → Permissions</b> → tick <b>Is executable</b>. Move it somewhere permanent, like your home folder.</li>
+        <li>Right-click it → <b>Add to Steam</b>. Go back to Gaming Mode; Masterlog is under Non-Steam in your library, controls and all.</li>
+        <li>To bring your library over, open Settings → Your PCs on your Windows PC and copy it across, or paste your sheet's Masterlog link on the Deck.</li></ol></details>
     </div>
 
     <div class="spane" data-spane="pcs" hidden>

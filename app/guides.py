@@ -3,6 +3,7 @@ import html
 import json
 import re
 import urllib.parse
+import urllib.error
 import urllib.request
 
 from art import _norm, similar
@@ -10,9 +11,19 @@ from art import _norm, similar
 UA = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/130.0 Safari/537.36"
 
 
+# Map Genie and some wikis sit behind a bot check that turns plain requests away; the app hands in a fetcher that
+# reads those pages through a hidden window of its own browser engine instead (read-only, these hosts only).
+BROWSER = None
+
+
 def _get(url, timeout=12):
-    with urllib.request.urlopen(urllib.request.Request(url, headers={"User-Agent": UA, "Accept-Language": "en-US,en;q=0.9"}), timeout=timeout) as r:
-        return r.read().decode("utf-8", "replace"), r.geturl()
+    try:
+        with urllib.request.urlopen(urllib.request.Request(url, headers={"User-Agent": UA, "Accept-Language": "en-US,en;q=0.9"}), timeout=timeout) as r:
+            return r.read().decode("utf-8", "replace"), r.geturl()
+    except urllib.error.HTTPError as e:
+        if e.code in (403, 429, 503) and BROWSER:
+            return BROWSER(url), url
+        raise
 
 
 def _base_words(name):
@@ -92,4 +103,25 @@ def mapgenie(name):
         title = re.search(r"<title>([^<]+)</title>", page)
         if maps:
             return {"game": html.unescape(title.group(1)).split("|")[0].strip() if title else name, "url": f"https://mapgenie.io/{slug}", "maps": maps[:16]}
+    return None
+
+
+def fextralife(name):
+    """Fextralife's wiki for the game (FromSoftware games, Baldur's Gate 3 and many RPGs have one)."""
+    w = _base_words(name)
+    full = "".join(w)
+    for slug in dict.fromkeys([full, "".join(re.findall(r"[a-z0-9]+", name.lower().replace("'", "")))]):
+        if not slug:
+            continue
+        try:
+            page, final = _get(f"https://{slug}.wiki.fextralife.com/")
+        except Exception:
+            continue
+        if "fextralife" not in urllib.parse.urlparse(final).netloc and "fextralife" not in page[:4000].lower():
+            continue
+        title = re.search(r"<title>([^<]+)</title>", page)
+        label = html.unescape(title.group(1)).split("|")[0].strip() if title else f"{name} Wiki"
+        if not similar(name, re.sub(r"\bwiki\b", "", label, flags=re.I)) >= 0.6 and _norm(name) not in _norm(label):
+            continue
+        return {"name": label, "url": f"https://{slug}.wiki.fextralife.com/"}
     return None

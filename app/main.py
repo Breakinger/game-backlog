@@ -20,6 +20,8 @@ import saver
 import secrets
 import youtube
 import feeds
+import family
+import chrome
 import deals
 import modpacks
 import pair
@@ -29,6 +31,7 @@ import socketserver
 import sheet
 import updater
 import vault
+import platforms
 from version import VERSION
 
 APP_NAME = "Masterlog"
@@ -36,7 +39,7 @@ OLD_NAME = "GameBacklog"
 
 
 def data_dir():
-    base = os.environ.get("APPDATA") or os.path.join(os.path.expanduser("~"), ".config")
+    base = os.environ.get("APPDATA") or os.environ.get("XDG_CONFIG_HOME") or os.path.join(os.path.expanduser("~"), ".config")
     d, old = os.path.join(base, APP_NAME), os.path.join(base, OLD_NAME)
     if not os.path.exists(d) and os.path.isdir(old):
         try:
@@ -55,12 +58,13 @@ def resource(rel):
 DEFAULTS = {"sheet_url": sheet.DEFAULT_SHEET, "sheet_key": "", "sgdb_key": "", "refresh_minutes": 2,
             "view_mode": "covers", "sound_on": True, "ambient_volume": 0.35, "fx_volume": 0.5, "intro": True,
             "heroic_linked": False, "big_picture": False, "ambience_path": "", "steam_cc": "GE", "ps_locale": "en-us",
-            "money": "native", "auto_names": True, "scale": 1, "ui_state": {}, "eshop_country": "DE"}
-PREFS = ("view_mode", "refresh_minutes", "sound_on", "ambient_volume", "fx_volume", "intro", "big_picture",
+            "money": "native", "auto_names": True, "scale": 1, "ui_state": {}, "eshop_country": "DE",
+            "native_titlebar": False, "smooth_scroll": True, "pad_scroll": 1.0}
+PREFS = ("native_titlebar", "pad_scroll", "smooth_scroll", "view_mode", "refresh_minutes", "sound_on", "ambient_volume", "fx_volume", "intro", "big_picture",
          "steam_cc", "ps_locale", "money", "auto_names", "scale", "ui_state", "eshop_country", "classic")
 PRIVATE = ("sgdb_key", "sheet_key", "ambience_path")
 # what stays with each PC when you copy Masterlog to another one
-MACHINE_ONLY = ("ambience_path", "heroic_linked", "big_picture", "state_meta", "pair_pending", "joined")
+MACHINE_ONLY = ("ambience_path", "heroic_linked", "big_picture", "state_meta", "pair_pending", "joined", "native_titlebar", "pad_scroll")
 # small things kept the same on all your PCs through your sheet's script (version 3)
 SHARED_PREFS = ("classic", "steam_cc", "ps_locale", "money", "auto_names", "eshop_country", "ranking")
 AUDIO_TYPES = {".mp3": "audio/mpeg", ".ogg": "audio/ogg", ".opus": "audio/ogg", ".m4a": "audio/mp4", ".aac": "audio/aac",
@@ -85,8 +89,10 @@ def audio_marks(path):
 class BrowserFetch:
     """Reads a Reddit listing through a hidden window of the app's own browser engine (Edge WebView2). Reddit turns away
     plain requests from apps but serves a normal browser, and since November 2025 it no longer hands out app IDs.
-    Only reddit.com pages are ever loaded here, and only to read public posts."""
-    HOSTS = ("www.reddit.com", "old.reddit.com")
+    Map Genie and some game wikis use the same kind of bot check, so their pages are read this way too.
+    Only those sites are ever loaded here, and only to read public pages."""
+    HOSTS = ("www.reddit.com", "old.reddit.com", "mapgenie.io", "store.steampowered.com")
+    HOST_SUFFIXES = (".fandom.com", ".wiki.fextralife.com")
 
     def __init__(self):
         self.lock = threading.Lock()
@@ -97,8 +103,8 @@ class BrowserFetch:
     def get(self, url, timeout=25):
         import webview
         u = urllib.parse.urlsplit(url)
-        if u.scheme != "https" or u.netloc not in self.HOSTS:
-            raise ValueError("only Reddit pages are read this way")
+        if u.scheme != "https" or not (u.netloc in self.HOSTS or u.netloc.endswith(self.HOST_SUFFIXES)):
+            raise ValueError("only Reddit, Map Genie and game wiki pages are read this way")
         origin = f"https://{u.netloc}"
         with self.lock:
             if self.win is None or self.origin != origin:
@@ -114,7 +120,7 @@ class BrowserFetch:
                     raise TimeoutError("Reddit didn't load")
             path = url[len(origin):]
             # same-origin fetch inside the page, so it goes out exactly like the browser's own request
-            self.win.evaluate_js("window.__ml = null; fetch(" + json.dumps(path) + ", {credentials: 'include', headers: {Accept: 'application/json'}})"
+            self.win.evaluate_js("window.__ml = null; fetch(" + json.dumps(path) + ", {credentials: 'include', headers: {Accept: " + json.dumps("application/json" if "reddit" in u.netloc else "text/html,application/json,*/*") + "}})"
                                  ".then(r => r.ok ? r.text() : Promise.reject('HTTP ' + r.status))"
                                  ".then(t => { window.__ml = {ok: true, t: t}; }).catch(e => { window.__ml = {ok: false, e: String(e)}; }); 1")
             end = time.time() + timeout
@@ -182,7 +188,11 @@ class Api:
         self._info.youtube_key = lambda: (self._vault.get("youtube") or {}).get("key")
         self._feeds = feeds.Feeds()
         feeds.REDDIT_APP["id"] = (self._vault.get("reddit") or {}).get("id")
-        feeds.BROWSER_FETCH["fn"] = BrowserFetch().get
+        self._family = family.Family(self._dir, self._vault)
+        self._browser = BrowserFetch()
+        feeds.BROWSER_FETCH["fn"] = self._browser.get
+        import guides
+        guides.BROWSER = self._browser.get
         self._twitch = twitch.Twitch(self._igdb)
         self._deals = deals.Deals(self._art, self._dir)
         self._deals.ebay = deals.Ebay(self._vault)
@@ -567,13 +577,41 @@ class Api:
             if not n:
                 continue
             plat = self._guess_platform(n)
+            live = self._is_live_service(n)
             try:
-                out = client.add("games", {"name": n, "status": "Completed", "platform": plat, "format": "Digital",
-                                           "notes": "Added from your Top 100"})
-                added.append({"name": n, "platform": plat, "row": out.get("row")})
+                if live:   # a live-service game is never "finished"; it goes in your library as one
+                    out = client.add("games", {"name": n, "status": "Library", "platform": plat, "format": "Digital",
+                                               "type": "Live service", "notes": "Added from your Top 100"})
+                else:
+                    out = client.add("games", {"name": n, "status": "Completed", "platform": plat, "format": "Digital",
+                                               "notes": "Added from your Top 100"}, finished_unknown=True)
+                added.append({"name": n, "platform": plat, "row": out.get("row"), "live": live})
             except Exception as e:
                 failed.append({"name": n, "error": str(e)})
         return {"added": added, "failed": failed}
+
+    LIVE_SERVICE = {"rainbow six siege", "tom clancys rainbow six siege", "fortnite", "apex legends", "warframe", "destiny 2",
+                    "counter strike 2", "counter strike global offensive", "dota 2", "valorant", "league of legends", "overwatch 2",
+                    "overwatch", "pubg battlegrounds", "playerunknowns battlegrounds", "rocket league", "team fortress 2",
+                    "world of warcraft", "final fantasy xiv online", "final fantasy xiv", "path of exile", "path of exile 2",
+                    "marvel rivals", "the finals", "deadlock", "dead by daylight", "sea of thieves", "call of duty warzone",
+                    "gta online", "grand theft auto online", "runescape", "old school runescape", "minecraft", "roblox",
+                    "genshin impact", "honkai star rail", "the elder scrolls online", "guild wars 2", "black desert",
+                    "escape from tarkov", "hunt showdown", "hunt showdown 1896", "smite", "smite 2", "paladins", "splitgate",
+                    "battlefield 2042", "helldivers 2", "lost ark", "new world", "star wars the old republic", "eve online"}
+
+    def _is_live_service(self, name):
+        if info._norm(name) in {info._norm(x) for x in self.LIVE_SERVICE}:
+            return True
+        try:   # Steam: an online-only game with no single-player is played, not finished
+            appid = self._art.steam_appid(name)
+            d = info.steam_details(appid) if appid else None
+            cats = {c.get("description", "").lower() for c in (d or {}).get("categories") or []}
+            genres = {g.get("description", "").lower() for g in (d or {}).get("genres") or []}
+            return bool(cats) and "single-player" not in cats and ("massively multiplayer" in genres or "free to play" in genres
+                                                                  or "online pvp" in cats or "mmo" in cats)
+        except Exception:
+            return False
 
     def add(self, tab, values):
         client = self._script()
@@ -1111,6 +1149,74 @@ class Api:
         return {"ok": True}
 
     # ----- pages opened inside Masterlog (wikis, maps, itch.io) -----
+    # ----- Steam Family -----
+    def steam_family(self):
+        """The shared library, refreshed in the background when it's older than six hours."""
+        fam = self._family
+        if fam.linked() and time.time() - (fam.data.get("t") or 0) > 6 * 3600 and not getattr(self, "_family_busy", False):
+            threading.Thread(target=self._family_refresh, daemon=True).start()
+        return fam.view()
+
+    def _family_refresh(self):
+        self._family_busy = True
+        try:
+            if not self._family.token():
+                self._family_renew()
+            key = (self._vault.get("steam") or {}).get("key")
+            self._family.refresh(key)
+        except Exception:
+            pass
+        finally:
+            self._family_busy = False
+
+    def _family_renew(self):
+        """A fresh token from the store, using the sign-in this PC's Masterlog windows remember."""
+        try:
+            tok = family.token_from_config(self._browser.get(family.CONFIG_URL))
+            if tok:
+                self._family.save_token(tok)
+                return True
+        except Exception:
+            pass
+        return False
+
+    def steam_family_link(self):
+        """Opens the Steam store's own sign-in page in a Masterlog window; once you're signed in, the window reads
+        the store's web token and closes. Your password goes only to Steam."""
+        import webview
+        if self._family_renew():
+            threading.Thread(target=self._family_refresh, daemon=True).start()
+            return {"ok": True, "done": True}
+        win = webview.create_window("Sign in to Steam · Masterlog", family.LOGIN_URL, width=980, height=780, background_color="#171A21")
+
+        def watch():
+            end = time.time() + 15 * 60
+            while time.time() < end:
+                time.sleep(1.5)
+                try:
+                    url = win.get_current_url() or ""
+                except Exception:
+                    return   # the window was closed
+                if url.startswith(family.CONFIG_URL):
+                    try:
+                        tok = family.token_from_config(win.evaluate_js("document.body ? document.body.innerText : ''"))
+                    except Exception:
+                        tok = None
+                    if tok:
+                        self._family.save_token(tok)
+                        try:
+                            win.destroy()
+                        except Exception:
+                            pass
+                        self._family_refresh()
+                        return
+        threading.Thread(target=watch, daemon=True).start()
+        return {"ok": True, "done": False}
+
+    def steam_family_unlink(self):
+        self._family.forget()
+        return True
+
     def open_inside(self, url, title="Masterlog"):
         """Opens a web page in its own Masterlog window (wikis and maps work fine there, unlike in an embedded frame)."""
         import webview
@@ -1207,16 +1313,25 @@ class Api:
         return _safe(self._info.updated, games) or {}
 
     def awards(self, game):
-        """Awards the game won in real life (Wikipedia's accolades), for the All Time Classic."""
+        """Real-world wins and nominations: The Game Awards first, then the Golden Joysticks, BAFTA and the Steam Awards."""
+        import lore
         name = (game or {}).get("name", "")
         key = info._norm(name)
-        hit = self._info.cache.get("awards", key)
+        hit = self._info.cache.get("awards2", key)
         if hit is not None:
             return hit
-        out = _safe(info.awards, name)
-        if out is not None:
-            self._info.cache.put("awards", key, out)
-        return out or {"wins": [], "goty": 0, "nominations": 0}
+        year = None
+        try:
+            m = re.search(r"(19|20)\d\d", str((self._info.about(game) or {}).get("release") or ""))
+            year = int(m.group(0)) if m else None
+        except Exception:
+            pass
+        try:
+            out = lore.awards(name, year)
+        except Exception:
+            return {"ceremonies": [], "wins": 0, "noms": 0, "goty": 0, "error": True}
+        self._info.cache.put("awards2", key, out)
+        return out
 
     def book_info(self, book):
         return _safe(self._info.book, book)
@@ -1227,13 +1342,24 @@ class Api:
 
     def open(self, url):
         try:
-            if sys.platform == "win32":
-                os.startfile(url)  # handles steam://, heroic:// and normal links
-            else:
-                webbrowser.open(url)
+            platforms.open_url(url)  # handles steam://, heroic:// and normal links
             return True
         except Exception as e:
             return str(e)
+
+    def open_path(self, path):
+        """Opens a save or settings folder from the Wiki tab. Only folders that exist on this PC; the part of the path
+        PCGamingWiki leaves as a placeholder (like <user id>) is dropped, so the game's own folder opens."""
+        if sys.platform != "win32" or not isinstance(path, str) or len(path) > 400:
+            return "Only on Windows."
+        p = re.split(r"[<>]", path, 1)[0]
+        p = os.path.expandvars(p.replace("/", "\\")).rstrip("\\ ")
+        if "%" in p or not os.path.isabs(p):
+            return "That folder isn't on this PC."
+        if not os.path.isdir(p) or len(p) <= 3:
+            return "That folder isn't on this PC."
+        os.startfile(p)
+        return True
 
     def open_sheet(self):
         link = self._settings.get("sheet_url") or ""
@@ -1247,7 +1373,62 @@ class Api:
             return False
         self._window.toggle_fullscreen()
         self._fullscreen = not getattr(self, "_fullscreen", bool(self._settings.get("big_picture")))
+        if not self._fullscreen and getattr(self, "_chrome", None) and self._chrome.applied:
+            threading.Timer(0.4, self._chrome.apply).start()   # leaving fullscreen brings the caption back
         return self._fullscreen
+
+    # ----- Masterlog's own title bar (Windows) -----
+    def _setup_chrome(self, *_):
+        self._chrome = chrome.Chrome(self._window)
+        if self._settings.get("native_titlebar") or self._fullscreen:
+            self._chrome.tint()
+            return
+        if not self._chrome.apply():
+            self._chrome.tint()
+
+    # ----- which system Masterlog runs on, and controllers on Linux -----
+    def platform_info(self):
+        return {"os": "windows" if platforms.WINDOWS else "linux" if platforms.LINUX else sys.platform,
+                "deck": platforms.on_deck(), "game_mode": platforms.game_mode(),
+                "native_pad": platforms.LINUX, "appimage": bool(platforms.appimage())}
+
+    def pad_state(self):
+        """Linux only: the controller as the page's gamepad code expects it (see linuxpad)."""
+        if not platforms.LINUX:
+            return None
+        if getattr(self, "_pads", None) is None:
+            import linuxpad
+            self._pads = linuxpad.Pads()
+        try:
+            return self._pads.state()
+        except Exception:
+            return None
+
+    def window_chrome(self):
+        c = getattr(self, "_chrome", None)
+        return {"custom": bool(c and c.applied), "max": bool(c and c.maximized()), "native_pref": bool(self._settings.get("native_titlebar")),
+                "windows": sys.platform == "win32"}
+
+    def win_drag(self):
+        c = getattr(self, "_chrome", None)
+        return bool(c and c.applied and c.drag())
+
+    def win_min(self):
+        c = getattr(self, "_chrome", None)
+        if c:
+            c.minimize()
+        elif self._window:
+            self._window.minimize()
+        return True
+
+    def win_max(self):
+        c = getattr(self, "_chrome", None)
+        return c.toggle_max() if c else False
+
+    def win_close(self):
+        if self._window:
+            self._window.destroy()
+        return True
 
     # ----- the sheet's connection script keeps itself up to date (version 6 and later) -----
     def _script_bundled(self):
@@ -1391,12 +1572,7 @@ class Api:
 
     def restart_app(self):
         """After copying from another PC: start again so every account and key is picked up."""
-        if getattr(sys, "frozen", False):
-            env = {k: v for k, v in os.environ.items() if not k.startswith(("_PYI", "_MEI"))}
-            env["PYINSTALLER_RESET_ENVIRONMENT"] = "1"
-            import subprocess
-            subprocess.Popen([sys.executable], cwd=os.path.dirname(sys.executable), env=env,
-                             creationflags=0x00000008 | 0x00000200, close_fds=True)
+        if platforms.relaunch():
             threading.Timer(0.6, self._quit).start()
         return True
 
@@ -1409,7 +1585,7 @@ class Api:
                "files": self._files_local()}
         sync = (self._vault.get("sync") or {}).get("key")
         if sync:
-            secret = {k: v for k, v in self._vault._data.items() if k not in ("sync", "device")}
+            secret = {k: v for k, v in self._vault._data.items() if k not in ("sync", "device", "steam_family")}
             if self._settings.get("sgdb_key"):
                 secret["_sgdb"] = self._settings["sgdb_key"]          # the SteamGridDB key travels the same sealed way
             out["secrets"] = {"blob": base64.b64encode(pair.seal(base64.b64decode(sync), secret, b"masterlog secrets")).decode(),
@@ -1587,20 +1763,48 @@ def _safe(fn, *a):
         return None
 
 
+def selftest():
+    """CI check for the built app: the GUI toolkit and every module it needs are inside the bundle."""
+    if platforms.LINUX:
+        os.environ.setdefault("QT_API", "pyqt6")
+    import webview  # noqa: F401
+    if platforms.LINUX:
+        from webview.platforms import qt  # noqa: F401  (Qt WebEngine)
+    print("selftest ok", VERSION, sys.platform)
+    return 0
+
+
 def main():
-    # let the startup sound and ambience play without waiting for a click
-    os.environ.setdefault("WEBVIEW2_ADDITIONAL_BROWSER_ARGUMENTS", "--autoplay-policy=no-user-gesture-required")
-    import webview  # imported here so the rest can be tested without a GUI
+    if "--selftest" in sys.argv:
+        sys.exit(selftest())
     api = Api()
+    # let the startup sound and ambience play without waiting for a click; scroll smoothly on the graphics card
+    flags = ["--autoplay-policy=no-user-gesture-required",
+             "--disable-smooth-scrolling" if api._settings.get("smooth_scroll") is False else "--enable-smooth-scrolling"]
+    os.environ.setdefault("WEBVIEW2_ADDITIONAL_BROWSER_ARGUMENTS", " ".join(flags))
+    if platforms.LINUX:
+        # Qt WebEngine (Chromium) draws the page; the controller is read straight from the system (linuxpad)
+        os.environ.setdefault("QTWEBENGINE_CHROMIUM_FLAGS", " ".join(flags + ["--enable-gpu-rasterization", "--ignore-gpu-blocklist"]))
+        os.environ.setdefault("QT_QPA_PLATFORM", "xcb")   # Gaming Mode runs X apps through XWayland
+        os.environ.setdefault("QT_API", "pyqt6")
+    import webview  # imported here so the rest can be tested without a GUI
     ui_url = getattr(api, "_ui_url", None)
+    # on the Steam Deck's Gaming Mode the app fills the screen, like a game
+    full = bool(api._settings.get("big_picture")) or platforms.game_mode()
+    # zoomable: without it the window adds a wheel listener of its own, which takes every scroll off the
+    # graphics card and onto the page's main thread, and scrolling stutters whenever the page is busy
     api._window = webview.create_window(
         "Masterlog", ui_url or resource(os.path.join("ui", "index.html")), js_api=api,
-        width=1480, height=920, min_size=(1100, 700), background_color="#0A1430",
-        fullscreen=bool(api._settings.get("big_picture")),
+        width=1480, height=920, min_size=(1024, 640) if platforms.LINUX else (1100, 700), background_color="#0A1430",
+        fullscreen=full, zoomable=True,
     )
-    api._fullscreen = bool(api._settings.get("big_picture"))
+    api._fullscreen = full
+    if platforms.WINDOWS:
+        api._window.events.shown += api._setup_chrome
     # served over http://127.0.0.1 rather than file://, so embedded YouTube trailers know where they're playing
-    webview.start(gui="edgechromium" if sys.platform == "win32" else None, http_server=not ui_url)
+    # windows remember sign-ins (Steam Family, Reddit) between runs, in a profile inside the app's own data folder
+    webview.start(gui="edgechromium" if platforms.WINDOWS else "qt" if platforms.LINUX else None, http_server=not ui_url,
+                  private_mode=False, storage_path=os.path.join(api._dir, "webview"))
 
 
 if __name__ == "__main__":

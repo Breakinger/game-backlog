@@ -143,7 +143,7 @@ function read_() {
     plays: table_('plays'),
     books: table_('books'),
     ranking: ranking_(),
-    script: 6,
+    script: 7,
   };
 }
 
@@ -232,6 +232,12 @@ function add_(p) {
   }
   if (!row) { sh.insertRowAfter(sh.getMaxRows()); row = sh.getMaxRows(); }
   const skipped = write_(sh, row, h, p.values);
+  // a game you finished long ago (added from your Top 100, say): don't let the sheet stamp today as its finish date
+  if (p.finished_unknown) {
+    const headers = sh.getRange(h, 1, 1, sh.getLastColumn()).getDisplayValues()[0];
+    const c = headers.findIndex(x => /completed/i.test(x));
+    if (c >= 0) sh.getRange(row, c + 1).setValue('unknown date');
+  }
   return { ok: true, row: row, skipped: skipped };
 }
 

@@ -8,8 +8,11 @@ on:
 permissions:
   contents: write
 
+env:
+  IMPORTS: "import sheet, art, info, igdb, updater, vault, accounts, youtube, feeds, deals, modpacks, twitch, saver, names, guides, pair, lore, family, chrome, platforms, main, version"
+
 jobs:
-  build:
+  windows:
     runs-on: windows-latest
     steps:
       - uses: actions/checkout@v4
@@ -28,7 +31,8 @@ jobs:
         run: echo "VERSION = \"1.0.${{ github.run_number }}\"" > app/version.py
 
       - name: Check the app imports
-        run: python -c "import sys; sys.path.insert(0, 'app'); import sheet, art, info, igdb, updater, vault, accounts, youtube, feeds, deals, modpacks, twitch, saver, names, guides, pair, main, version; print('imports ok', version.VERSION)"
+        shell: bash
+        run: python -c "import sys; sys.path.insert(0, 'app'); ${IMPORTS}; print('imports ok', version.VERSION)"
 
       - name: Build the exe
         run: pyinstaller --noconfirm --onefile --windowed --name Masterlog --icon assets/icon.ico --add-data "app/ui;ui" --add-data "app/top100.txt;." --paths app app/main.py
@@ -36,15 +40,85 @@ jobs:
       - name: Upload build
         uses: actions/upload-artifact@v4
         with:
-          name: Masterlog
+          name: windows
           path: dist/Masterlog.exe
 
+  steamdeck:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install system libraries Qt needs
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends libegl1 libgl1 libxkbcommon0 libxkbcommon-x11-0 libxcb-cursor0 libxcb-icccm4 \
+            libxcb-keysyms1 libxcb-shape0 libxcb-xinerama0 libxcb-randr0 libxcb-render-util0 libxcb-image0 libxcb-xkb1 \
+            libnss3 libxcomposite1 libxdamage1 libxrandr2 libxtst6 libxkbfile1 libasound2t64 libdbus-1-3 libfontconfig1 desktop-file-utils
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+
+      - name: Stamp the version
+        run: echo "VERSION = \"1.0.${{ github.run_number }}\"" > app/version.py
+
+      - name: Check the app imports
+        run: python -c "import sys; sys.path.insert(0, 'app'); ${IMPORTS}; import linuxpad; print('imports ok', version.VERSION)"
+
+      - name: Build the app
+        run: |
+          pyinstaller --noconfirm --onedir --windowed --name Masterlog --add-data "app/ui:ui" --add-data "app/top100.txt:." --paths app \
+            --collect-data webview --hidden-import webview.platforms.qt --hidden-import qtpy --hidden-import linuxpad app/main.py
+
+      - name: Check the built app starts its toolkit
+        env:
+          QT_QPA_PLATFORM: offscreen
+        run: dist/Masterlog/Masterlog --selftest
+
+      - name: Pack it as an AppImage
+        run: |
+          mkdir -p AppDir/usr/bin
+          cp -a dist/Masterlog/. AppDir/usr/bin/
+          cat > AppDir/AppRun <<'SH'
+          #!/bin/sh
+          HERE="$(dirname "$(readlink -f "$0")")"
+          exec "$HERE/usr/bin/Masterlog" "$@"
+          SH
+          chmod +x AppDir/AppRun
+          printf '[Desktop Entry]\nType=Application\nName=Masterlog\nComment=Your games and books backlog\nExec=Masterlog\nIcon=masterlog\nCategories=Game;\nTerminal=false\n' > AppDir/masterlog.desktop
+          python -c "from PIL import Image; Image.open('assets/icon.png').convert('RGBA').resize((256, 256)).save('AppDir/masterlog.png')"
+          cp AppDir/masterlog.png AppDir/.DirIcon
+          curl -fsSL -o appimagetool https://github.com/AppImage/appimagetool/releases/download/continuous/appimagetool-x86_64.AppImage
+          chmod +x appimagetool
+          ARCH=x86_64 APPIMAGE_EXTRACT_AND_RUN=1 ./appimagetool --no-appstream AppDir dist/Masterlog-SteamDeck.AppImage
+          ls -la dist/Masterlog-SteamDeck.AppImage
+
+      - name: Upload build
+        uses: actions/upload-artifact@v4
+        with:
+          name: steamdeck
+          path: dist/Masterlog-SteamDeck.AppImage
+
+  release:
+    needs: [windows, steamdeck]
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          path: dist
+          merge-multiple: true
+
       - name: Publish release
-        shell: bash
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
           cp dist/Masterlog.exe dist/GameBacklog.exe   # older builds update themselves from this name
-          gh release create "v1.0.${{ github.run_number }}" dist/Masterlog.exe dist/GameBacklog.exe \
+          gh release create "v1.0.${{ github.run_number }}" dist/Masterlog.exe dist/GameBacklog.exe dist/Masterlog-SteamDeck.AppImage \
+            --repo "${{ github.repository }}" \
             --title "Masterlog v1.0.${{ github.run_number }}" \
-            --notes "Already have the app? Click Update in its top bar. New here? Download Masterlog.exe below and run it; no install needed. If Windows SmartScreen warns you, click More info, then Run anyway (the app isn't signed)."
+            --notes "Already have the app? Click Update in its top bar. New here on Windows? Download Masterlog.exe below and run it; no install needed. If Windows SmartScreen warns you, click More info, then Run anyway (the app isn't signed). On a Steam Deck, download Masterlog-SteamDeck.AppImage in Desktop Mode (Masterlog's Settings, Controller tab, has the steps)."

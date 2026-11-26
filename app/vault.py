@@ -46,7 +46,61 @@ if sys.platform == "win32":
             return ctypes.string_at(out.pbData, out.cbData)
         finally:
             _kernel32.LocalFree(out.pbData)
-else:  # development only; the shipped app is Windows
+elif sys.platform.startswith("linux"):
+    # Linux (Steam Deck): AES-256-GCM with a key kept outside the app's data folder, readable only by your user
+    # account (like ~/.ssh), and bound to this machine's ID, so a copy of the vault on another machine or account
+    # can't be opened.
+    from cryptography.hazmat.primitives.ciphers.aead import AESGCM
+    from cryptography.hazmat.primitives.kdf.hkdf import HKDF
+    from cryptography.hazmat.primitives import hashes
+
+    _MAGIC = b"MLV1"
+
+    def _key_file():
+        base = os.environ.get("XDG_DATA_HOME") or os.path.join(os.path.expanduser("~"), ".local", "share")
+        d = os.path.join(base, "masterlog-keys")
+        os.makedirs(d, mode=0o700, exist_ok=True)
+        try:
+            os.chmod(d, 0o700)
+        except OSError:
+            pass
+        return os.path.join(d, "vault.key")
+
+    def _machine_id():
+        for p in ("/etc/machine-id", "/var/lib/dbus/machine-id"):
+            try:
+                with open(p, "rb") as f:
+                    v = f.read().strip()
+                    if v:
+                        return v
+            except OSError:
+                pass
+        return b"no-machine-id"
+
+    def _key():
+        path = _key_file()
+        try:
+            with open(path, "rb") as f:
+                secret = f.read()
+        except FileNotFoundError:
+            secret = os.urandom(32)
+            fd = os.open(path, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600)
+            with os.fdopen(fd, "wb") as f:
+                f.write(secret)
+        if len(secret) != 32:
+            raise OSError("The vault key is damaged.")
+        info = b"Masterlog/vault/v1|" + _machine_id() + b"|" + str(os.getuid()).encode()
+        return HKDF(algorithm=hashes.SHA256(), length=32, salt=None, info=info).derive(secret)
+
+    def _protect(data: bytes) -> bytes:
+        nonce = os.urandom(12)
+        return _MAGIC + nonce + AESGCM(_key()).encrypt(nonce, data, _MAGIC)
+
+    def _unprotect(data: bytes) -> bytes:
+        if not data.startswith(_MAGIC):
+            raise OSError("Not a Masterlog vault.")
+        return AESGCM(_key()).decrypt(data[4:16], data[16:], _MAGIC)
+else:  # development only (macOS and other systems aren't shipped)
     def _protect(data: bytes) -> bytes:
         return b"DEV:" + base64.b64encode(data)
 
@@ -78,7 +132,8 @@ class Vault:
                 self._data[key] = value
             blob = _protect(json.dumps(self._data).encode("utf-8"))
             tmp = self.path + ".tmp"
-            with open(tmp, "wb") as f:
+            fd = os.open(tmp, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
+            with os.fdopen(fd, "wb") as f:
                 f.write(blob)
             os.replace(tmp, self.path)
 

@@ -27,9 +27,10 @@ const GROUP_LABEL = { "Heroic": "Heroic (Epic + GOG)", "Exiled": "Exiled (EA + U
 const groupOf = p => GROUPS[p] || p;
 const PRIO_ORDER = { Extreme: 0, High: 1, Medium: 2, Low: 3 };
 const PRIO_COLOR = { Extreme: "#FF5C93", High: "#FF8A3D", Medium: "#FFC94D", Low: "#8B97B3" };
-const STATUS_COLOR = { Library: "#8F9BB3", Playing: "#4DABF7", Paused: "#FFB547", Wishlist: "#9775FA", Completed: "#5BD38A", Dropped: "#FF6B6B", "Second chance": "#FF922B",
+const STATUS_COLOR = { Family: "#66C0F4", Library: "#8F9BB3", Playing: "#4DABF7", Paused: "#FFB547", Wishlist: "#9775FA", Completed: "#5BD38A", Dropped: "#FF6B6B", "Second chance": "#FF922B",
   "To read": "#8F9BB3", Reading: "#4DABF7", Read: "#5BD38A" };
 const CONSOLES = new Set(["PS5", "PS4", "PS2", "Switch 2", "Switch"]);
+const IS_WINDOWS = /Windows/.test(navigator.userAgent);
 const UPGRADE_TO = { PS4: "PS5", Switch: "Switch 2" };
 const FALLBACK_OPTIONS = {
   games: { status: ["Library", "Playing", "Paused", "Wishlist", "Completed", "Dropped"], priority: ["Extreme", "High", "Medium", "Low"],
@@ -162,7 +163,62 @@ function drainLazy(root) {
   };
   if (jobs.length) later(step);
 }
-function findItem(kind, id) { return kind === "book" ? state.books.find(x => x.id === +id) : (state.games.find(x => x.id === +id) || accountCopies().find(x => x.id === +id)); }
+function findItem(kind, id) { return kind === "book" ? state.books.find(x => x.id === +id) : (state.games.find(x => x.id === +id) || accountCopies().find(x => x.id === +id) || familyItems().find(x => x.id === +id)); }
+/* ----- Steam Family: games other members share with you (not in your sheet; read-only) ----- */
+const familyState = { data: null, key: "", items: [] };
+function familyItems() {
+  const d = familyState.data;
+  if (!d?.apps?.length) return [];
+  const k = d.t + ":" + d.apps.length + ":" + state.games.length;
+  if (familyState.key === k) return familyState.items;
+  const mine = new Set(state.games.map(g => rankKey(g.name)));
+  familyState.items = d.apps.filter(a => !mine.has(rankKey(a.name))).map((a, i) => ({
+    id: 900000 + i, row: -1, name: a.name, platform: "Steam", format: "Digital", status: "Family", family: true, appid: a.appid,
+    owners: a.owners, priority: "", type: "", beaten_on: [], hours: a.playtime ? Math.round(a.playtime / 6) / 10 : null }));
+  familyState.key = k;
+  return familyState.items;
+}
+/* ---------- Masterlog's own title bar (Windows): drag the top bar, double-click it to maximize ---------- */
+async function setupChrome() {
+  const c = await Promise.resolve(api?.window_chrome?.()).catch(() => null);
+  if (!c?.custom) { if (c && !c.native_pref && c.windows && !setupChrome.tries) { setupChrome.tries = 1; setTimeout(setupChrome, 1500); } return; }
+  document.body.classList.add("chrome");
+  $("#winctl").hidden = false; $("#dragStrip").hidden = false;
+  const paintMax = m => { document.body.classList.toggle("win-max", !!m); $('#winctl [data-win="max"]').title = m ? "Restore" : "Maximize"; };
+  paintMax(c.max);
+  if (setupChrome.bound) return;
+  setupChrome.bound = true;
+  $("#winctl").addEventListener("click", async e => {
+    const b = e.target.closest("[data-win]"); if (!b) return;
+    if (b.dataset.win === "min") api.win_min();
+    if (b.dataset.win === "max") paintMax(await api.win_max());
+    if (b.dataset.win === "close") api.win_close();
+  });
+  const draggable = t => !t.closest("button, a, input, select, textarea, label, [role=tab], [data-url], .catalog, .tab, .clock, .sync");
+  const down = e => {
+    if (e.button !== 0 || !draggable(e.target)) return;
+    if (e.detail === 2) { e.preventDefault(); Promise.resolve(api.win_max()).then(paintMax); return; }
+    api.win_drag();
+  };
+  document.querySelector(".bar").addEventListener("mousedown", down);
+  $("#dragStrip").addEventListener("mousedown", down);
+  addEventListener("resize", () => { clearTimeout(setupChrome.rt); setupChrome.rt = setTimeout(async () => { const s = await Promise.resolve(api.window_chrome()).catch(() => null); if (s) paintMax(s.max); }, 200); });
+}
+async function addFamilyGame(g) {
+  const r = await Promise.resolve(api?.add("games", { name: g.name, status: "Library", platform: "Steam", format: "Digital", notes: `Shared through Steam Family by ${(g.owners || []).join(", ")}` })).catch(e => ({ error: String(e) }));
+  if (!r || r.error) return toast(`Couldn't add it: ${r?.error || "no connection"}`, "err");
+  try { FX.play.save(); } catch {}
+  toast(`${g.name} added to your library.`, "ok");
+  if (panelItem?.id === g.id) closePanel();
+  sync(true);
+}
+async function loadFamily() {
+  const d = await Promise.resolve(api?.steam_family?.()).catch(() => null);
+  if (!d) return;
+  const changed = JSON.stringify(d.apps?.length) + d.t !== JSON.stringify(familyState.data?.apps?.length) + familyState.data?.t;
+  familyState.data = d;
+  if (changed && d.apps?.length && ["home", "library"].includes(state.view)) render();
+}
 
 /* ---------- the game case ---------- */
 function upgradeLabel(g) {
@@ -185,14 +241,14 @@ function caseHTML(g, o = {}) {
   else if (g.status === "Dropped") badge = `<span class="badge drop">✗</span>`;
   else if (g.priority === "Extreme" || g.priority === "High") badge = `<span class="badge" style="color:${PRIO_COLOR[g.priority]}">${g.priority}</span>`;
   const rkn = rankOf(g);
-  const rankChip = rkn && rkn > 10 ? `<span class="rankchip t-${rankTier(rkn)}" title="${TIER_NAME[rankTier(rkn)]} · #${rkn} in your Top 100">#${rkn}</span>` : "";
+  const medals = medalsHTML(g);
   const fresh = state.updated[g.name] ? `<span class="freshline" title="${esc(state.updated[g.name].title || "")}"><i></i>Newly updated!</span>` : "";
   const upOwned = g.upgrade_owned || factsOf(g).ps5_version;
   const up = g.upgrade && UPGRADE_TO[g.platform] && g.upgrade !== "No upgrade" ? `<span class="tag up ${upOwned ? "owned" : g.upgrade.startsWith("Free") ? "free" : "paid"}" title="${esc(upgradeLabel(g))}${upOwned ? " · you own the upgrade" : ""}">${upOwned ? `${esc(UPGRADE_TO[g.platform].replace("PlayStation ", "PS").replace("Nintendo ", ""))} ✓` : `${g.upgrade.startsWith("Free") ? "FREE" : "PAID"} ↑`}</span>` : "";
   const cached = covers.get(coverKey(g));
   const art = cached ? `<img alt="" decoding="async" src="${cached}">` : `<div class="fallback"><div class="t">${esc(g.name)}</div><div class="d">${esc(g.developer || g.genre || "")}</div></div>`;
   const deck = g.platform === "Steam" && g.play_on === "Steam Deck" ? emblem("deck") : p.tag ? `<span class="tag">${p.tag}</span>` : "";
-  const typeTag = g.type === "Live service" ? `<span class="typetag live"><i></i>LIVE</span>` : g.type === "Modded" ? `<span class="typetag mod">MODDED</span>` : "";
+  const typeTag = g.family ? `<span class="typetag fam">FAMILY</span>` : g.type === "Live service" ? `<span class="typetag live"><i></i>LIVE</span>` : g.type === "Modded" ? `<span class="typetag mod">MODDED</span>` : "";
   const ach = achBadge(g);
   const quick = !o.noLabel ? quickBtn(g) : "";
   const media = p.media === "card"
@@ -200,19 +256,33 @@ function caseHTML(g, o = {}) {
     : `<div class="media disc ${p.disc || ""}"><div class="disc-face"></div></div>`;
   const dups = (dupsOf.get(g) || []).slice(0, 3);
   const stack = dups.length ? `<div class="fancards" aria-hidden="true">${dups.map((d, i) => { const dp = plat(d.platform), c = covers.get(coverKey(d)) || covers.get(coverKey(g)); return `<i style="--i:${i + 1};--n:${dups.length};--dc:${dp.band};--dt:${dp.text || "#fff"};--ds:${dp.shell || "#10162A"}"><em>${esc(dp.label)}</em>${c ? `<img alt="" src="${c}">` : ""}</i>`; }).join("")}</div><span class="copies" title="${esc(dups.map(d => `${d.name} (${plat(d.platform).label}, ${d.status})`).join(" · "))}">×${dups.length + 1}</span>` : "";
-  return `<button class="case p-${(g.platform || "x").replace(/\W+/g, "")} ${g.status === "Wishlist" ? "unowned" : ""} ${dups.length ? "stacked" : ""} ${effectClass(g)} ${ach ? "honored" : ""}" data-id="${g.id}" data-kind="game"
+  return `<button class="case p-${(g.platform || "x").replace(/\W+/g, "")} ${isSel("game", g.virtual ? state.games.find(x => x.row === g.row) || g : g) ? "sel" : ""} ${g.status === "Wishlist" ? "unowned" : ""} ${dups.length ? "stacked" : ""} ${effectClass(g)} ${ach ? "honored" : ""}" data-id="${g.id}" data-kind="game"
     style="--band:${p.band};--band-text:${p.text};--shell:${p.shell};--accent:${p.accent};--plat:${p.chip}" aria-label="${esc(g.name)}">
     <div class="stage">${stack}${media}${effectLayer(g)}
       <div class="box"><div class="shell"></div>
         <div class="band">${emblem(g.platform)}<span class="wm">${esc(bandLabel(g.platform, p))}</span>${deck}${up}</div>
         <div class="art" data-kind="game" data-id="${g.id}">${art}</div>
         <div class="hinge"></div><div class="sheen"></div>${typeTag}${quick}
-      </div>${ach}
+      </div>
     </div>
-    ${o.noLabel ? "" : `<div class="label">${fresh}<div class="name">${esc(g.name)}</div><div class="sub">${badge}${rankChip}${esc(o.sub ?? subline(g))}</div>${g.status === "Wishlist" ? priceTag(g) : ""}</div>`}
+    ${o.noLabel ? "" : `<div class="label">${fresh}<div class="ltop"><div class="name">${esc(g.name)}</div>${medals}</div><div class="sub">${badge}${esc(o.sub ?? subline(g))}</div>${g.status === "Wishlist" ? priceTag(g) : ""}</div>`}
   </button>`;
 }
 function factsOf(g) { return state.facts[g.name] || {}; }
+/* medals sit beside the game's name, under the cover, so they never cover its art, logo or tags */
+function medalSVG(kind) {
+  const inner = kind === "crimson" ? `<path class="gem" d="M8.2 19.2h7.6l2.4 3.2-6.2 7-6.2-7z"/><path class="gemline" d="M5.8 22.4h12.4M10 19.2l2 10.2 2-10.2"/>`
+    : kind === "plat" ? `<path class="cup" d="M8.4 17.4h7.2v2.6a3.6 3.6 0 0 1-7.2 0zM11 23.4h2v2.2h2.2v1.4H8.8v-1.4H11z"/><path class="cupline" d="M8.4 18.4H6.6a1.8 1.8 0 0 0 1.9 2.4M15.6 18.4h1.8a1.8 1.8 0 0 1-1.9 2.4"/>`
+    : "";
+  return `<svg viewBox="0 0 24 34" aria-hidden="true"><path class="rib r1" d="M4.6 0h5.2l3.4 12.6-4.2 2.2z"/><path class="rib r2" d="M19.4 0h-5.2l-3.4 12.6 4.2 2.2z"/><circle class="disc" cx="12" cy="23" r="9.6"/><circle class="rim" cx="12" cy="23" r="7.6"/>${inner}</svg>`;
+}
+function medalsHTML(g) {
+  const out = [], rk = rankOf(g), f = factsOf(g);
+  if (rk && !isClassic(g)) { const t = rankTier(rk); out.push(`<span class="medal m-rank m-${t}" title="${TIER_NAME[t]} medal · #${rk} in your Top 100">${medalSVG(t)}${t === "crimson" ? "" : `<b>${rk}</b>`}</span>`); }
+  if (f.complete === "Platinum" || (g.platinum && CONSOLES.has(g.platform))) out.push(`<span class="medal m-plat" title="Platinum trophy">${medalSVG("plat")}</span>`);
+  else if (f.complete || g.platinum) out.push(`<span class="medal m-full" title="100%: every achievement">${medalSVG("full")}<b>100</b></span>`);
+  return out.length ? `<span class="medals">${out.join("")}</span>` : "";
+}
 function achBadge(g) {
   const f = factsOf(g);
   // a badge of honour: bigger than the cover's edge, like a perfect-game badge
@@ -243,14 +313,13 @@ function effectLayer(g) {
   if (isClassic(g)) out += `<i class="fxglow classic" aria-hidden="true"></i>`;
   else if (g.priority === "High" && g.status !== "Completed" && g.status !== "Dropped") out += `<i class="fxglow high" aria-hidden="true"></i>`;
   if (isClassic(g)) out += `<div class="flames classic-flames" aria-hidden="true"><i></i><i></i><i></i><i></i><i></i><i></i><i></i></div>${SPARKS}<div class="cosmos aura still" aria-hidden="true"></div><span class="classic-award oncover" title="All Time Classic · Mythical">${CLASSIC_IMG}</span>`;
-  else if (rk && rk <= 10) { const t = rankTier(rk); out += `<span class="favstar award t-${t}" title="${TIER_NAME[t]} · #${rk} in your Top 100">${awardSVG(t)}<b>${rk}</b></span>`; }
   if (g.priority === "Extreme" && g.status !== "Completed" && g.status !== "Dropped") out += `<div class="flames" aria-hidden="true"><i></i><i></i><i></i><i></i><i></i></div>`;
   if ((st === "Paused" || g.status === "Paused") && st !== "Second chance") out += `<div class="cobweb" aria-hidden="true"><svg viewBox="0 0 60 60"><path d="M0 0L60 60M0 0L60 22M0 0L22 60M0 0L60 0M0 0L0 60M10 0Q8 8 0 10M22 0Q18 18 0 22M36 0Q30 30 0 36M52 0Q42 42 0 52"/></svg></div><div class="dust" aria-hidden="true"></div>`;
   if (st === "Second chance") out += `<span class="extralife" title="Second chance"><svg viewBox="0 0 24 24"><path d="M12 21s-7.5-4.6-9.5-9.1C1 8.4 3.2 5 6.6 5c2 0 3.4 1.1 4.2 2.4C11.6 6.1 13 5 15 5c3.4 0 5.6 3.4 4.1 6.9C17.1 16.4 12 21 12 21z"/></svg><b>↻ 1UP</b></span>`;
   return out;
 }
 function quickBtn(item) {
-  if (!state.canEdit) return "";
+  if (!state.canEdit || item.family) return "";
   const kind = item.author !== undefined ? "book" : "game";
   if (item.status === "Wishlist") return `<span class="qc own" role="button" tabindex="-1" data-qown="${item.id}" data-qkind="${kind}" title="${kind === "book" ? "I have it now" : "I own it now"}">＋</span>`;
   if (kind === "game" && (item.status === "Completed" || item.type === "Live service")) return "";
@@ -259,6 +328,7 @@ function quickBtn(item) {
 }
 function hoursFromAccounts(g) { const m = factsOf(g).minutes; return m ? Math.round(m / 6) / 10 : null; }
 function subline(g) {
+  if (g.family) return `Shared by ${(g.owners || []).join(", ") || "your family"}`;
   if (g.status === "Completed") return g.completed ? `Finished ${daysAgoLabel(g.completed)}` : "Finished";
   if (g.status === "Wishlist") return [g.platform, g.priority].filter(Boolean).join("  ·  ");
   if (g.type === "Live service") return [g.platform, "Live service", factsOf(g).minutes ? `${Math.round(factsOf(g).minutes / 60)} h` : ""].filter(Boolean).join("  ·  ");
@@ -287,7 +357,7 @@ function bookHTML(b, o = {}) {
   const cached = covers.get(coverKey(b));
   const art = cached ? `<img alt="" decoding="async" src="${cached}">` : `<div class="fallback book-fallback"><div class="t">${esc(b.name)}</div><div class="d">${esc(b.author)}</div></div>`;
   const badge = b.status === "Read" ? `<span class="badge done">✓</span>` : b.status === "Reading" ? `<span class="badge reading">Reading</span>` : b.priority === "Extreme" || b.priority === "High" ? `<span class="badge" style="color:${PRIO_COLOR[b.priority]}">${b.priority}</span>` : "";
-  return `<button class="case book ${b.status === "Wishlist" ? "unowned" : ""} ${bookFx(b)}" data-id="${b.id}" data-kind="book" aria-label="${esc(b.name)}">
+  return `<button class="case book ${isSel("book", b) ? "sel" : ""} ${b.status === "Wishlist" ? "unowned" : ""} ${bookFx(b)}" data-id="${b.id}" data-kind="book" aria-label="${esc(b.name)}">
     <div class="stage"><div class="pages"></div>${bookFxLayer(b)}
       <div class="box"><div class="art" data-kind="book" data-id="${b.id}">${art}</div><div class="bspine"></div><div class="sheen"></div>${badge}${o.noLabel ? "" : quickBtn(b)}</div>
     </div>
@@ -314,6 +384,7 @@ function shelves() {
     { title: "Plan to migrate", items: G.filter(migrating), view: "library", preset: { status: "Plan to migrate" } },
     { title: `Finished in ${year}`, items: G.filter(g => g.status === "Completed" && (g.completed || "").startsWith(String(year))).sort(byDone), view: "stats" },
     { title: "Second chances", items: G.filter(g => statusOf(g) === "Second chance"), view: "played" },
+    { title: "Shared by your Steam Family", items: familyItems().slice().sort((a, b) => (familyState.data.apps.find(x => x.name === b.name)?.last || 0) - (familyState.data.apps.find(x => x.name === a.name)?.last || 0)).slice(0, 30), view: "library", preset: { status: "Steam Family" } },
   ];
 }
 /* ----- your Top 100 ----- */
@@ -324,8 +395,10 @@ const rankKey = memo(rankKeyRaw);
 function rankKeyRaw(n) {
   const R = { ii: "2", iii: "3", iv: "4", v: "5", vi: "6", vii: "7", viii: "8", ix: "9", x: "10" };
   return String(n || "").normalize("NFD").replace(/[\u0300-\u036f]/g, "").toLowerCase().replace(/[™®©]/g, "").replace(/&/g, " and ")
-    .replace(/[^a-z0-9]+/g, " ").split(" ").filter(w => w && w !== "the").map(w => R[w] || w).join(" ");
+    .replace(/[^a-z0-9]+/g, " ").replace(BRAND_PREFIX, "").split(" ").filter(w => w && w !== "the").map(w => R[w] || w).join(" ");
 }
+// "Tom Clancy's Rainbow Six Siege" and "Rainbow Six Siege" are the same game
+const BRAND_PREFIX = /^\s*(tom clancy s|tom clancys|sid meier s|sid meiers|marvel s|marvels|disney s|disneys|clive barker s|american mcgee s|dreamworks|lego marvel s)\s+(?=\S)/;
 function rankOf(g) {
   if (!rankIndex) {
     rankIndex = new Map(); rankMatches = new Map(); matchPool = null;
@@ -473,7 +546,7 @@ function classicHTML() {
       <p class="muted">${esc([g.developer, g.publisher && g.publisher !== g.developer ? g.publisher : "", plat(g.platform).label].filter(Boolean).join("  ·  "))}</p>
       <div class="cstats">${stat(hours ? `${Math.round(hours * 10) / 10} h` : "", "played")}${stat(runs.length || g.runs || "", (runs.length || g.runs) === 1 ? "run" : "runs")}${stat(done, "finished")}${stat(g.score != null ? scoreText(g.score) : "", "your score")}${stat(rankOf(g) ? `#${rankOf(g)}` : "", "in your Top 100")}</div>
       ${runs.length ? `<ol class="cruns">${runs.map(r => `<li><b>Run ${r.run || "·"}</b><span>${esc(plat(r.platform || g.platform).label)}${r.play_on ? ` on ${esc(r.play_on)}` : ""}</span><span>${r.hours ? `${r.hours} h` : ""}</span><span>${r.finished ? (r.finished_on ? `Finished ${fmtDate(r.finished_on)}` : "Finished") : "Unfinished"}</span><span class="tags">${r.modded ? "<i>Modded</i>" : ""}${r.dlc ? "<i>DLC</i>" : ""}${r.platinum ? "<i>100%</i>" : ""}</span>${r.notes ? `<small>${esc(r.notes)}</small>` : ""}</li>`).join("")}</ol>` : ""}
-      <div class="cawards" id="classicAwards"><span class="spinner"></span> Looking up the awards it won…</div>
+      <div class="cawards" id="classicAwards"><span class="spinner"></span> Looking up its awards…</div>
     </div>
     ${state.canEdit ? `<button class="ghost small classic-off" data-unclassic title="Take the award back">Remove award</button>` : ""}
   </section>`;
@@ -484,15 +557,8 @@ async function fillClassicAwards() {
   if (!box || !g || !api) return;
   const r = await Promise.resolve(api.awards(g)).catch(() => null);
   if (!$("#classicAwards") || classicGame() !== g) return;
-  const wins = r?.wins || [];
-  if (!wins.length) { box.innerHTML = `<p class="muted">No awards listed for it on Wikipedia${r?.url ? ` (<a role="link" tabindex="0" data-url="${esc(r.url)}">check the page</a>)` : ""}. Some classics win hearts, not trophies.</p>`; return; }
-  const goty = wins.filter(w => /game of the year/i.test(w.category + " " + w.award));
-  const list = [...goty, ...wins.filter(w => !goty.includes(w))];
-  const li = w => `<li class="${goty.includes(w) ? "goty" : ""}"><b>${esc(w.category || w.award)}</b><span>${esc(w.category ? w.award : "")}${w.year ? ` · ${esc(w.year)}` : ""}</span></li>`;
-  box.innerHTML = `<h3>${wins.length} award${wins.length === 1 ? "" : "s"} won${goty.length ? `, ${goty.length} Game of the Year` : ""}${r.nominations ? ` <small>from ${r.nominations} nominations</small>` : ""}</h3>
-    <ul class="awardlist">${list.slice(0, 12).map(li).join("")}</ul>
-    ${list.length > 12 ? `<details><summary>All ${list.length}</summary><ul class="awardlist">${list.slice(12).map(li).join("")}</ul></details>` : ""}
-    <p class="fine">From <a role="link" tabindex="0" data-url="${esc(r.url)}">Wikipedia</a>.</p>`;
+  const html = awardsHTML(r);
+  box.innerHTML = html || `<p class="muted">${r?.error ? "Couldn't reach Wikipedia just now; the awards show up next time." : "No Game Awards, Golden Joystick, BAFTA or Steam Awards entries for it. Some classics win hearts, not trophies."}</p>`;
 }
 function rankVia(n, g) { const m = rankMatches.get(n); return m?.via === "collection" ? `In ${esc(g.name)} · ` : m?.via === "edition" ? `As ${esc(g.name)} · ` : ""; }
 /* Top 100 games that aren't anywhere in your library get added to it (once; Undo takes them out again) */
@@ -508,7 +574,8 @@ async function addMissingRanked() {
   addMissingRanked.busy = false;
   if (!r || r.error || !r.added?.length) return;
   const names = r.added.map(a => a.name);
-  toast(`Added ${names.length === 1 ? names[0] : names.length + " games"} from your Top 100 to your library as Completed. Change the platform with a right-click.`, "ok", {
+  const live = r.added.filter(a => a.live).length;
+  toast(`Added ${names.length === 1 ? names[0] : names.length + " games"} from your Top 100 to your library${live === names.length ? " as live service" : live ? ` (${live} as live service)` : ""}. Finish dates are left as unknown; right-click one to fix its platform.`, "ok", {
     label: "Undo", run: async () => {
       for (const a of r.added.slice().reverse()) await Promise.resolve(api.delete_item("games", a.row, a.name)).catch(() => null);
       sync(true);
@@ -664,6 +731,7 @@ function focusKey(el) {
 function render() {
   const fk = focusKey(document.activeElement);
   renderView();
+  if (selection.size) paintSelection();
   if (fk && (!document.activeElement || document.activeElement === document.body)) {
     const el = [...document.querySelectorAll(`#view ${fk}, #tabs ${fk}`)].find(x => !x.closest(".hero"));
     el?.focus({ preventScroll: true });
@@ -962,12 +1030,14 @@ const SPECIAL = {
   "Modpacks": g => g.type === "Modded",
   "Replays": g => (g.runs || 0) > 1,
   "Plan to migrate": g => migrating(g) || (groupOf(g.platform) === "Exiled" && owned(g)) || (g.platform === "Epic Games" && owned(g)),
+  "Steam Family": g => !!g.family,
 };
 function asSet(v) { return v instanceof Set ? v : new Set(!v || v === "All" ? [] : [v]); }
 function filtered() {
   const f = state.filter, q = f.q.trim().toLowerCase();
   f.status = asSet(f.status); f.prio = asSet(f.prio); f.formats = asSet(f.formats);
-  const list = withCopies(state.games).filter(g => {
+  const fam = state.view === "library" && f.status.has("Steam Family") ? familyItems() : [];
+  const list = withCopies(state.games).concat(fam).filter(g => {
     if (state.view === "wishlist" && g.status !== "Wishlist") return false;
     if (state.view === "backlog" && !inBacklog(g)) return false;
     if (state.view === "played" && !["Completed", "Dropped"].includes(g.status)) return false;
@@ -1069,7 +1139,7 @@ function backlogHTML() {
 }
 function libraryHTML() {
   const f = state.filter;
-  const statuses = state.view === "wishlist" ? [] : state.view === "played" ? ["Completed", "Dropped", "Second chance", "Replays"] : ["Library", "Playing", "Paused", "Completed", "Dropped", "Second chance", "Wishlist", "Live service", "Modpacks", "Replays", "Plan to migrate"];
+  const statuses = state.view === "wishlist" ? [] : state.view === "played" ? ["Completed", "Dropped", "Second chance", "Replays"] : ["Library", "Playing", "Paused", "Completed", "Dropped", "Second chance", "Wishlist", "Live service", "Modpacks", "Replays", "Plan to migrate", ...(familyItems().length ? ["Steam Family"] : [])];
   const list = filtered();
   const active = f.status.size + f.prio.size + f.formats.size + f.plats.size + !!f.q + !!f.genre + !!f.studio;
   const pinned = [f.genre ? `<button class="chip on" data-unpin="genre">Genre: ${esc(f.genre.join(", "))} ✕</button>` : "", f.studio ? `<button class="chip on" data-unpin="studio">Made by: ${esc(f.studio.join(", "))} ✕</button>` : ""].join("");
@@ -1266,15 +1336,150 @@ function openCaseHTML(kind, item) {
   }
   const p = plat(item.platform), cached = covers.get(coverKey(item));
   const art = cached ? `<img alt="" decoding="async" src="${cached}">` : `<div class="fallback"><div class="t">${esc(item.name)}</div></div>`;
-  const tray = p.media === "card"
-    ? `<div class="cardslot"><div class="cart"><div class="cart-label">${cached ? `<img alt="" decoding="async" src="${cached}">` : ""}</div><span>${esc(p.label.replace("Nintendo ", ""))}</span></div></div><div class="clips"></div>`
-    : `<div class="bigdisc ${p.disc || ""}"><div class="label">${cached ? `<img alt="" decoding="async" src="${cached}">` : ""}</div><div class="hub"></div></div>`;
+  const tray = p.media === "card" ? gameCardHTML(item, cached) : discHTML(item, cached);
   return `<div class="opencase p-${(item.platform || "x").replace(/\W+/g, "")}" style="--band:${p.band};--band-text:${p.text};--shell:${p.shell};--accent:${p.accent};--plat:${p.chip}">
     <div class="leaf back"><div class="tray">${tray}</div></div>
     <div class="leaf front">
       <div class="face outside"><div class="band">${emblem(item.platform)}<span class="wm">${esc(p.label)}</span>${item.platform === "Steam" && item.play_on === "Steam Deck" ? emblem("deck") : ""}</div><div class="art" data-kind="game" data-id="${item.id}">${art}<button type="button" class="artedit" data-coverpick title="Change cover" aria-label="Change cover"><svg viewBox="0 0 24 24" width="16" height="16"><path fill="currentColor" d="M4 5h11l2 2h3v12H4zm2 2v10h12V9h-2l-2-2zm2 8 3-4 2 3 1.5-2 2.5 3z"/></svg></button></div><div class="hinge"></div><div class="sheen"></div></div>
       <div class="face inside"><div class="manual"><div class="manual-body" id="manual"><p class="muted">Opening the manual…</p></div></div></div>
     </div></div>`;
+}
+/* ---------- pick several games (Shift+click), then change them together with a right-click ---------- */
+const selection = new Set();
+const selKey = (kind, it) => `${kind}:${it.row}:${it.name}`;
+const isSel = (kind, it) => selection.size > 0 && selection.has(selKey(kind, it));
+function selectedItems() {
+  const out = [];
+  for (const k of selection) {
+    const [kind, row, ...rest] = k.split(":"), name = rest.join(":");
+    const list = kind === "book" ? state.books : state.games;
+    const it = list.find(x => String(x.row) === row && x.name === name);
+    if (it) out.push({ kind, item: it });
+  }
+  return out;
+}
+function toggleSelect(el) {
+  const kind = el.dataset.kind === "book" ? "book" : "game", item = findItem(kind, el.dataset.id);
+  if (!item) return;
+  const target = item.virtual ? (kind === "game" ? state.games.find(x => x.row === item.row) || item : item) : item;
+  const k = selKey(kind, target);
+  // one kind at a time: games with games, books with books
+  if (selection.size && [...selection][0].split(":")[0] !== kind) selection.clear();
+  selection.has(k) ? selection.delete(k) : selection.add(k);
+  try { FX.play.move(); } catch {}
+  paintSelection();
+}
+function clearSelection() { if (!selection.size) return; selection.clear(); paintSelection(); }
+function paintSelection() {
+  document.body.classList.toggle("selecting", selection.size > 0);
+  document.querySelectorAll("#view .case[data-kind]").forEach(el => {
+    const kind = el.dataset.kind === "book" ? "book" : "game", it = findItem(kind, el.dataset.id);
+    const base = it?.virtual && kind === "game" ? state.games.find(x => x.row === it.row) || it : it;
+    el.classList.toggle("sel", !!base && selection.has(selKey(kind, base)));
+  });
+  let bar = document.getElementById("selbar");
+  if (!selection.size) { bar?.remove(); return; }
+  if (!bar) {
+    bar = document.createElement("div"); bar.id = "selbar"; bar.className = "selbar";
+    bar.innerHTML = `<b></b><span>Right-click any of them to change them together</span><button class="ghost small" data-selall>Select all shown</button><button class="ghost small" data-selclear>Clear</button>`;
+    bar.addEventListener("click", e => {
+      if (e.target.closest("[data-selclear]")) clearSelection();
+      if (e.target.closest("[data-selall]")) {
+        const kind = [...selection][0]?.split(":")[0] || "game";
+        document.querySelectorAll(`#view .case[data-kind="${kind}"]`).forEach(el => { if (el.closest(".hero")) return; const it = findItem(kind, el.dataset.id); if (it) selection.add(selKey(kind, it.virtual && kind === "game" ? state.games.find(x => x.row === it.row) || it : it)); });
+        paintSelection();
+      }
+    });
+    document.body.append(bar);
+  }
+  const kind = [...selection][0].split(":")[0];
+  bar.querySelector("b").textContent = `${selection.size} ${kind === "book" ? (selection.size === 1 ? "book" : "books") : (selection.size === 1 ? "game" : "games")} selected`;
+}
+function batchCtxMenu(x, y) {
+  closeCtx();
+  const picked = selectedItems();
+  if (!picked.length) return;
+  const kind = picked[0].kind, cat = kind === "book" ? "books" : "games";
+  const o = (k, d) => state.options[cat]?.[k]?.length ? state.options[cat][k] : d;
+  const sub = (label, key, values, fmt = v => v) => `<li class="has-sub" role="menuitem" tabindex="-1"><span>${label}</span><i>›</i><ul class="sub" role="menu">${values.map(v =>
+    `<li role="menuitem" tabindex="-1" data-bset="${key}" data-val="${esc(v)}">${esc(fmt(v))}</li>`).join("")}</ul></li>`;
+  const m = document.createElement("div");
+  m.id = "ctx"; m.className = "ctx batch"; m.setAttribute("role", "menu"); m.dataset.batch = kind;
+  m.innerHTML = `<div class="ctx-head">${picked.length} ${kind === "book" ? "books" : "games"}<small>${esc(picked.slice(0, 3).map(p => p.item.name).join(", "))}${picked.length > 3 ? "…" : ""}</small></div><ul>
+    ${sub("Status", "status", o("status", FALLBACK_OPTIONS[cat].status))}
+    ${sub("Priority", "priority", [...o("priority", FALLBACK_OPTIONS[cat].priority), ""], v => v || "No priority")}
+    ${kind === "game" ? sub("Platform", "platform", o("platform", Object.keys(PLAT)), v => plat(v).label) : ""}
+    ${sub("Format", "format", o("format", FALLBACK_OPTIONS[cat].format))}
+    ${kind === "game" ? sub("Type", "type", ["", "Live service", "Modded"], v => v || "Normal game") : ""}
+    ${kind === "game" ? `<li role="menuitem" tabindex="-1" data-bact="platinum">Mark as 100% / Platinum</li>` : ""}
+    <li class="sep" role="separator"></li>
+    <li role="menuitem" tabindex="-1" data-bact="clear">Clear selection</li>
+    ${state.canEdit ? `<li role="menuitem" tabindex="-1" data-bact="delete" class="ctx-danger">Delete ${picked.length} ${kind === "book" ? "books" : "games"}…</li>` : ""}
+  </ul>`;
+  placeCtx(m, x, y);
+}
+async function batchAction(li) {
+  const picked = selectedItems();
+  if (!picked.length) return closeCtx();
+  const kind = picked[0].kind, tab = kind === "book" ? "books" : "games";
+  if (li.dataset.bact === "clear") { closeCtx(); return clearSelection(); }
+  if (li.dataset.bact === "delete") {
+    if (!li.dataset.armed) { li.dataset.armed = "1"; li.classList.add("armed"); li.textContent = `Click again to delete all ${picked.length}`; return; }
+    closeCtx();
+    const list = tab === "books" ? state.books : state.games, undo = [], failed = [];
+    // bottom rows first, so the rows of the ones still to go don't shift
+    for (const { item } of picked.sort((a, b) => b.item.row - a.item.row)) {
+      const r = await Promise.resolve(api?.delete_item(tab, item.row, item.name)).catch(e => ({ error: String(e) }));
+      if (!r || r.error) { failed.push(item.name); continue; }
+      undo.push(r.undo); const at = list.indexOf(item); if (at >= 0) list.splice(at, 1);
+    }
+    clearSelection(); rankIndex = null; virtualKey = null; render();
+    try { FX.play.back(); } catch {}
+    toast(`Deleted ${undo.length} ${kind === "book" ? "books" : "games"}${failed.length ? `; couldn't delete ${failed.join(", ")}` : ""}.`, failed.length ? "err" : "ok", undo.length ? { label: "Undo", run: async () => {
+      for (const u of undo.slice().reverse()) await Promise.resolve(api.undo_delete(u)).catch(() => null);
+      toast("They're back.", "ok"); sync(true);
+    } } : undefined);
+    return setTimeout(() => sync(false), 2500);
+  }
+  const changes = li.dataset.bact === "platinum" ? { platinum: true } : { [li.dataset.bset]: li.dataset.val };
+  closeCtx();
+  const todo = picked.filter(({ item }) => Object.entries(changes).some(([k, v]) => (item[k] ?? (typeof v === "boolean" ? false : "")) !== v));
+  if (!todo.length) return toast("They already are.");
+  const before = todo.map(({ item }) => ({ ...item }));
+  todo.forEach(({ item }) => Object.assign(item, changes));
+  render();
+  let failed = 0;
+  for (let i = 0; i < todo.length; i++) {
+    const r = await Promise.resolve(api?.edit(tab, before[i].row, before[i].name, changes)).catch(e => ({ error: String(e) }));
+    if (!r || r.error) { failed++; Object.assign(todo[i].item, before[i]); }
+  }
+  render();
+  try { FX.play.save(); } catch {}
+  const [k, v] = Object.entries(changes)[0];
+  toast(failed ? `Changed ${todo.length - failed} of ${todo.length}; ${failed} couldn't be saved.` : `${todo.length} ${kind === "book" ? "books" : "games"}: ${k.replace("_", " ")} set to ${v === true ? "yes" : v || "none"}.`, failed ? "err" : "ok");
+  setTimeout(() => sync(false), 1500);
+}
+
+/* the disc or game card inside the case, after the real thing on each system (no logos, just the look) */
+function discKind(platform) {
+  return { PS2: "ps2", PS4: "ps4", PS5: "ps5" }[platform] || "pc";
+}
+function discHTML(item, cached) {
+  const k = discKind(item.platform);
+  const img = cached ? `<img alt="" decoding="async" src="${cached}">` : `<div class="dfall">${esc(item.name)}</div>`;
+  const band = k === "ps4" ? `<div class="dband"><b>PS4</b></div>` : k === "ps5" ? `<div class="dband"><b>PS5</b></div>` : "";
+  const arc = { ps2: "PlayStation 2 · DVD-ROM", ps4: "", ps5: "", pc: "PC DVD-ROM · " + (item.developer || "Windows") }[k];
+  const id = "arc" + item.id;
+  return `<div class="bigdisc disc-${k}">
+    <div class="dlabel">${img}${band}</div>
+    ${arc ? `<svg class="darc" viewBox="0 0 100 100" aria-hidden="true"><defs><path id="${id}" d="M50 50 m-43 0 a43 43 0 1 1 86 0 a43 43 0 1 1 -86 0"/></defs><text><textPath href="#${id}" startOffset="${k === "pc" ? "2%" : "60%"}">${esc(arc)}</textPath></text></svg>` : ""}
+    <div class="hub"></div><div class="dglare"></div></div>`;
+}
+function gameCardHTML(item, cached) {
+  const two = item.platform === "Switch 2";
+  return `<div class="cardslot"><div class="gcard ${two ? "sw2" : "sw1"}">
+    <div class="gc-label">${cached ? `<img alt="" decoding="async" src="${cached}">` : `<span>${esc(item.name)}</span>`}<i class="gc-strip">${two ? "SWITCH 2" : "SWITCH"}</i></div>
+    <div class="gc-grip"></div></div></div><div class="clips"></div>`;
 }
 function bookPageHTML(b) {
   return `<h4>${esc(b.name)}</h4><p class="by">${esc(b.author)}</p>${b.series ? `<p>${esc(b.series)}${b.number ? `, book ${b.number}` : ""}</p>` : ""}
@@ -1288,7 +1493,7 @@ function manualHTML(g, about, dlcs) {
   const text = about?.text ? `<p class="syn">${esc(about.text)}</p>` : `<p class="muted">No description found yet.</p>`;
   const list = (dlcs || []).filter(d => d.kind !== "upgrade").slice(0, 5);
   const dl = list.length
-    ? `<h5>${g.dlc_owned ? "DLC included" : "DLC available"}</h5><ul>${list.map(d => `<li class="${g.dlc_owned ? "have" : ""}">${g.dlc_owned ? "✓" : "–"} ${esc(shortDlc(g, d.name))}${d.major ? ` <b>Major</b>` : ""}</li>`).join("")}</ul>`
+    ? `<h5>${g.dlc_owned ? "DLC included" : "DLC available"}</h5><ul class="mdlc">${list.map(d => `<li class="${g.dlc_owned ? "have" : ""}">${d.art ? `<img alt="" loading="lazy" decoding="async" src="${esc(d.art)}">` : `<span class="mdlc-blank"></span>`}<span class="mdlc-t">${esc(shortDlc(g, d.name))}${d.major ? ` <b>Major</b>` : ""}${g.dlc_owned ? ` <em>✓ owned</em>` : d.release && d.coming ? ` <em>${esc(d.release)}</em>` : ""}</span></li>`).join("")}</ul>`
     : `<h5>DLC</h5><p class="muted">None found.</p>`;
   const facts = [about?.release && `Released ${about.release}`, about?.developers?.length && about.developers.join(", ")].filter(Boolean);
   return `<div class="mhead">${esc(g.name)}</div>${text}${dl}${facts.length ? `<p class="mfoot">${esc(facts.join(" · "))}</p>` : ""}${about?.source ? `<p class="msrc">Text from ${esc(about.source)}</p>` : ""}`;
@@ -1300,14 +1505,14 @@ function openPanel(kind, id, tab = "overview") {
   panelItem = { kind, id: item.id };
   hidePeek();
   const panel = $("#panel");
-  const tabs = kind === "game" ? [["overview", "Overview"], ["ratings", "Ratings"], ["dlc", "DLC"], ...(item.type === "Live service" ? [["milestones", "Milestones"]] : []), ["watch", "Watch"], ["wiki", "Wiki"], ["news", "News"], ["edit", "Edit"]]
-    : [["overview", "Overview"], ["wiki", "About"], ["edit", "Edit"]];
+  const tabs = kind === "game" ? [["overview", "Overview"], ["ratings", "Ratings"], ["dlc", "DLC"], ...(item.type === "Live service" ? [["milestones", "Milestones"]] : []), ["watch", "Watch"], ["wiki", "Wiki"], ["news", "News"]]
+    : [["overview", "Overview"], ["wiki", "About"]];
   if (!same) {
     try { FX.play.open(); } catch {}
     panel.innerHTML = `<div class="cv-bg"><div class="cv-art" id="cvArt"></div></div>
       <button class="icon close" aria-label="Close">✕</button><button class="icon refreshinfo" data-refresh title="${kind === "game" ? "Refresh info: fetch cover, synopsis, ratings and media again" : "Refresh info: fetch the cover, ratings and description again"}" aria-label="Refresh info">↻</button>
       <div class="cv-stage">${openCaseHTML(kind, item)}</div>
-      <div class="cv-info"><div class="cv-head"><h2>${esc(item.name)}</h2><div class="pills">${kind === "game" ? pillsHTML(item) : bookPills(item)}</div></div>
+      <div class="cv-info"><div class="cv-head"><div class="cv-title"><h2>${esc(item.name)}</h2><button class="modbtn" data-ptab="edit" aria-selected="${tab === "edit"}"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 17.5V20h2.5L17.6 8.9l-2.5-2.5zM19.7 6.8a1 1 0 0 0 0-1.4l-1.1-1.1a1 1 0 0 0-1.4 0l-1 1 2.5 2.5z"/></svg>Modify</button></div><div class="pills">${kind === "game" ? pillsHTML(item) : bookPills(item)}</div></div>
         <div class="ptabs" role="tablist">${tabs.map(([k, l]) => `<button data-ptab="${k}" aria-selected="${k === tab}">${l}</button>`).join("")}</div>
         <div class="pbody" id="pbody"></div></div>`;
     activateArt(panel);
@@ -1318,6 +1523,8 @@ function openPanel(kind, id, tab = "overview") {
     const still = () => panelItem && panelItem.id === item.id && panelItem.kind === kind;
     const setArt = uri => { const a = $("#cvArt"); if (a && still() && uri) { a.style.backgroundImage = `url("${uri}")`; a.classList.add("on"); } };
     if (kind === "game") {
+      // the disc or card label shows the cover as soon as it's ready
+      loadCover(item).then(u => { if (!u || !still()) return; document.querySelectorAll("#panel .dlabel, #panel .gc-label").forEach(el => { if (el.querySelector("img")) return; el.querySelector(".dfall, span")?.remove(); el.insertAdjacentHTML("afterbegin", `<img alt="" decoding="async" src="${u}">`); }); }).catch(() => {});
       Promise.resolve(api?.hero(item.name)).then(uri => uri ? setArt(uri) : loadCover(item).then(setArt)).catch(() => {});
       Promise.all([Promise.resolve(api?.about(item)).catch(() => null), Promise.resolve(api?.dlcs(item)).catch(() => [])])
         .then(([about, dlcs]) => { const m = $("#manual"); if (m && still()) m.innerHTML = manualHTML(item, about, dlcs); });
@@ -1359,6 +1566,7 @@ function showPanelTab(tab) {
     Promise.resolve(api?.links(item)).then(links => { const box = $("#links"); if (box && still()) box.innerHTML = (links || []).map(l => `<button class="${l.primary ? "primary" : "ghost"}" data-url="${esc(l.url)}">${esc(l.label)}</button>`).join(""); }).catch(() => {});
     Promise.resolve(api?.media(item)).then(m => { if (still()) renderGallery(m || { shots: [], videos: [] }); }).catch(() => renderGallery({ shots: [], videos: [] }));
     Promise.resolve(api?.about(item)).then(a => { const box = $("#aboutLong"); if (box && still() && a?.long) { box.hidden = false; box.querySelector("div").textContent = a.long; } }).catch(() => {});
+    Promise.resolve(api?.awards(item)).then(r => { const box = $("#ovAwards"), html = awardsHTML(r); if (box && still() && html) { box.innerHTML = `<h3>Awards</h3>${html}`; box.hidden = false; } }).catch(() => {});
     getRatings(item).then(r => { const box = $("#ovScores"); if (box && still()) box.innerHTML = r && (r.metacritic || r.steam || r.playstation) ? `${miniScoresHTML(r)}<button class="linkish" data-ptab="ratings">View more</button>` : `<span class="muted">No ratings found.</span>`; });
   }
   if (tab === "ratings") { body.innerHTML = loading("Fetching scores…"); getRatings(item).then(r => { if (still()) body.innerHTML = ratingsHTML(item, r); }); }
@@ -1425,6 +1633,7 @@ function gameOverviewHTML(g) {
     ${quick}
     <div class="kv">${kv.map(([k, v]) => `<div><small>${esc(k)}</small><span>${esc(v)}</span></div>`).join("")}</div>
     <div class="flags">${flags.map(([k, on]) => `<span class="flag ${on ? "on" : ""}">${on ? "✓ " : ""}${esc(k)}</span>`).join("")}</div>
+    <section class="ovawards" id="ovAwards" hidden></section>
     ${g.notes ? `<h3>Notes</h3><p class="notes">${esc(g.notes)}</p>` : ""}
     <details class="more about-long" id="aboutLong" hidden><summary>About this game</summary><div></div></details>
     <h3>Runs</h3>
@@ -1510,21 +1719,73 @@ function milestonesHTML(g, items) {
       <div class="ms-text"><div class="meta">${m.upcoming ? `<span class="ntag soon">Coming ${new Date(m.start * 1000).toLocaleDateString(undefined, { day: "numeric", month: "short" })}</span>` : `<span class="ntag major">${m.kind === "release" ? "Launch" : "Major update"}</span>`}<span>${m.date ? ago(m.date) : ""}</span></div>
         <b>${esc(m.title)}</b>${m.summary ? `<p>${esc(m.summary)}</p>` : ""}</div></li>`).join("")}</ol>`;
 }
+/* ---------- Wiki tab: the article in readable chapters, how it runs, its wikis and maps ---------- */
+const DECK_TONE = { Verified: "good", Playable: "ok", Unsupported: "bad" };
+const PROTON_TONE = { platinum: "good", gold: "good", silver: "ok", bronze: "ok", borked: "bad", native: "good" };
+const VAL_ICON = { yes: "✓", no: "✕", fixable: "⚒", limited: "◐", "always on": "✓" };
+function paras(text, max = 99) {
+  return String(text || "").split(/\n{2,}|\n(?=[A-Z])/).map(t => t.trim()).filter(Boolean).slice(0, max)
+    .map(t => /^[A-Z][^.!?]{2,60}$/.test(t) ? `<h5>${esc(t)}</h5>` : `<p>${esc(t)}</p>`).join("");
+}
 function wikiHTML(g, w) {
-  const wp = w?.wikipedia, fd = w?.fandom, mg = w?.mapgenie;
-  const pc = !CONSOLES.has(g.platform);
-  const inside = (url, title, label = "Open in Masterlog", browser = "Open in browser") => `<button class="primary small" data-inside="${esc(url)}" data-title="${esc(title)}">${label}</button><button class="ghost small" data-url="${esc(url)}">${browser}</button>`;
-  return `<section class="wsec"><h3>Wikipedia</h3>
-      ${wp ? `<div class="wiki">${wp.thumb ? `<img alt="" src="${esc(wp.thumb)}">` : ""}<h4>${esc(wp.title)}</h4><p>${esc(wp.extract)}</p></div><div class="links">${inside(wp.url, wp.title)}</div>` : `<p class="muted">No Wikipedia article found.</p>`}</section>
-    <section class="wsec"><h3>Fandom wiki</h3>
-      ${fd ? `<div class="wiki fandom">${fd.article?.thumb ? `<img alt="" src="${esc(fd.article.thumb)}">` : fd.logo ? `<img alt="" src="${esc(fd.logo)}">` : ""}<h4>${esc(fd.name)}</h4>
-          ${fd.article ? `<p><b>${esc(fd.article.title)}</b>${fd.article.abstract ? ` — ${esc(fd.article.abstract)}` : ""}</p>` : ""}</div>
-        <div class="links">${fd.article ? inside(fd.article.url, fd.article.title, "Open the article", "Article in browser") : ""}${inside(fd.url, fd.name, "Open the wiki", "Wiki in browser")}</div>`
-        : `<p class="muted">No Fandom wiki found for this game.</p><div class="links"><button class="ghost small" data-url="${esc(w?.fandom_search || "")}">Search Fandom</button></div>`}</section>
-    <section class="wsec"><h3>Map Genie</h3>
-      ${mg ? `<p class="muted">Interactive maps with every item, collectible and secret marked.</p><div class="mapgrid">${mg.maps.map(m => `<button class="mapbtn" data-inside="${esc(m.url)}" data-title="${esc(mg.game)}: ${esc(m.name)}"><span>🗺</span>${esc(m.name)}</button>`).join("")}</div>
-        <div class="links"><button class="ghost small" data-url="${esc(mg.url)}">All of ${esc(mg.game)} on Map Genie (browser)</button></div>` : `<p class="muted">Map Genie doesn't have maps for this game.</p>`}</section>
-    ${pc ? `<div class="links"><button class="ghost small" data-url="${esc(w?.pcgamingwiki || "")}">PCGamingWiki (fixes and settings)</button><button class="ghost small" data-nexus="${esc(g.name)}">Mods on Nexus Mods</button></div>` : ""}`;
+  if (!w) return `<p class="muted">Couldn't reach the wikis just now. Check your connection, then press ↻ to try again.</p>`;
+  const wp = w.wikipedia, ar = w.article || {}, pc = w.pcgw, dk = w.deck, fd = w.fandom, fx = w.fextralife, mg = w.mapgenie;
+  const failed = new Set(w.failed || []);
+  const inside = (url, title, label) => `<button class="wbtn" data-inside="${esc(url)}" data-title="${esc(title)}">${esc(label)}</button>`;
+  const lead = ar.lead || wp?.extract || "";
+  const leadParas = lead.split(/\n+/).filter(Boolean);
+  const article = wp ? `<section class="wcard wp">
+      ${wp.thumb ? `<img class="wthumb" alt="" loading="lazy" src="${esc(wp.thumb)}">` : ""}
+      <header><h3>${esc(wp.title)}</h3>${wp.description ? `<small>${esc(wp.description)}</small>` : ""}</header>
+      <div class="wlead">${leadParas.slice(0, 2).map(t => `<p>${esc(t)}</p>`).join("")}</div>
+      ${leadParas.length > 2 ? `<details class="wmore"><summary>Read the whole introduction</summary>${leadParas.slice(2).map(t => `<p>${esc(t)}</p>`).join("")}</details>` : ""}
+      ${(ar.facts || []).length ? `<dl class="wfacts">${ar.facts.map(f => `<div><dt>${esc(f.label)}</dt><dd>${esc(f.value)}</dd></div>`).join("")}</dl>` : ""}
+      ${(ar.sections || []).length ? `<div class="wchapters">${ar.sections.map((sec, i) => `<details class="wchap ${sec.spoiler ? "spoil" : ""}" name="wchap" data-chap="${i}">
+          <summary><b>${esc(sec.title)}</b>${sec.spoiler ? `<i>Spoilers</i>` : `<span>${esc(sec.text.split(/(?<=[.!?])\s/)[0].slice(0, 110))}…</span>`}</summary>
+          <div class="wtext">${paras(sec.text)}</div></details>`).join("")}</div>` : ""}
+      <footer>${inside(wp.url, wp.title, "Read on Wikipedia")}<button class="wbtn ghosty" data-url="${esc(wp.url)}">Open in browser</button></footer>
+    </section>`
+    : `<section class="wcard wp empty"><h3>Wikipedia</h3><p class="muted">${failed.has("wikipedia") ? "Wikipedia didn't answer just now. Press ↻ above to try again." : "No Wikipedia article for this one."}</p></section>`;
+  const supportRow = f => `<li class="v-${esc(f.value.replace(/\s/g, ""))}" title="${esc(f.note || "")}"><i>${VAL_ICON[f.value] || "·"}</i><span>${esc(f.label)}</span><small>${esc(f.value === "fixable" ? "fixable" : f.value === "limited" ? "limited" : "")}</small></li>`;
+  const paths = (label, obj) => {
+    const plats = Object.entries(obj || {}).filter(([p]) => /windows|steam play|linux/i.test(p));
+    if (!plats.length) return "";
+    return `<div class="wpaths"><h5>${label}</h5>${plats.map(([p, list]) => list.map(path => `<div class="wpath"><small>${esc(p)}</small><code>${esc(path)}</code>
+      <button class="wbtn tiny" data-copy="${esc(path)}">Copy</button>${/^%[A-Z]+%/.test(path) && IS_WINDOWS ? `<button class="wbtn tiny" data-openpath="${esc(path)}">Open folder</button>` : ""}</div>`).join("")).join("")}</div>`;
+  };
+  const runs = (pc || dk) ? `<section class="wcard runs-on"><h3>How it runs</h3>
+      ${dk ? `<div class="wbadges">${dk.deck ? `<span class="wbadge ${DECK_TONE[dk.deck]}"><b>Steam Deck</b>${esc(dk.deck)}</span>` : ""}${dk.proton ? `<button class="wbadge ${PROTON_TONE[dk.proton] || "ok"}" data-url="${esc(dk.proton_url)}"><b>ProtonDB</b>${esc(dk.proton[0].toUpperCase() + dk.proton.slice(1))}</button>` : ""}</div>` : ""}
+      ${pc ? `${(pc.video.length || pc.input.length) ? `<ul class="wsupport">${[...pc.video, ...pc.input].map(supportRow).join("")}</ul>` : ""}
+        ${pc.fixes.length ? `<h5>Essential fixes</h5><div class="wchips">${pc.fixes.map(f => inside(f.url, `${pc.title}: ${f.title}`, f.title)).join("")}</div>` : ""}
+        ${pc.issues.length ? `<h5>Known issues, with fixes</h5><div class="wchips">${pc.issues.map(f => inside(f.url, `${pc.title}: ${f.title}`, f.title)).join("")}</div>` : ""}
+        ${paths("Saves", pc.saves)}${paths("Settings files", pc.config)}
+        <footer>${inside(pc.url, pc.title, "Open on PCGamingWiki")}</footer>` : ""}
+    </section>` : "";
+  const wikiCard = (wk, kind) => wk ? `<div class="wcom ${kind}">
+      ${wk.article?.thumb ? `<img alt="" loading="lazy" src="${esc(wk.article.thumb)}">` : wk.logo ? `<img alt="" loading="lazy" src="${esc(wk.logo)}">` : `<span class="wglyph">${kind === "fandom" ? "F" : "W"}</span>`}
+      <div><b>${esc(wk.name)}</b>${wk.article?.abstract ? `<p>${esc(wk.article.abstract)}</p>` : `<p class="muted">${kind === "fandom" ? "Community wiki" : "Guides, builds, bosses and item locations"}</p>`}
+      <form class="wsearch" data-wikisearch="${esc(wk.url)}" data-wikikind="${kind}" data-wikiname="${esc(wk.name)}"><input type="search" placeholder="Search ${esc(wk.name)}" aria-label="Search ${esc(wk.name)}"><button class="wbtn" type="submit">Search</button></form>
+      <div class="wrow">${wk.article ? inside(wk.article.url, wk.article.title, "Open the article") : ""}${inside(wk.url, wk.name, "Open the wiki")}</div></div></div>` : "";
+  const community = (fd || fx) ? `<section class="wcard"><h3>Game wikis</h3>${wikiCard(fx, "fextralife")}${wikiCard(fd, "fandom")}</section>` : "";
+  const maps = mg ? `<section class="wcard"><h3>Interactive maps</h3><p class="muted">Every item, collectible and secret marked, from Map Genie.</p>
+      <div class="mapgrid">${mg.maps.map(m => `<button class="mapbtn" data-inside="${esc(m.url)}" data-title="${esc(mg.game)}: ${esc(m.name)}"><span class="mapglyph" aria-hidden="true"></span>${esc(m.name)}</button>`).join("")}</div></section>` : "";
+  const more = `<section class="wcard"><h3>More places to look</h3><div class="wchips">${(w.links || []).map(l => inside(l.url, `${g.name}: ${l.label}`, l.label)).join("")}${!CONSOLES.has(g.platform) ? `<button class="wbtn" data-nexus="${esc(g.name)}">Nexus Mods</button>` : ""}</div></section>`;
+  return `<div class="wikiview">${article}${runs}${community}${maps}${more}</div>`;
+}
+/* the real-world awards, The Game Awards first */
+const CEREMONY_MARK = { tga: "TGA", gj: "GJ", bafta: "BAFTA", steam: "STEAM" };
+function awardsHTML(r, { title = true } = {}) {
+  const cs = r?.ceremonies || [];
+  if (!cs.length) return "";
+  const yr = x => x.year ? `<small>${esc(x.year)}</small>` : "";
+  return `${title ? `<p class="aw-title">${r.wins ? `${r.wins} win${r.wins === 1 ? "" : "s"}` : "No wins"}${r.noms ? `<span> and ${r.noms} nomination${r.noms === 1 ? "" : "s"}</span>` : ""}${r.goty ? `<em>${r.goty}× Game of the Year</em>` : ""}</p>` : ""}
+    <div class="ceremonies">${cs.map(c => `<div class="ceremony c-${c.key}">
+      <div class="c-mark" aria-hidden="true">${CEREMONY_MARK[c.key]}</div>
+      <div class="c-body"><b>${esc(c.name)}</b>
+        ${c.wins.length ? `<ul class="c-wins">${c.wins.map(x => `<li class="${/game of the year/i.test(x.category) ? "goty" : ""}">${esc(x.category || "Winner")}${yr(x)}</li>`).join("")}</ul>` : ""}
+        ${c.noms.length ? `<ul class="c-noms">${c.noms.map(x => `<li>${esc(x.category || "Nominee")}${yr(x)}</li>`).join("")}</ul>` : ""}
+      </div></div>`).join("")}</div>
+    ${r.url ? `<p class="fine">From <a role="link" tabindex="0" data-url="${esc(r.url)}">Wikipedia</a>.</p>` : ""}`;
 }
 function newsHTML(g, items) {
   if (!items.length) return `<p class="muted">No recent news found.</p>`;
@@ -1570,26 +1831,58 @@ const GAME_FORM = [["name", "Name", "text"], ["status", "Status", "select"], ["p
 const BOOK_FORM = [["name", "Title", "text"], ["author", "Author", "text"], ["series", "Series", "text"], ["number", "Number in series", "number"],
   ["status", "Status", "select"], ["priority", "Priority", "select"], ["format", "Format", "select"], ["score", "Score (0–10)", "number"],
   ["store_link", "Store link", "text"], ["notes", "Notes", "textarea"]];
+/* ---------- Modify: the game's details, laid out the way you think about them ---------- */
+const CHIP_FIELDS = new Set(["status", "priority", "play_on", "format", "type"]);
+const FORM_GROUPS = {
+  games: [["Progress", ["status", "priority"]], ["Where you play it", ["platform", "play_on", "format", "type", "upgrade", "migrate_to"]], ["Your take", ["hours", "score"]], ["Details", ["genre", "store_link", "notes"]]],
+  books: [["Progress", ["status", "priority"]], ["The book", ["author", "series", "number", "format"]], ["Your take", ["score"]], ["Details", ["store_link", "notes"]]],
+};
+const NONE_LABEL = { priority: "None", type: "Normal", play_on: "Any", format: "Not set" };
 function fieldHTML(cat, [k, label, type], item) {
   const v = item?.[k];
-  if (type === "select") return `<label>${label}<select name="${k}"><option value=""></option>${opts(cat, k).map(o => `<option ${o === v ? "selected" : ""}>${esc(o)}</option>`).join("")}</select></label>`;
-  if (type === "number") return `<label>${label}<input name="${k}" type="number" step="0.1" min="0" ${k === "score" ? 'max="10"' : ""} value="${v ?? ""}"></label>`;
-  if (type === "textarea") return `<label class="wide">${label}<textarea name="${k}" rows="3">${esc(v || "")}</textarea></label>`;
-  if (type === "check") return `<label class="check"><input name="${k}" type="checkbox" ${v ? "checked" : ""}>${label}</label>`;
-  return `<label class="${["notes", "store_link", "name"].includes(k) ? "wide" : ""}">${label}<input name="${k}" type="text" value="${esc(v ?? "")}"></label>`;
+  if (type === "select" && CHIP_FIELDS.has(k) && opts(cat, k).length <= 8) {
+    const list = k === "status" ? opts(cat, k) : k === "type" || k === "play_on" ? ["", ...opts(cat, k)] : [...opts(cat, k), ""];
+    const tint = o => k === "status" ? STATUS_COLOR[o] : k === "priority" ? PRIO_COLOR[o] : "";
+    return `<fieldset class="mf chips" data-field="${k}"><legend>${label}</legend><div class="chiprow">${list.map(o => `<label class="mchip" style="${tint(o) ? `--c:${tint(o)}` : ""}"><input type="radio" name="${k}" value="${esc(o)}" ${(v ?? "") === o ? "checked" : ""}><span>${esc(o || NONE_LABEL[k] || "None")}</span></label>`).join("")}</div></fieldset>`;
+  }
+  if (type === "select") return `<label class="mf">${label}<select name="${k}"><option value="">Not set</option>${opts(cat, k).map(o => `<option ${o === v ? "selected" : ""}>${esc(o)}</option>`).join("")}</select></label>`;
+  if (k === "score") {
+    const has = v != null && v !== "";
+    return `<div class="mf score ${has ? "" : "unset"}" data-field="score"><span class="mlabel">${label}</span><div class="scorebox"><b class="scorenum">${has ? (+v).toFixed(1).replace(/\.0$/, "") : "–"}</b><small>/10</small>
+      <input type="range" min="0" max="10" step="0.5" value="${has ? v : 5}" data-score aria-label="Score">
+      <button type="button" class="mclear" data-scoreclear title="No score">Clear</button></div><input type="hidden" name="score" value="${has ? v : ""}"></div>`;
+  }
+  if (type === "number") return `<label class="mf num" data-field="${k}">${label}<span class="stepper"><button type="button" data-step="-1" aria-label="Less">−</button><input name="${k}" type="number" step="${k === "number" ? 1 : 0.1}" min="0" value="${v ?? ""}" placeholder="–"><button type="button" data-step="1" aria-label="More">+</button></span></label>`;
+  if (type === "textarea") return `<label class="mf wide" data-field="${k}">${label}<textarea name="${k}" rows="3" placeholder="Anything worth remembering">${esc(v || "")}</textarea></label>`;
+  if (type === "check") return `<label class="mswitch" data-field="${k}"><input name="${k}" type="checkbox" ${v ? "checked" : ""}><i aria-hidden="true"></i><span>${label}</span></label>`;
+  return `<label class="mf ${k === "store_link" ? "wide" : ""}" data-field="${k}">${label}<input name="${k}" type="text" value="${esc(v ?? "")}" ${k === "store_link" ? 'placeholder="https://"' : ""}></label>`;
 }
 function editHTML(cat, item) {
-  if (!state.canEdit) return `<p class="muted">To edit here, connect the app to your sheet: open Settings and follow "How to connect your sheet". Until then, edit the sheet itself and the app picks up the changes on the next sync.</p>`;
-  const form = cat === "games" ? GAME_FORM : BOOK_FORM;
-  return `<form class="editform" id="editForm" data-cat="${cat}">
-    <div class="fields">${form.filter(f => f[2] !== "check").map(f => fieldHTML(cat, f, item)).join("")}</div>
-    ${cat === "games" ? `<div class="checks">${form.filter(f => f[2] === "check").map(f => fieldHTML(cat, f, item)).join("")}</div>` : ""}
-    <p class="fine">Finish and drop dates, runs and "Beaten on" are filled in by the sheet itself. Renaming a game also renames its replays and fetches the cover for the new name.</p>
-    ${cat === "games" ? `<label class="rankfield">Top 100 place <input type="number" name="top_rank" min="1" max="${(state.ranking || []).length + 1}" value="${rankOf(item) || ""}" placeholder="Not ranked">
-      <small>Type 55 and it goes to #55; #55 and everything below it move down one. Clear it to take the game out.</small></label>
-      <div class="row"><button type="button" class="ghost small" data-classic="${item.id}">${isClassic(item) ? "Remove All Time Classic" : "Crown as All Time Classic"}</button></div>` : ""}
-    <div class="row"><button type="button" class="ghost small" data-coverpick>Change cover…</button><button type="button" class="ghost small" data-refresh>Refresh info</button></div>
-    <div class="row"><span class="spacer"></span><button type="submit" class="primary">Save changes</button></div></form>`;
+  if (item?.family) return `<div class="mgroup famnote"><h4>Shared with you</h4><p>${esc(item.name)} is in your Steam Family's library, shared by ${esc((item.owners || []).join(", ") || "a family member")}. It isn't in your sheet, so there's nothing to change yet.</p>
+    ${state.canEdit ? `<button class="primary" data-famadd="${item.id}">Add it to Masterlog</button>` : ""}</div>`;
+  if (!state.canEdit) return `<p class="muted">To change things here, connect the app to your sheet: open Settings and follow "How to connect your sheet". Until then, edit the sheet itself and the app picks up the changes on the next sync.</p>`;
+  const form = cat === "games" ? GAME_FORM : BOOK_FORM, byKey = Object.fromEntries(form.map(f => [f[0], f]));
+  return `<form class="modify" id="editForm" data-cat="${cat}" autocomplete="off">
+    <label class="mname" data-field="name"><span>${byKey.name[1]}</span><input name="name" type="text" value="${esc(item?.name ?? "")}" required></label>
+    ${FORM_GROUPS[cat].map(([title, keys]) => `<section class="mgroup ${title === "Details" ? "mdetails" : ""}"><h4>${title}</h4><div class="mgrid">${keys.filter(k => byKey[k]).map(k => fieldHTML(cat, byKey[k], item)).join("")}</div></section>`).join("")}
+    ${cat === "games" ? `<section class="mgroup mextras"><h4>Extras</h4><div class="mswitches">${form.filter(f => f[2] === "check").map(f => fieldHTML(cat, f, item)).join("")}</div></section>
+      <section class="mgroup"><h4>Top 100</h4><div class="mrank"><label class="mf num" data-field="top_rank">Place<input type="number" name="top_rank" min="1" max="${(state.ranking || []).length + 1}" value="${rankOf(item) || ""}" placeholder="Not ranked"></label>
+        <p class="fine">Type 55 and it goes to #55; everything from #55 down moves one place. Clear it to take the game out.</p>
+        <button type="button" class="mcrown" data-classic="${item.id}">${isClassic(item) ? "Remove All Time Classic" : "Crown as All Time Classic"}</button></div></section>` : ""}
+    <section class="mgroup mtools"><div class="mrow"><button type="button" class="ghost small" data-coverpick>Change cover…</button><button type="button" class="ghost small" data-refresh>Refresh info</button></div>
+      <p class="fine">Finish and drop dates, runs and "Beaten on" are filled in by the sheet itself. Renaming also renames the game's replays and fetches the cover for the new name.</p></section>
+    <div class="msave" id="msave"><span id="mcount">No changes yet</span><button type="button" class="ghost small" data-discard>Discard</button><button type="submit" class="primary">Save changes</button></div>
+  </form>`;
+}
+function modifyDirty(form) {
+  const item = panelItem && findItem(panelItem.kind, panelItem.id);
+  if (!item || !form) return;
+  const ch = readForm(form, form.dataset.cat, item);
+  const rankChanged = !!form.elements.top_rank && String(form.elements.top_rank.value) !== String(rankOf(item) || "");
+  const n = Object.keys(ch).length + (rankChanged ? 1 : 0);
+  form.querySelectorAll("[data-field]").forEach(el => el.classList.toggle("changed", el.dataset.field in ch || (el.dataset.field === "top_rank" && rankChanged)));
+  form.classList.toggle("dirty", n > 0);
+  const c = form.querySelector("#mcount"); if (c) c.textContent = n ? `${n} change${n === 1 ? "" : "s"} not saved yet` : "No changes yet";
 }
 function readForm(form, cat, item) {
   const fields = cat === "games" ? GAME_FORM : BOOK_FORM;
@@ -1627,7 +1920,7 @@ function refreshPanelHead() {
   const item = findItem(panelItem.kind, panelItem.id);
   if (!item) return;
   const head = $("#panel .cv-head");
-  if (head) head.innerHTML = `<h2>${esc(item.name)}</h2><div class="pills">${panelItem.kind === "game" ? pillsHTML(item) : bookPills(item)}</div>`;
+  if (head) { head.querySelector("h2").textContent = item.name; head.querySelector(".pills").innerHTML = panelItem.kind === "game" ? pillsHTML(item) : bookPills(item); }
   if ($("#pbody")?.dataset.tab === "overview") showPanelTab("overview");
 }
 /* ----- walk the shelves (walk.js draws it) ----- */
@@ -1828,6 +2121,42 @@ function showSettingsTab(t) {
   document.querySelectorAll("[data-stab]").forEach(b => b.setAttribute("aria-selected", String(b.dataset.stab === t)));
   document.querySelectorAll("[data-spane]").forEach(p => { p.hidden = p.dataset.spane !== t; });
   if (t === "accounts") renderAccounts();
+  if (t === "pad") padTester();
+}
+/* which kind of controller, so hints show the letters printed on it */
+function padFamily(id = "") {
+  if (/054c|dualsense|dualshock|wireless controller|playstation/i.test(id)) return "ps";
+  if (/057e|nintendo|pro controller|joy-?con/i.test(id)) return "nin";
+  if (/28de|steam/i.test(id)) return "deck";
+  return "xbox";
+}
+const PAD_LABELS = {
+  xbox: ["A", "B", "X", "Y", "LB", "RB", "LT", "RT", "View", "Menu", "LS", "RS", "Up", "Down", "Left", "Right", "Guide"],
+  deck: ["A", "B", "X", "Y", "L1", "R1", "L2", "R2", "View", "Menu", "L3", "R3", "Up", "Down", "Left", "Right", "Steam"],
+  ps: ["✕", "○", "□", "△", "L1", "R1", "L2", "R2", "Create", "Options", "L3", "R3", "Up", "Down", "Left", "Right", "PS"],
+  nin: ["B", "A", "Y", "X", "L", "R", "ZL", "ZR", "−", "+", "LS", "RS", "Up", "Down", "Left", "Right", "Home"],
+};
+const PAD_NAMES = { xbox: "Xbox-style controller", deck: "Steam Input controller", ps: "PlayStation controller", nin: "Nintendo controller" };
+function padTester() {
+  if (padTester.on) return;
+  padTester.on = true;
+  const loop = () => {
+    const pane = document.querySelector('[data-spane="pad"]');
+    if (!pane || pane.hidden || !$("#settings").open) { padTester.on = false; return; }
+    const pad = [...(navigator.getGamepads?.() || [])].find(p => p && p.connected);
+    if (pad) {
+      const fam = padFamily(pad.id), labels = PAD_LABELS[fam];
+      $("#padName").textContent = PAD_NAMES[fam];
+      $("#padHelp").textContent = pad.id.replace(/\s*\(.*?Vendor.*?\)/i, "").slice(0, 80) + (pad.mapping === "standard" ? "" : " · not in the standard layout: add Masterlog to Steam to fix the buttons");
+      const pressed = pad.buttons.map((b, i) => b.pressed ? labels[i] || `#${i}` : null).filter(Boolean);
+      const [lx = 0, ly = 0, rx = 0, ry = 0] = pad.axes;
+      $("#padTest").innerHTML = `${pressed.length ? pressed.map(p => `<kbd>${esc(p)}</kbd>`).join("") : `<span class="muted">Press a button to test it</span>`}
+        <span class="sticks"><i style="--x:${lx};--y:${ly}"></i><i style="--x:${rx};--y:${ry}"></i></span>`;
+      $("#padNow").classList.add("on");
+    } else { $("#padNow").classList.remove("on"); $("#padTest").innerHTML = ""; }
+    requestAnimationFrame(loop);
+  };
+  requestAnimationFrame(loop);
 }
 function openSettings(showHowTo, tab = "sheet") {
   const f = $("#settingsForm"), st = state.settings;
@@ -1839,6 +2168,9 @@ function openSettings(showHowTo, tab = "sheet") {
   f.fx_volume.value = st.fx_volume ?? 0.5;
   f.intro.checked = st.intro !== false;
   f.big_picture.checked = !!st.big_picture;
+  f.smooth_scroll.checked = st.smooth_scroll !== false;
+  f.native_titlebar.checked = !!st.native_titlebar;
+  f.pad_scroll.value = st.pad_scroll || 1; $("#padScrollVal").textContent = `${(+f.pad_scroll.value).toFixed(1)}×`;
   f.steam_cc.value = st.steam_cc || "GE";
   f.ps_locale.value = st.ps_locale || "en-us";
   f.money_gel.checked = st.money === "GEL";
@@ -1884,6 +2216,7 @@ async function chooseAmbience(clear) {
 function soundSettings() {
   const f = $("#settingsForm");
   return { sound_on: f.sound_on.checked, ambient_volume: +f.ambient_volume.value, fx_volume: +f.fx_volume.value, intro: f.intro.checked, big_picture: f.big_picture.checked,
+    smooth_scroll: f.smooth_scroll.checked, native_titlebar: f.native_titlebar.checked, pad_scroll: +f.pad_scroll.value,
     steam_cc: f.steam_cc.value, ps_locale: f.ps_locale.value, money: f.money_gel.checked ? "GEL" : "native", auto_names: f.auto_names.checked,
     eshop_country: f.eshop_country.value };
 }
@@ -1977,7 +2310,23 @@ async function renderAccounts() {
       ${s.linked ? `<button type="button" class="ghost small" data-unlink="${k}">Unlink</button>` : `<button type="button" class="primary small" data-linkopen="${k}">Link</button>`}</div>
       <div class="form" data-linkform="${k}" hidden>${a.help}${a.fields.map(([n, l, t]) => `<label>${l}<input name="acct_${k}_${n}" type="${t}" autocomplete="off"></label>`).join("")}
         <div class="row"><span class="spacer"></span><button type="button" class="primary small" data-link="${k}">${k === "heroic" ? "Link Heroic" : `Link ${a.name}`}</button></div></div></div>`;
-  }).join("") + `<div class="row"><button type="button" class="ghost small" id="syncAccounts">Check accounts now</button><button type="button" class="ghost small" id="reviewImports">Review games not in Masterlog</button><button type="button" class="ghost small" id="showHidden">Hidden games</button></div>`;
+  }).join("") + familyRowHTML() + `<div class="row"><button type="button" class="ghost small" id="syncAccounts">Check accounts now</button><button type="button" class="ghost small" id="reviewImports">Review games not in Masterlog</button><button type="button" class="ghost small" id="showHidden">Hidden games</button></div>`;
+}
+function familyRowHTML() {
+  const d = familyState.data || {};
+  const st = !d.linked ? `<span class="st">Not linked</span>` : d.none ? `<span class="st">You're not in a Steam Family</span>`
+    : `<span class="st ok">${d.apps?.length || 0} shared games${d.family ? ` from ${esc(d.family)}` : ""}${d.t ? ` · checked ${ago(new Date(d.t * 1000).toISOString())}` : ""}${d.valid ? "" : " · sign in again to refresh"}</span>`;
+  return `<div class="acct"><div class="acct-head"><span class="sw" style="background:#66C0F4"></span><b>Steam Family</b>${st}<span class="spacer"></span>
+    ${d.linked ? `<button type="button" class="ghost small" data-famlink>${d.valid ? "Check now" : "Sign in again"}</button><button type="button" class="ghost small" data-famunlink>Unlink</button>` : `<button type="button" class="primary small" data-famlink>Sign in to Steam</button>`}</div>
+    <p class="fine">Shows the games your family shares with you, in Library → Steam Family and on Home. You sign in on Steam's own page in a Masterlog window; Masterlog keeps only a short-lived read-only token, on this PC.</p></div>`;
+}
+async function linkFamily() {
+  const r = await Promise.resolve(api?.steam_family_link()).catch(e => ({ error: String(e) }));
+  if (!r || r.error) return toast(r?.error || "Couldn't open Steam's sign-in.", "err");
+  toast(r.done ? "Checking your Steam Family…" : "Sign in to Steam in the window that opened. It closes on its own when you're done.");
+  let n = 0;
+  const tick = async () => { await loadFamily(); if (familyState.data?.apps?.length || familyState.data?.none || ++n > 60) { renderAccounts(); if (familyState.data?.apps?.length) toast(`Found ${familyState.data.apps.length} games shared by your Steam Family.`, "ok"); return; } setTimeout(tick, 4000); };
+  setTimeout(tick, 3000);
 }
 async function linkAccount(k) {
   const v = n => $(`[name="acct_${k}_${n}"]`)?.value.trim() || "";
@@ -2122,47 +2471,18 @@ function tick() {
   syncLabel();
 }
 
-/* ---------- PS2 boot towers ---------- */
+/* ---------- PS2 boot towers ----------
+   Each tower rises and falls on the graphics card (a transform animation), so the background moves smoothly at the
+   screen's own refresh rate and costs the page nothing; it rests with every other animation when Masterlog isn't in front. */
 function towers() {
-  const c = $("#towers"), ctx = c.getContext("2d");
-  const reduce = matchMedia("(prefers-reduced-motion: reduce)").matches;
-  let w, h, cols = [];
-  const resize = () => {
-    w = c.width = Math.round(innerWidth * 0.6); h = c.height = Math.round(innerHeight * 0.6);  // soft shapes: a smaller canvas looks the same
-    cols = Array.from({ length: 26 }, (_, i) => ({
-      x: (i / 26) * w + Math.random() * w / 30, base: 0.25 + Math.random() * 0.55, phase: Math.random() * Math.PI * 2,
-      speed: 0.00012 + Math.random() * 0.00018, width: (8 + Math.random() * 22) * 0.6, depth: 0.35 + Math.random() * 0.65,
-    }));
-  };
-  const draw = t => {
-    ctx.clearRect(0, 0, w, h);
-    const tint = isBooks() ? [255, 214, 150] : [150, 180, 255];
-    for (const col of cols) {
-      const hh = h * (col.base + 0.12 * Math.sin(t * col.speed + col.phase));
-      const y = h - hh;
-      const g = ctx.createLinearGradient(0, y, 0, h);
-      g.addColorStop(0, `rgba(${tint},${0.10 * col.depth})`);
-      g.addColorStop(0.6, `rgba(${tint},${0.04 * col.depth})`);
-      g.addColorStop(1, "rgba(40,60,140,0)");
-      ctx.fillStyle = g;
-      ctx.fillRect(col.x, y, col.width * col.depth, hh);
-      ctx.fillStyle = `rgba(${tint},${0.22 * col.depth})`;
-      ctx.fillRect(col.x, y, col.width * col.depth, 1.2);
-    }
-  };
-  resize(); addEventListener("resize", resize);
-  if (reduce) { draw(0); return; }
-  let last = 0;
-  // the background moves slowly, so a dozen frames a second is plenty; it rests while you scroll, read a case or use another window
-  let scrolling = 0;
-  $("#view").addEventListener("scroll", () => { scrolling = performance.now(); }, { passive: true });
-  // ten frames a second on a timer (not every screen refresh); it rests while you scroll, read a case, walk or use another window
-  const loop = () => {
-    const t = performance.now();
-    if (!document.hidden && document.hasFocus() && t - scrolling > 250 && !$("#panel").classList.contains("open") && !Walk.active) { draw(t); last = t; }
-    setTimeout(loop, document.hidden || !document.hasFocus() ? 1000 : 160);
-  };
-  loop();
+  const c = $("#towers");
+  if (!c || c.childElementCount) return;
+  const n = 26, rnd = (a, b) => a + Math.random() * (b - a);
+  c.innerHTML = Array.from({ length: n }, (_, i) => {
+    const base = rnd(0.25, 0.8), depth = rnd(0.35, 1), top = Math.min(0.98, base + 0.12), low = Math.max(0.05, base - 0.12);
+    const half = rnd(10, 26);
+    return `<i style="left:${((i / n) * 100 + rnd(0, 3.3)).toFixed(2)}%;width:${(rnd(8, 30) * depth).toFixed(1)}px;height:${(top * 100).toFixed(1)}%;--lo:${(low / top).toFixed(3)};--d:${depth.toFixed(2)};animation-duration:${half.toFixed(1)}s;animation-delay:-${rnd(0, half * 2).toFixed(1)}s"></i>`;
+  }).join("");
 }
 
 /* ---------- navigation: mouse, keyboard, controller ---------- */
@@ -2209,10 +2529,15 @@ function bindGlobal() {
   $("#copyScript").addEventListener("click", copyScript);
   $("#copyManifest").addEventListener("click", copyManifest);
   document.querySelectorAll("[data-stab]").forEach(b => b.addEventListener("click", () => showSettingsTab(b.dataset.stab)));
-  $("#settingsForm").addEventListener("input", e => { if (["sound_on", "ambient_volume", "fx_volume"].includes(e.target.name)) applySound({ ...state.settings, ...soundSettings() }); });
+  $("#settingsForm").addEventListener("input", e => {
+    if (["sound_on", "ambient_volume", "fx_volume"].includes(e.target.name)) applySound({ ...state.settings, ...soundSettings() });
+    if (e.target.name === "pad_scroll") { state.settings.pad_scroll = +e.target.value; $("#padScrollVal").textContent = `${(+e.target.value).toFixed(1)}×`; }
+  });
   $("#accountsBox").addEventListener("click", e => {
     const o = e.target.closest("[data-linkopen]"); if (o) { const f = $(`[data-linkform="${o.dataset.linkopen}"]`); f.hidden = !f.hidden; return; }
     const l = e.target.closest("[data-link]"); if (l) return linkAccount(l.dataset.link);
+    if (e.target.closest("[data-famlink]")) return linkFamily();
+    if (e.target.closest("[data-famunlink]")) return Promise.resolve(api?.steam_family_unlink()).then(() => { familyState.data = null; familyState.key = ""; renderAccounts(); render(); toast("Steam Family unlinked. Its token was deleted from this PC.", "ok"); });
     const u = e.target.closest("[data-unlink]"); if (u) return Promise.resolve(api?.unlink_account(u.dataset.unlink)).then(() => { renderAccounts(); toast("Unlinked. Its saved key was deleted from this PC.", "ok"); });
     if (e.target.closest("#syncAccounts")) { api?.accounts_sync(); pollAccounts(true); return toast("Checking your accounts…"); }
     if (e.target.closest("#showHidden")) { $("#settings").close(); return showHidden(); }
@@ -2257,7 +2582,9 @@ function bindGlobal() {
     const qc = e.target.closest("[data-qc], [data-qown]");
     if (qc) { e.stopPropagation(); return quickMark(qc); }
     if (e.target.closest("select, input, option")) return;
-    const c = e.target.closest(".case"); if (c && !c.closest(".hero")) return openPanel(c.dataset.kind, c.dataset.id);
+    const c = e.target.closest(".case");
+    if (c && !c.closest(".hero") && (e.shiftKey || selection.size)) { e.preventDefault(); return toggleSelect(c); }
+    if (c && !c.closest(".hero")) return openPanel(c.dataset.kind, c.dataset.id);
     const tr = e.target.closest("tr[data-id]"); if (tr) return openPanel(tr.dataset.kind, tr.dataset.id);
     const more = e.target.closest("[data-go]");
     if (more) {
@@ -2377,12 +2704,15 @@ function bindGlobal() {
     const kind = c.dataset.kind === "book" ? "book" : "game", item = findItem(kind, c.dataset.id);
     if (!item) return;
     e.preventDefault(); hidePeek();
+    if (selection.size && c.classList.contains("sel")) return batchCtxMenu(e.clientX, e.clientY);
     ctxMenu(item, e.clientX, e.clientY, kind);
   });
   document.addEventListener("click", e => {
     const m = document.getElementById("ctx");
     if (!m) return;
     if (!m.contains(e.target)) return closeCtx();
+    const bl = e.target.closest("li[data-bset], li[data-bact]");
+    if (bl) { e.preventDefault(); e.stopPropagation(); return batchAction(bl); }
     const li = e.target.closest("li[data-act], li[data-set], button[data-act]");
     if (li) { e.preventDefault(); e.stopPropagation(); ctxAction(li); }
   }, true);
@@ -2469,30 +2799,60 @@ function bindGlobal() {
     const gp = e.target.closest("[data-gplay]"); if (gp) return showGallery(+gp.dataset.gplay, true);
     if (e.target.closest("[data-coverpick]")) { e.stopPropagation(); return openCoverPicker(); }
     const nx = e.target.closest("[data-nexus]"); if (nx) { Promise.resolve(api?.nexus_link(nx.dataset.nexus)).then(u => u && api.open_inside(u, `${nx.dataset.nexus} mods`)); return; }
+    const fa = e.target.closest("[data-famadd]"); if (fa) { const g = findItem("game", fa.dataset.famadd); if (g) addFamilyGame(g); return; }
     const cl = e.target.closest("[data-classic]"); if (cl) { const g = findItem("game", cl.dataset.classic); if (g) { setClassic(isClassic(g) ? null : g); showPanelTab("edit"); } return; }
     if (e.target.closest("[data-refresh]")) return refreshGame();
     const dl = e.target.closest("[data-dlcown]"); if (dl) return markDlc(dl.dataset.dlcown);
+    const cp = e.target.closest("[data-copy]"); if (cp) { navigator.clipboard?.writeText(cp.dataset.copy).then(() => toast("Copied.", "ok")).catch(() => toast("Couldn't copy.", "err")); return; }
+    const op = e.target.closest("[data-openpath]"); if (op) { Promise.resolve(api?.open_path(op.dataset.openpath)).then(r => r !== true && toast(r || "That folder isn't on this PC.", "err")); return; }
     const ins = e.target.closest("[data-inside]"); if (ins) { api?.open_inside(ins.dataset.inside, ins.dataset.title || "Masterlog"); return; }
     const tw = e.target.closest("[data-twitch]"); if (tw) return playWatch("twitch", +tw.dataset.twitch);
     const yw = e.target.closest("[data-ytw]"); if (yw) return playWatch("yt", +yw.dataset.ytw);
   });
   panel.addEventListener("submit", e => {
     e.preventDefault();
+    const ws = e.target.closest("[data-wikisearch]");
+    if (ws) {
+      const q = ws.querySelector("input").value.trim(); if (!q) return;
+      const base = ws.dataset.wikisearch.replace(/\/wiki\/.*$/, "").replace(/\/$/, "");
+      const url = ws.dataset.wikikind === "fandom" ? `${base}/wiki/Special:Search?query=${encodeURIComponent(q)}` : `${base}/${encodeURIComponent(q.replace(/ /g, "+"))}`;
+      api?.open_inside(url, `${ws.dataset.wikiname}: ${q}`); return;
+    }
     const item = findItem(panelItem.kind, panelItem.id);
     if (e.target.id === "editForm") {
       const rf = e.target.elements.top_rank, cat = e.target.dataset.cat;
       const changes = readForm(e.target, cat, item);
       const ranked = rf && cat === "games" ? placeInRanking(item, rf.value === "" ? 0 : Math.max(1, Math.round(+rf.value))) : false;
-      if (Object.keys(changes).length) saveEdit(cat, item, changes);
+      const form = e.target;
+      if (Object.keys(changes).length) Promise.resolve(saveEdit(cat, item, changes)).then(() => { form.classList.add("saved"); setTimeout(() => form.classList.remove("saved"), 900); modifyDirty(form); });
       else if (!ranked) toast("Nothing changed.");
+      else modifyDirty(form);
     }
     if (e.target.id === "runFormEl") submitRun(e.target, item);
+  });
+  // Modify: live score, steppers, and a save bar that counts what you changed
+  const modifyInput = e => {
+    const form = e.target.closest?.("#editForm"); if (!form) return;
+    if (e.target.matches("[data-score]")) {
+      const box = e.target.closest(".score"), v = +e.target.value;
+      form.elements.score.value = v; box.classList.remove("unset"); box.querySelector(".scorenum").textContent = String(v).replace(/\.0$/, "");
+    }
+    modifyDirty(form);
+  };
+  panel.addEventListener("input", modifyInput);
+  panel.addEventListener("change", modifyInput);
+  panel.addEventListener("click", e => {
+    const form = e.target.closest?.("#editForm"); if (!form) return;
+    const st = e.target.closest("[data-step]");
+    if (st) { const inp = st.parentElement.querySelector("input"); const v = (+inp.value || 0) + (+st.dataset.step); inp.value = Math.max(0, Math.round(v * 10) / 10); modifyDirty(form); return; }
+    if (e.target.closest("[data-scoreclear]")) { const box = form.querySelector(".score"); form.elements.score.value = ""; box.classList.add("unset"); box.querySelector(".scorenum").textContent = "–"; modifyDirty(form); return; }
+    if (e.target.closest("[data-discard]")) { showPanelTab("edit"); toast("Changes discarded."); }
   });
 
   document.addEventListener("keydown", e => {
     if (e.key === "F11") { e.preventDefault(); toggleBigPicture(); return; }
     if (e.key === "l" && e.ctrlKey) { e.preventDefault(); Walk.active ? Walk.close() : openWalk(); return; }
-    if (e.key === "Escape") { if ($("#panel").classList.contains("open") && !document.getElementById("ctx") && !document.querySelector("dialog[open]")) closePanel(); return; }
+    if (e.key === "Escape") { if ($("#panel").classList.contains("open") && !document.getElementById("ctx") && !document.querySelector("dialog[open]")) closePanel(); else if (!document.getElementById("ctx")) clearSelection(); return; }
     if (Walk.active && !$("#panel").classList.contains("open")) return;
     if (["INPUT", "SELECT", "TEXTAREA"].includes(document.activeElement?.tagName) || document.querySelector("dialog[open]")) return;
     const dir = { ArrowLeft: "l", ArrowRight: "r", ArrowUp: "u", ArrowDown: "d" }[e.key];
@@ -2505,6 +2865,13 @@ function bindGlobal() {
   const calm = () => document.body.classList.toggle("calm", document.hidden || !document.hasFocus());
   addEventListener("blur", calm); addEventListener("focus", calm); document.addEventListener("visibilitychange", calm);
   pollPad();
+  Promise.resolve(api?.platform_info?.()).then(p => {
+    if (!p) return;
+    state.platform = p;
+    document.body.dataset.os = p.os;
+    document.body.classList.toggle("deck", !!p.deck);
+    if (p.native_pad) nativePads();
+  }).catch(() => {});
 }
 async function quickMark(btn) {
   const kind = btn.dataset.qkind, item = findItem(kind, btn.dataset.qc || btn.dataset.qown);
@@ -2633,6 +3000,15 @@ async function claudeApply() {
 function ctxMenu(g, x, y, kind = "game") {
   closeCtx();
   if (kind === "book") return bookCtxMenu(g, x, y);
+  if (g.family) {
+    const m = document.createElement("div");
+    m.id = "ctx"; m.className = "ctx"; m.setAttribute("role", "menu"); m.dataset.id = g.id; m.dataset.kind = "game";
+    m.innerHTML = `<div class="ctx-head">${esc(g.name)}<small>Shared by ${esc((g.owners || []).join(", "))}</small></div><ul>
+      <li role="menuitem" tabindex="-1" data-act="open">Open</li>
+      ${state.canEdit ? `<li role="menuitem" tabindex="-1" data-act="famadd">Add to Masterlog</li>` : ""}
+      <li role="menuitem" tabindex="-1" data-act="famplay">Play on Steam</li></ul>`;
+    return placeCtx(m, x, y);
+  }
   const edit = state.canEdit ? "" : " disabled";
   const sub = (label, key, values, current, fmt = v => v) => `<li class="has-sub" role="menuitem" tabindex="-1"><span>${label}</span><i>›</i><ul class="sub" role="menu">${values.map(v =>
     `<li role="menuitemradio" tabindex="-1" aria-checked="${(current ?? "") === v}" data-set="${key}" data-val="${esc(v)}"${edit}>${esc(fmt(v))}</li>`).join("")}</ul></li>`;
@@ -2713,6 +3089,8 @@ async function ctxAction(li) {
   if (act === "delete") { if (!armDelete(li, g)) return; closeCtx(); return deleteItem("games", g); }
   if (act === "rank") { const v = m.querySelector(".ctx-rank input").value; closeCtx(); placeInRanking(g, v === "" ? 0 : Math.max(1, Math.round(+v))); return render(); }
   closeCtx();
+  if (act === "famadd") return addFamilyGame(g);
+  if (act === "famplay") return api?.open(`steam://run/${g.appid}`);
   if (act === "open") return openPanel("game", g.id);
   if (act === "classic") return setClassic(isClassic(g) ? null : (g.virtual ? state.games.find(x => x.row === g.row) || g : g));
   if (act === "cover") { panelItem = { kind: "game", id: g.id }; coverFor = null; return openCoverPicker(); }
@@ -2881,6 +3259,7 @@ async function toggleBigPicture() {
 }
 function switchCatalog(cat) {
   if (cat === state.catalog) return;
+  selection.clear(); paintSelection();
   if (cat === "news") $("#newsDot").hidden = true;
   state.catalog = cat;
   state.view = cat === "books" ? "shelf" : cat === "news" ? "breaking" : "home";
@@ -2962,6 +3341,7 @@ function navBack() {
   if (dlg) { const c = dlg.querySelector("[data-close], .close, button[value=cancel], [formmethod=dialog]"); c ? c.click() : dlg.close(); return; }
   if ($("#panel").classList.contains("open")) { const id = panelItem?.id, kind = panelItem?.kind; closePanel(); const c = id != null && caseFor(id, kind === "book" ? "book" : "game"); c ? focusNav(c, false) : focusFirst(); return; }
   if (["INPUT", "SELECT", "TEXTAREA"].includes(document.activeElement?.tagName)) { document.activeElement.blur(); return; }
+  if (selection.size) return clearSelection();
   const home = state.catalog === "books" ? "shelf" : state.catalog === "news" ? "breaking" : "home";
   if (state.view !== home) { go(home); requestAnimationFrame(() => focusFirst()); }
 }
@@ -3008,6 +3388,31 @@ function cyclePanelTab(d) {
 /* Controller: polled only while one is plugged in, and slowly while Masterlog is in the background.
    A select · B back · X options · Y search · LB/RB tabs · LT/RT sub-tabs · right stick scrolls ·
    View switches games/books · Menu big picture · R3 walk mode */
+/* On Linux (the Steam Deck) the browser engine doesn't see controllers, so Masterlog reads them itself and the
+   page sees them through the usual navigator.getGamepads(): same code for the controller everywhere, Walk mode too. */
+function nativePads() {
+  if (nativePads.on) return;
+  nativePads.on = true;
+  const own = navigator.getGamepads ? navigator.getGamepads.bind(navigator) : () => [];
+  let pad = null, busy = false;
+  navigator.getGamepads = () => { const list = [...(own() || [])]; return list.some(p => p && p.connected) ? list : pad ? [pad] : list; };
+  const poll = async () => {
+    if (!busy) {
+      busy = true;
+      const st = await Promise.resolve(api?.pad_state?.()).catch(() => null);
+      busy = false;
+      if (st) {
+        const was = !!pad;
+        pad = { id: st.id, index: 0, connected: true, mapping: "standard", timestamp: performance.now(), axes: st.axes,
+          buttons: st.buttons.map(v => ({ pressed: v > 0.5, touched: v > 0, value: v })) };
+        if (!was) dispatchEvent(new Event("gamepadconnected"));
+      } else if (pad) { pad = null; dispatchEvent(new Event("gamepaddisconnected")); }
+    }
+    // quick while a controller is there and Masterlog is in front, a slow look otherwise
+    setTimeout(poll, pad && !document.hidden && document.hasFocus() ? 16 : 1000);
+  };
+  poll();
+}
 const Pad = (() => {
   const held = {}, rep = {};
   let raf = 0, timer = 0, lastInput = 0;
@@ -3022,11 +3427,12 @@ const Pad = (() => {
     const h = document.getElementById("padHints");
     if (!h || h.hidden) return;
     const layer = navLayer();
-    const set = layer.id === "ctx" ? [["A", "Choose"], ["B", "Close"]]
-      : layer.tagName === "DIALOG" ? [["A", "Select"], ["B", "Close"]]
-      : layer.id === "panel" ? [["A", "Select"], ["LB RB", "Tabs"], ["B", "Close"]]
-      : [["A", "Open"], ["X", "Options"], ["Y", "Search"], ["LB RB", "Tabs"], ["B", "Back"]];
-    const html = set.map(([k, t]) => `<span><b>${k}</b>${t}</span>`).join("");
+    const L = PAD_LABELS[padFamily(present()?.id)], tabs = `${L[4]} ${L[5]}`;
+    const set = layer.id === "ctx" ? [[L[0], "Choose"], [L[1], "Close"]]
+      : layer.tagName === "DIALOG" ? [[L[0], "Select"], [L[1], "Close"]]
+      : layer.id === "panel" ? [[L[0], "Select"], [tabs, "Tabs"], [L[1], "Close"]]
+      : [[L[0], "Open"], [L[2], "Options"], [L[3], "Search"], [tabs, "Tabs"], [L[1], selection.size ? "Clear" : "Back"]];
+    const html = set.map(([k, t]) => `<span><b>${esc(k)}</b>${t}</span>`).join("");
     if (h.dataset.html !== html) { h.innerHTML = html; h.dataset.html = html; }
   }
   // fire once on press, then repeat while held (for moving through long lists)
@@ -3059,8 +3465,9 @@ const Pad = (() => {
         const layer = navLayer();
         const box = layer === document ? $("#view") : layer.querySelector(".pbody, .scroll, form") || layer;
         const row = document.activeElement?.closest?.(".shelf-row");
-        box.scrollTop += sy * Math.abs(sy) * 28;
-        if (sx && row) row.scrollLeft += sx * Math.abs(sx) * 28;
+        const speed = 28 * (+state.settings.pad_scroll || 1);
+        box.scrollTop += sy * Math.abs(sy) * speed;
+        if (sx && row) row.scrollLeft += sx * Math.abs(sx) * speed;
       }
     }
     press(0, navActivate);
@@ -3429,6 +3836,8 @@ async function start() {
   setTimeout(checkNewsDot, 15000); setInterval(checkNewsDot, 15 * 60 * 1000);
   setTimeout(() => loadDeals(false), 6000); setInterval(() => loadDeals(false), 30 * 60 * 1000);
   setInterval(pollRenames, 60 * 1000);
+  setTimeout(loadFamily, 3000); setInterval(loadFamily, 10 * 60 * 1000);
+  setTimeout(setupChrome, 600);
   setInterval(async () => { const a = await Promise.resolve(api?.itch_added()).catch(() => []); if (a?.length) { toast(`Added to your wishlist from itch.io: ${a.join(", ")}.`, "party"); sync(true); } }, 5000);
   setInterval(() => { if (state.catalog === "news") loadNews(state.view, true); }, 15 * 60 * 1000);
   pollAccounts(false);

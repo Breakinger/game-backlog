@@ -19,7 +19,7 @@ import youtube
 BROWSER_UA = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/130.0 Safari/537.36"
 MC = "https://backend.metacritic.com"
 DAY = 86400
-TTL = {"awards": 30 * 86400, "about": 30 * DAY, "media": 7 * DAY, "ratings": 3 * DAY, "dlcs": 7 * DAY, "wiki": 30 * DAY, "news": 6 * 3600, "trailers": 14 * DAY, "watch": 2 * DAY, "updated": 12 * 3600, "book": 30 * DAY}
+TTL = {"awards": 30 * 86400, "about": 30 * DAY, "media": 7 * DAY, "ratings": 3 * DAY, "dlcs": 7 * DAY, "wiki": 30 * DAY, "wiki2": 14 * DAY, "awards2": 30 * DAY, "news": 6 * 3600, "trailers": 14 * DAY, "watch": 2 * DAY, "updated": 12 * 3600, "book": 30 * DAY}
 NEW_UPDATE_DAYS = 14
 CACHE_VERSION = 3
 PATCH_RE = re.compile(r"\b(patch|update|hotfix|hot-fix|version\s*\d|v\d+\.\d+|release notes)\b", re.I)
@@ -179,26 +179,7 @@ def ps_store_rating(name):
 
 # ---------------- Wikipedia ----------------
 
-def wikipedia(query, hint="video game"):
-    s = _json("https://en.wikipedia.org/w/api.php?action=query&list=search&format=json&srlimit=6&srsearch="
-              + urllib.parse.quote(f"{query} {hint}"))
-    results = (s.get("query") or {}).get("search") or []
-    if not results:
-        return None
-    base = re.sub(r"\s*\(.*?\)\s*", " ", query).strip()
-    def score(r):
-        t = r["title"]
-        bonus = 0.15 if hint.split()[0] in t.lower() or "game" in t.lower() or "novel" in t.lower() else 0
-        return similar(base, re.sub(r"\s*\(.*?\)", "", t)) + bonus
-    best = max(results, key=score)
-    if score(best) < 0.55:
-        return None
-    sm = _json("https://en.wikipedia.org/api/rest_v1/page/summary/" + urllib.parse.quote(best["title"].replace(" ", "_")))
-    if sm.get("type") == "disambiguation":
-        return None
-    return {"title": sm.get("title"), "extract": sm.get("extract"),
-            "url": ((sm.get("content_urls") or {}).get("desktop") or {}).get("page"),
-            "thumb": (sm.get("thumbnail") or {}).get("source")}
+from lore import wikipedia  # noqa: E402  (Wikipedia wants apps to say who they are; lore does)
 
 
 # ---------------- news ----------------
@@ -517,22 +498,52 @@ class Info:
 
     # ----- wiki -----
     def wiki(self, game):
+        """Everything the Wiki tab shows. Nothing is remembered when a source couldn't be reached, so a bad
+        connection doesn't hide an article for weeks."""
         key = self._key(game)
-        hit = self.cache.get("wiki", key)
-        if hit is not None and "mapgenie" in hit:
+        hit = self.cache.get("wiki2", key)
+        if hit is not None:
             return hit
-        try:
-            w = wikipedia(game.get("name", ""), ("video game " + (game.get("developer") or "")).strip())
-        except Exception:
-            return None
         import guides
-        q = urllib.parse.quote(game.get("name", ""))
-        out = {"wikipedia": w,
-               "fandom_search": f"https://community.fandom.com/wiki/Special:Search?query={q}&scope=cross-wiki",
-               "pcgamingwiki": f"https://www.pcgamingwiki.com/w/index.php?search={q}",
-               "fandom": _safe(guides.fandom, game.get("name", "")),
-               "mapgenie": _safe(guides.mapgenie, game.get("name", ""))}
-        self.cache.put("wiki", key, out)
+        import lore
+        name = game.get("name", "")
+        appid = self._appid(game)
+        failed = []
+
+        def run(label, fn, *a):
+            try:
+                return fn(*a)
+            except Exception:
+                failed.append(label)
+                return None
+        hint = ("video game " + (game.get("developer") or "")).strip()
+        jobs = {"pcgw": self.pool.submit(run, "pcgw", lore.pcgw, appid, name),
+                "deck": self.pool.submit(run, "deck", lore.deck, appid) if appid else None,
+                "fandom": self.pool.submit(run, "fandom", guides.fandom, name),
+                "fextralife": self.pool.submit(run, "fextralife", guides.fextralife, name),
+                "mapgenie": self.pool.submit(run, "mapgenie", guides.mapgenie, name)}
+        wp = run("wikipedia", lore.wikipedia, name, hint)
+        art = run("article", lore.article, wp["title"]) if wp else None
+        out = {"wikipedia": wp, "article": art, "appid": appid}
+        for k, f in jobs.items():
+            try:
+                out[k] = f.result(timeout=60) if f else None
+            except Exception:
+                out[k] = None
+                failed.append(k)
+        q = urllib.parse.quote(name)
+        out["links"] = [
+            {"label": "PCGamingWiki", "url": (out.get("pcgw") or {}).get("url") or f"https://www.pcgamingwiki.com/w/index.php?search={q}"},
+            {"label": "HowLongToBeat", "url": f"https://howlongtobeat.com/?q={q}"},
+            {"label": "ProtonDB", "url": f"https://www.protondb.com/app/{appid}" if appid else f"https://www.protondb.com/search?q={q}"},
+            {"label": "SteamDB", "url": f"https://steamdb.info/app/{appid}/" if appid else f"https://steamdb.info/search/?a=app&q={q}"},
+            {"label": "GameFAQs", "url": f"https://gamefaqs.gamespot.com/search?game={q}"},
+            {"label": "IGN guide", "url": f"https://www.ign.com/search?q={q}%20wiki%20guide"},
+            {"label": "Fandom search", "url": f"https://community.fandom.com/wiki/Special:Search?query={q}&scope=cross-wiki"},
+        ]
+        out["failed"] = failed
+        if "wikipedia" not in failed and "article" not in failed:
+            self.cache.put("wiki2", key, out)
         return out
 
     # ----- news -----
@@ -691,146 +702,3 @@ def _safe(fn, *a):
         return fn(*a)
     except Exception:
         return None
-
-
-# ---------------- awards a game won (Wikipedia's accolades tables) ----------------
-from html.parser import HTMLParser
-
-
-class _Tables(HTMLParser):
-    """Rows of every wikitable: [(text, rowspan, colspan, is_header), ...]."""
-    def __init__(self):
-        super().__init__()
-        self.tables, self.depth, self.cell, self.row, self.skip = [], 0, None, None, 0
-
-    def handle_starttag(self, tag, attrs):
-        a = dict(attrs)
-        if tag == "table":
-            self.depth += 1
-            if self.depth == 1:
-                self.tables.append([])
-        elif self.depth == 1 and tag == "tr":
-            self.row = []
-        elif self.depth == 1 and tag in ("td", "th") and self.row is not None:
-            def num(k):
-                try:
-                    return max(1, int(re.sub(r"\D", "", a.get(k) or "1") or 1))
-                except ValueError:
-                    return 1
-            self.cell = {"text": "", "rs": num("rowspan"), "cs": num("colspan"), "th": tag == "th"}
-        elif tag in ("sup", "style", "script"):
-            self.skip += 1
-        elif tag == "br" and self.cell is not None:
-            self.cell["text"] += " "
-
-    def handle_endtag(self, tag):
-        if tag == "table":
-            self.depth -= 1
-        elif tag in ("sup", "style", "script") and self.skip:
-            self.skip -= 1
-        elif self.depth == 1 and tag in ("td", "th") and self.cell is not None and self.row is not None:
-            self.cell["text"] = re.sub(r"\s+", " ", self.cell["text"]).strip()
-            self.row.append(self.cell)
-            self.cell = None
-        elif self.depth == 1 and tag == "tr" and self.row is not None:
-            if self.row:
-                self.tables[-1].append(self.row)
-            self.row = None
-
-    def handle_data(self, data):
-        if self.cell is not None and not self.skip:
-            self.cell["text"] += data
-
-
-def _grid(rows):
-    """Expand rowspan/colspan so every row has its full set of columns."""
-    out, carry = [], {}
-    for row in rows:
-        cells, col, it = [], 0, iter(row)
-        pending = list(row)
-        while pending or col in carry:
-            if col in carry:
-                text, left = carry[col]
-                cells.append(text)
-                if left <= 1:
-                    del carry[col]
-                else:
-                    carry[col] = (text, left - 1)
-                col += 1
-                continue
-            c = pending.pop(0)
-            for _ in range(c["cs"]):
-                cells.append(c["text"])
-                if c["rs"] > 1:
-                    carry[col] = (c["text"], c["rs"] - 1)
-                col += 1
-        out.append(cells)
-    return out
-
-
-def _won(table):
-    if len(table) < 2:
-        return [], 0
-    head = [c["text"].lower() for c in table[0]]
-    def idx(*words):
-        for i, h in enumerate(head):
-            if any(w in h for w in words):
-                return i
-        return None
-    ri, ai, ci, yi = idx("result"), idx("award", "ceremony", "event", "organization", "publication"), idx("category"), idx("year", "date")
-    if ri is None or (ai is None and ci is None):
-        return [], 0
-    wins, total = [], 0
-    for r in _grid(table[1:]):
-        if len(r) <= ri:
-            continue
-        total += 1
-        if not re.search(r"\bwon\b", r[ri], re.I):
-            continue
-        get = lambda i: r[i] if i is not None and i < len(r) else ""
-        year = re.search(r"(19|20)\d\d", get(yi) or "")
-        wins.append({"award": get(ai), "category": get(ci), "year": year.group(0) if year else ""})
-    return wins, total
-
-
-def awards(name):
-    """The awards a game won, from Wikipedia's Accolades section (or its 'List of accolades' page)."""
-    w = wikipedia(name)
-    if not w or not w.get("title"):
-        return None
-    api = "https://en.wikipedia.org/w/api.php?format=json&formatversion=2&redirects=1&action=parse"
-    pages = [("List of accolades received by " + w["title"], None), (w["title"], "sect")]
-    for page, mode in pages:
-        try:
-            if mode:
-                secs = _json(api + "&prop=sections&page=" + urllib.parse.quote(page)).get("parse", {}).get("sections") or []
-                sec = next((x for x in secs if re.search(r"accolades|awards", x.get("line", ""), re.I)), None)
-                if not sec:
-                    continue
-                text = _json(api + "&prop=text&section=" + sec["index"] + "&page=" + urllib.parse.quote(page)).get("parse", {}).get("text") or ""
-                url = w.get("url", "") + "#" + sec.get("anchor", "Accolades")
-            else:
-                d = _json(api + "&prop=text&page=" + urllib.parse.quote(page))
-                if "error" in d:
-                    continue
-                text = d.get("parse", {}).get("text") or ""
-                url = "https://en.wikipedia.org/wiki/" + urllib.parse.quote(page.replace(" ", "_"))
-        except Exception:
-            continue
-        p = _Tables()
-        p.feed(text)
-        wins, total = [], 0
-        for t in p.tables:
-            a, n = _won(t)
-            wins += a
-            total += n
-        if wins or total:
-            seen, out = set(), []
-            for x in wins:
-                k = (x["award"], x["category"], x["year"])
-                if k not in seen:
-                    seen.add(k)
-                    out.append(x)
-            goty = [x for x in out if re.search(r"game of the year|ultimate game of the year", x["category"] + " " + x["award"], re.I)]
-            return {"wins": out, "goty": len(goty), "nominations": total, "url": url, "source": "Wikipedia"}
-    return {"wins": [], "goty": 0, "nominations": 0, "url": w.get("url"), "source": "Wikipedia"}

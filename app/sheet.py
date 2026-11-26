@@ -306,8 +306,11 @@ class ScriptClient:
         return self._call(body={"action": "update", "key": self.key, "tab": tab, "row": row, "name": name,
                                 "changes": self._to_headers(tab, changes)})
 
-    def add(self, tab, values):
-        return self._call(body={"action": "add", "key": self.key, "tab": tab, "values": self._to_headers(tab, values)})
+    def add(self, tab, values, finished_unknown=False):
+        body = {"action": "add", "key": self.key, "tab": tab, "values": self._to_headers(tab, values)}
+        if finished_unknown:
+            body["finished_unknown"] = True   # script 7: keep "unknown date" instead of today's date
+        return self._call(body=body)
 
 
 def load_csv(link):

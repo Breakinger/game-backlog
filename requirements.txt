@@ -2,3 +2,7 @@ pywebview>=5.1
 pyinstaller>=6.10
 cryptography>=42
 Pillow>=10
+# the Steam Deck (Linux) build draws the page with Qt WebEngine
+QtPy>=2.4; sys_platform == "linux"
+PyQt6>=6.6; sys_platform == "linux"
+PyQt6-WebEngine>=6.6; sys_platform == "linux"

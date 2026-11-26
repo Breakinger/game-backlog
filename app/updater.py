@@ -6,16 +6,17 @@ The leftover *.old.exe is deleted the next time the app starts.
 """
 import json
 import os
-import subprocess
 import sys
 import threading
 import time
 import urllib.request
 
+import platforms
 from version import VERSION
 
 REPO = "Breakinger/game-backlog"
-ASSETS = ("Masterlog.exe", "GameBacklog.exe")
+# Windows builds update from the .exe; the Steam Deck (Linux) build from its AppImage
+ASSETS = ("Masterlog-SteamDeck.AppImage",) if platforms.LINUX else ("Masterlog.exe", "GameBacklog.exe")
 UA = "Masterlog-updater"
 
 
@@ -27,7 +28,7 @@ def _ver(v):
 
 
 def frozen():
-    return getattr(sys, "frozen", False) and sys.platform == "win32"
+    return bool(platforms.installed())
 
 
 class Updater:
@@ -37,6 +38,8 @@ class Updater:
 
     def cleanup(self):
         if not frozen():
+            return
+        if not platforms.WINDOWS:
             return
         exe = sys.executable
         old = os.path.splitext(exe)[0] + ".old.exe"
@@ -72,10 +75,11 @@ class Updater:
             self.check()
         if not self.latest or not self.latest.get("url"):
             return "No new version to install."
-        exe = sys.executable
+        exe = platforms.installed()
         folder = os.path.dirname(exe)
-        new = os.path.join(folder, "Masterlog.new.exe")
-        old = os.path.splitext(exe)[0] + ".old.exe"
+        ext = ".exe" if platforms.WINDOWS else ".AppImage"
+        new = os.path.join(folder, "Masterlog.new" + ext)
+        old = os.path.splitext(exe)[0] + ".old" + ext
         self.progress = {"state": "downloading", "done": 0, "total": self.latest.get("size") or 0, "error": None}
         try:
             req = urllib.request.Request(self.latest["url"], headers={"User-Agent": UA})
@@ -88,28 +92,34 @@ class Updater:
                     f.write(chunk)
                     self.progress["done"] += len(chunk)
             with open(new, "rb") as f:
-                if f.read(2) != b"MZ":
-                    raise ValueError("The download isn't a Windows program.")
+                magic = f.read(4)
+            if platforms.WINDOWS and magic[:2] != b"MZ":
+                raise ValueError("The download isn't a Windows program.")
+            if not platforms.WINDOWS and magic != b"\x7fELF":
+                raise ValueError("The download isn't a Linux program.")
             if self.progress["total"] and os.path.getsize(new) != self.progress["total"]:
                 raise ValueError("The download was cut off. Try again.")
             self.progress["state"] = "installing"
-            if os.path.exists(old):
-                os.remove(old)
-            os.replace(exe, old)
-            os.replace(new, exe)
+            if platforms.WINDOWS:
+                # Windows won't overwrite a running .exe, but it will rename it
+                if os.path.exists(old):
+                    os.remove(old)
+                os.replace(exe, old)
+                os.replace(new, exe)
+            else:
+                # Linux keeps the running copy alive in memory, so the file can be swapped in place
+                os.chmod(new, 0o755)
+                os.replace(new, exe)
         except PermissionError:
             self._undo(exe, new, old)
-            self.progress.update(state="error", error="Windows didn't allow replacing the app in this folder. Move the app to a folder you own, like Documents, and try again.")
+            self.progress.update(state="error", error="The app's folder doesn't allow replacing it. Move Masterlog to a folder you own (like Documents, or your home folder on the Steam Deck) and try again.")
             return self.progress["error"]
         except Exception as e:
             self._undo(exe, new, old)
             self.progress.update(state="error", error=str(e) or e.__class__.__name__)
             return self.progress["error"]
         self.progress["state"] = "restarting"
-        env = {k: v for k, v in os.environ.items() if not k.startswith(("_PYI", "_MEI"))}
-        env["PYINSTALLER_RESET_ENVIRONMENT"] = "1"
-        flags = 0x00000008 | 0x00000200  # DETACHED_PROCESS | CREATE_NEW_PROCESS_GROUP
-        subprocess.Popen([exe], cwd=folder, env=env, creationflags=flags, close_fds=True)
+        platforms.relaunch()
         return None
 
     @staticmethod
