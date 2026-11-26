@@ -101,6 +101,18 @@ class BrowserFetch:
         self.ready = threading.Event()
 
     def get(self, url, timeout=25):
+        import health
+        try:
+            out = self._fetch(url, timeout)
+        except ValueError:
+            raise
+        except Exception as e:
+            health.record(url, False, str(e)[:120] or e.__class__.__name__)
+            raise
+        health.record(url, True)
+        return out
+
+    def _fetch(self, url, timeout):
         import webview
         u = urllib.parse.urlsplit(url)
         if u.scheme != "https" or not (u.netloc in self.HOSTS or u.netloc.endswith(self.HOST_SUFFIXES)):
@@ -167,6 +179,8 @@ class Api:
 
     def __init__(self):
         self._dir = data_dir()
+        import health
+        health.install(self._dir)   # note which outside sources answer (Settings → Sources)
         self._settings_path = os.path.join(self._dir, "settings.json")
         self._cache_path = os.path.join(self._dir, "last_sync.json")
         self._settings = dict(DEFAULTS)
@@ -1316,6 +1330,11 @@ class Api:
 
     def updated(self, games):
         return _safe(self._info.updated, games) or {}
+
+    def sources_health(self):
+        """Settings → Sources: which outside sites answered lately, and what went wrong when they didn't."""
+        import health
+        return health.H.report() if health.H else {"sources": [], "alert": False}
 
     def events(self):
         """Big events live now or starting within a few days (showcases, The Game Awards, sales)."""

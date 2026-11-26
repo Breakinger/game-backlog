@@ -2135,3 +2135,22 @@ body.calm .glint { animation-play-state: paused; }
               linear-gradient(0deg, rgba(0, 0, 0, .45), transparent 45%); }
 .ev.has-art .ev-glyph { display: none; }
 .ev.has-art .ev-noms { padding: 12px; border-radius: 12px; background: rgba(0, 0, 0, .45); }
+
+/* Settings → Source status */
+.hsum { display: flex; flex-wrap: wrap; gap: 8px; margin: 6px 0 12px; }
+.hs { padding: 4px 10px; border-radius: 999px; font-size: 13px; font-weight: 600; }
+.hs.ok { background: rgba(91, 211, 138, .15); color: var(--ok); } .hs.warn { background: rgba(255, 181, 71, .15); color: #FFB547; } .hs.bad { background: rgba(255, 107, 107, .16); color: #FF8A8A; }
+.hlist { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 6px; }
+.hlist li { display: grid; grid-template-columns: 14px minmax(0, 1fr) minmax(0, 1.1fr); gap: 12px; align-items: start; padding: 10px 12px; border-radius: 10px; background: rgba(6, 12, 31, .45); border: 1px solid var(--line); }
+.hlist b { display: block; font-size: 14px; } .hlist small { display: block; color: var(--muted); font-size: 12px; }
+.hdot { width: 10px; height: 10px; border-radius: 50%; margin-top: 4px; background: var(--ok); box-shadow: 0 0 8px rgba(91, 211, 138, .6); }
+.h-trouble .hdot { background: #FFB547; box-shadow: 0 0 8px rgba(255, 181, 71, .6); }
+.h-failing .hdot { background: #FF6B6B; box-shadow: 0 0 8px rgba(255, 107, 107, .7); }
+.hstate { font-size: 13px; text-align: right; color: var(--silver); } .hstate span { font-weight: 600; } .h-failing .hstate span { color: #FF8A8A; } .h-trouble .hstate span { color: #FFB547; }
+#settingsBtn { position: relative; }
+#settingsBtn.alert::after { content: ""; position: absolute; top: 4px; right: 4px; width: 9px; height: 9px; border-radius: 50%; background: #FF6B6B; box-shadow: 0 0 0 2px var(--bg, #0A1430); }
+/* settings: room for every tab on one line, and nothing wider than the dialog */
+#settings.settings { width: min(900px, 94vw); }
+.stabs { flex-wrap: wrap; row-gap: 0; }
+.stabs button { white-space: nowrap; padding: 9px 12px; }
+#settings .spane { min-width: 0; overflow-wrap: anywhere; }

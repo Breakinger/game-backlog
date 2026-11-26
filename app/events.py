@@ -318,10 +318,13 @@ class Events:
         self.busy = True
         try:
             store = dict(self.store)
+            import health
             try:
                 found = parse_steam_schedule(self._get(STEAM_SCHEDULE))
                 if found:
                     store["steam"] = found
+                health.record("parse_steam_schedule", bool(found), None if found else "Steam's schedule page changed shape: no sale dates could be read",
+                              "Reading: Steam's sale schedule", "Dates of Steam's seasonal sales and Next Fest")
             except Exception:
                 pass
             items = []

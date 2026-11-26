@@ -211,8 +211,14 @@ class Goty:
         self.busy = True
         try:
             live = {"t": time.time(), "tga": {}, "gj": {}, "bafta": {}, "steam": {}}
+            import health
             try:
-                live["tga"] = {str(y): [w, n] for y, (w, n) in parse_tga(self._page("tga")).items()}
+                parsed = parse_tga(self._page("tga"))
+                live["tga"] = {str(y): [w, n] for y, (w, n) in parsed.items()}
+                # the page lists every year since 2014; far fewer means its table changed shape
+                good = sum(1 for y, (w, n) in parsed.items() if w and TGA.get(y, (None,))[0] in (None, w))
+                health.record("parse_tga", good >= 8, None if good >= 8 else "Wikipedia's Game of the Year table changed shape: new winners won't be picked up",
+                              "Reading: The Game Awards winners", "New Game of the Year winners from Wikipedia")
             except Exception:
                 live["tga"] = self.live.get("tga", {})
             for key, all_win in (("gj", True), ("bafta", False)):

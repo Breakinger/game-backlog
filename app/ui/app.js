@@ -2369,6 +2369,7 @@ function showSettingsTab(t) {
   document.querySelectorAll("[data-spane]").forEach(p => { p.hidden = p.dataset.spane !== t; });
   if (t === "accounts") renderAccounts();
   if (t === "pad") padTester();
+  if (t === "health") paintHealth();
 }
 /* which kind of controller, so hints show the letters printed on it */
 function padFamily(id = "") {
@@ -3129,6 +3130,7 @@ function bindGlobal() {
   addEventListener("blur", calm); addEventListener("focus", calm); document.addEventListener("visibilitychange", calm);
   pollPad();
   loadGoty();
+  setTimeout(checkHealthDot, 60 * 1000); setInterval(checkHealthDot, 30 * 60 * 1000);
   $("#gotyPickList")?.addEventListener("click", e => {
     const b = e.target.closest("[data-gchoose]");
     if (!b) return;
@@ -3934,6 +3936,30 @@ async function pollRenames() {
     } });
     sync(true);
   }
+}
+
+/* ---------- Settings → Source status: which outside sites answered lately ---------- */
+function agoShort(ts) {
+  if (!ts) return "never";
+  const s = Date.now() / 1000 - ts, n = (v, u) => `${v} ${u}${v === 1 ? "" : "s"}`;
+  return s < 90 ? "just now" : s < 3600 ? `${n(Math.round(s / 60), "minute")} ago` : s < 86400 ? `${n(Math.round(s / 3600), "hour")} ago` : `${n(Math.round(s / 86400), "day")} ago`;
+}
+function forShort(ts) { return agoShort(ts).replace(/ ago$/, "").replace(/^just now$/, "a moment"); }
+async function paintHealth() {
+  const r = await Promise.resolve(api?.sources_health?.()).catch(() => null);
+  const list = r?.sources || [];
+  const bad = list.filter(x => x.status === "failing"), hmm = list.filter(x => x.status === "trouble");
+  $("#healthSum").innerHTML = !list.length ? `<span class="hs ok">Nothing checked yet. Use the app for a bit and come back.</span>`
+    : bad.length ? `<span class="hs bad">${bad.length} not working for over a day</span>${hmm.length ? `<span class="hs warn">${hmm.length} had trouble recently</span>` : ""}`
+    : hmm.length ? `<span class="hs warn">${hmm.length} had trouble recently; usually that sorts itself out</span>` : `<span class="hs ok">Everything answered the last time it was asked</span>`;
+  $("#healthList").innerHTML = list.map(x => `<li class="h-${x.status}"><i class="hdot" aria-hidden="true"></i><div><b>${esc(x.name)}</b>${x.what ? `<small>${esc(x.what)}</small>` : ""}</div>
+    <div class="hstate">${x.status === "ok" ? `Worked ${esc(agoShort(x.ok_t))}` : `<span>${x.status === "failing" ? "Not working" : "Trouble"} for ${esc(forShort(x.since))}</span><small>${esc(x.err || "")}</small>${x.ok_t ? `<small>Last worked ${esc(agoShort(x.ok_t))}</small>` : ""}`}</div></li>`).join("");
+  $("#settingsBtn")?.classList.toggle("alert", !!r?.alert);
+}
+async function checkHealthDot() {
+  const r = await Promise.resolve(api?.sources_health?.()).catch(() => null);
+  const b = $("#settingsBtn");
+  if (b) { b.classList.toggle("alert", !!r?.alert); b.title = r?.alert ? "Settings · a source has stopped working (see Source status)" : "Settings"; }
 }
 
 /* ---------- Events on Home, like Steam's big banner: showcases, The Game Awards and sales, live or starting soon ---------- */

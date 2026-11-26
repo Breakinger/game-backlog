@@ -67,6 +67,12 @@
       { id: "tga", series: "tga", title: "The Game Awards 2026", kind: "Awards show", theme: "tga", sale: false, start: 1796919945, end: 1796932545, timed: true, state: "soon", note: "Live from the Peacock Theater in Los Angeles: the year's awards and world premieres.", watch: [["YouTube", "https://www.youtube.com/@thegameawards/streams"], ["Twitch", "https://www.twitch.tv/thegameawards"]], links: [["Official site", "https://thegameawards.com"], ["All nominees", "https://thegameawards.com/nominees"]] },
       { id: "win", series: "steam_sale", title: "Steam Winter Sale", kind: "Sale", theme: "winter", sale: true, start: 1795883145, end: 1797438345, timed: true, state: "soon", note: "", watch: [], links: [["Open the Steam store", "https://store.steampowered.com/"]] }
     ] }, 200),
+    sources_health: async () => wait({ alert: true, sources: [
+      { key: "steam_schedule", name: "Steam sale schedule", what: "Dates of Steam's seasonal sales and Next Fest", status: "failing", ok_t: 1795279086, since: 1795538286, err: "the site turned the app away (403)" },
+      { key: "igdb", name: "IGDB", what: "Covers, art and release dates for console games", status: "trouble", ok_t: 1795707486, since: 1795710486, err: "no answer in time" },
+      { key: "wikipedia", name: "Wikipedia", what: "Wiki tab, awards, Game of the Year winners, release years", status: "ok", ok_t: 1795710966 },
+      { key: "steam_store", name: "Steam Store", what: "Prices, descriptions, release dates, Steam Deck ratings", status: "ok", ok_t: 1795711056 }
+    ] }, 150),
     release_year: async name => wait(2018, 200),
     release_years: async names => wait({ years: Object.fromEntries(names.map((n, i) => [n, [2022, 2023, 2024, 2025, 2019, 2020][i % 6]])), pending: 0 }, 300),
     open_path: async p => "That folder isn't on this PC.",
