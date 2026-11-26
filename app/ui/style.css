@@ -2007,3 +2007,16 @@ body.chrome:not(.bigpic) .caseview .refreshinfo { right: 70px; }
 
 .gpick-other, .gpick-empty { grid-column: 1 / -1; margin: 6px 0 0; }
 .gpick-other { font-size: 13px; color: var(--muted); font-weight: 600; }
+
+/* Game of the Year fire, toned down: a low, soft glow of flame that stays close to the cover */
+.goty-flames { top: -11%; height: 30%; left: 6%; right: 6%; opacity: .72; }
+.goty-flames i { animation-duration: 1.6s !important; }
+.goty-sparks { top: -4%; height: 34%; }
+.goty-sparks i { width: 3px; height: 3px; opacity: .8; }
+.case.fx-goty:not(.goty-unplayed) .box { box-shadow: 0 0 0 2px #FFC531, 0 0 16px rgba(255, 179, 0, .32), 0 18px 34px rgba(0, 0, 0, .55); }
+.case.fx-mygoty:not(.goty-unplayed) .box { box-shadow: 0 0 0 2px #EEF3FF, 0 0 16px rgba(220, 232, 255, .3), 0 18px 34px rgba(0, 0, 0, .55); }
+.gfire { top: -9%; height: 30%; left: 0; right: 0; opacity: .75; }
+.gfire i { animation-duration: 1.6s; }
+/* room above History covers grows with the cover size setting, so the fire never reaches the text */
+.year .detail .shelf-row { padding-top: calc(112px * var(--scale) * .3 + 18px); }
+.year .best { margin-bottom: 4px; }
