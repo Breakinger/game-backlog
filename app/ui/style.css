@@ -1953,3 +1953,54 @@ body.chrome:not(.bigpic) .caseview .refreshinfo { right: 70px; }
 .gpick small { color: var(--muted); font-size: 12px; }
 .gyear:not(.live) *, .gyear:not(.live)::before { animation-play-state: paused !important; }
 @media (max-width: 1250px) { .gstage { grid-template-columns: 1fr 1fr; } .gothers { grid-column: 1 / -1; display: grid; grid-template-columns: repeat(auto-fill, minmax(220px, 1fr)); } .gothers h5 { grid-column: 1 / -1; } }
+
+/* History years: room above the covers for flames and crowns, and the year's Game of the Year in its own frame */
+.year .detail .shelf-row { padding-top: 44px; }
+.year .best { position: relative; z-index: 2; }
+.ltop { flex-wrap: wrap; }
+.ltop .name { flex: 1 1 96px; }
+.ltop .medals { flex: none; }
+.year.open .detail.with-goty { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 26px; align-items: start; }
+.ymain { min-width: 0; }
+.ycrowns { display: inline-flex; gap: 4px; margin-left: 10px; vertical-align: 6px; }
+.ycrowns i { display: inline-block; width: 24px; height: 18px; }
+.ycrowns i.dim { filter: grayscale(1) brightness(.7); opacity: .55; }
+.ycrowns i.lit .crown.gold { filter: drop-shadow(0 0 6px rgba(255, 190, 40, .8)); }
+.ycrowns i.lit .crown.white { filter: drop-shadow(0 0 6px rgba(230, 238, 255, .8)); }
+.ygoty { width: max-content; max-width: 330px; padding: 14px 16px 16px; border-radius: 14px; border: 1px solid rgba(255, 197, 49, .35);
+  background: radial-gradient(120% 90% at 50% 0%, rgba(255, 190, 60, .14), rgba(255, 190, 60, 0) 60%), rgba(8, 14, 36, .78); }
+.ygoty h4 { display: flex; align-items: center; gap: 8px; margin: 0 0 4px; font-size: 14px; font-weight: 600; color: #FFE7A0; }
+.ygoty h4 .crown { width: 22px; height: 16px; }
+.ygoty .fine { margin: 0 0 8px; }
+.ygrow { display: flex; gap: 16px; padding-top: 38px; }
+.yg { position: relative; width: 132px; display: flex; flex-direction: column; gap: 4px; cursor: pointer; border-radius: 8px; outline: none; }
+.yg:focus-visible .gbox { outline: 2px solid #8FD3FF; outline-offset: 3px; }
+.ygcover { position: relative; width: 132px; margin-bottom: 6px; }
+.yg .gbox { transition: transform .2s cubic-bezier(.2,.8,.2,1); }
+.yg:hover .gbox { transform: translateY(-3px); }
+.yg.gold .gbox { box-shadow: 0 0 0 2px #FFC531, 0 0 24px rgba(255, 179, 0, .5); }
+.yg.white .gbox { box-shadow: 0 0 0 2px #EEF3FF, 0 0 24px rgba(220, 232, 255, .45); }
+.yg.both .gbox { box-shadow: 0 0 0 2px #FFC531, 0 0 0 4px #EEF3FF, 0 0 28px rgba(255, 210, 120, .55); }
+.yg.gold .gfire i { background: radial-gradient(ellipse at 50% 92%, #FFFBE6 0%, #FFE07A 16%, #FFB21A 36%, #FF6A00 58%, rgba(120, 30, 0, 0) 80%); }
+.yg.white:not(.both) .gfire i { background: radial-gradient(ellipse at 50% 92%, #FFFFFF 0%, #F4F7FF 20%, #CFDBFF 42%, #8FA6E8 62%, rgba(40, 60, 140, 0) 82%); }
+.yg.both .gfire i:nth-child(even) { background: radial-gradient(ellipse at 50% 92%, #FFFFFF 0%, #F4F7FF 20%, #CFDBFF 42%, #8FA6E8 62%, rgba(40, 60, 140, 0) 82%); }
+.ygcrowns { position: absolute; z-index: 3; left: 50%; top: -20px; transform: translateX(-50%); display: flex; gap: 2px; }
+.ygcrowns i { display: block; width: 40px; height: 30px; filter: drop-shadow(0 4px 8px rgba(0, 0, 0, .6)); }
+.ygcrowns i.gold { transform: rotate(-8deg); } .ygcrowns i.white { transform: rotate(8deg); }
+.yg b { font-size: 14px; line-height: 1.25; }
+.yg small { color: var(--muted); font-size: 12px; }
+.yg .ygk { color: #FFD66B; font-weight: 600; font-size: 11.5px; }
+.yg.white:not(.both) .ygk { color: #E8EEFF; }
+.yg .milestone { margin-top: 4px; }
+.yg.unplayed .gbox { filter: grayscale(1) brightness(.6); box-shadow: 0 0 0 1px rgba(255, 255, 255, .18); }
+.yg.unplayed .ygcrowns i { filter: grayscale(1) brightness(.85); opacity: .7; }
+.ygwait { margin-top: 18px; padding-top: 12px; border-top: 1px dashed rgba(255, 255, 255, .16); }
+.ygwait:first-of-type { margin-top: 6px; }
+.ygwait-label { display: block; font-size: 12px; color: var(--muted); margin-bottom: -26px; }
+.ygpick { margin-top: 16px; display: inline-flex; align-items: center; gap: 8px; }
+.ygpick .crown { width: 20px; height: 15px; }
+@media (max-width: 1250px) { .year.open .detail.with-goty { grid-template-columns: 1fr; } .ygoty { max-width: none; width: auto; } }
+.year > button { grid-template-columns: 190px 1fr 90px 90px 90px; }
+.year .y { display: flex; align-items: center; white-space: nowrap; }
+.ycrowns { vertical-align: middle; }
+.ycrowns { font-size: 0; line-height: 0; align-items: center; align-self: center; }

@@ -722,7 +722,7 @@ async function loadGoty(force) {
   if (!d?.years) return;
   const before = JSON.stringify(gotyState.data?.years);
   gotyState.data = d; gotyState.key = "";
-  if (before !== JSON.stringify(d.years) || force) { if (state.view === "home") fillGotyHome(); if (state.view === "stats") fillGotyHistory(); if (state.view !== "home" && state.view !== "stats" && state.catalog === "games") render(); }
+  if (before !== JSON.stringify(d.years) || force) { if (state.view === "home") fillGotyHome(); if (state.view !== "home" && state.catalog === "games") render(); }
   if (!gotyState.retry && !d.checked) { gotyState.retry = true; setTimeout(() => loadGoty(), 20000); }   // the first weekly read is still running
 }
 /* game id -> what it won: { official: [years], mine: [years], also: [{ceremony, year}] } */
@@ -803,6 +803,41 @@ function gotyYearHTML(y, { nav = false } = {}) {
     </div>
     ${mine ? `<div class="gfoot"><button type="button" class="linkish" data-gpick="${y.year}">Change your pick</button> <button type="button" class="linkish" data-gclear="${y.year}">Remove</button></div>` : ""}
   </div>`;
+}
+/* inside each History year: that year's Game of the Year frame on the right, the official winner and yours;
+   one cover with both crowns when they're the same game; a game you haven't played sits apart, greyed out */
+function gotyYear(year) { return (gotyState.data?.years || []).find(y => y.year === year) || null; }
+function yearCrowns(year) {
+  const y = gotyYear(year), mine = myGoty()[year];
+  if (!y?.tga?.winner && !mine) return "";
+  const lit = n => { const m = n && rankMatch(n); return m && m.via !== "collection" && played(m.g) ? "lit" : "dim"; };
+  return `<span class="ycrowns">${y?.tga?.winner ? `<i class="${lit(y.tga.winner)}" title="Game of the Year: ${esc(y.tga.winner)}">${CROWN("gold")}</i>` : ""}${mine ? `<i class="${lit(mine)}" title="Your Game of the Year: ${esc(mine)}">${CROWN("white")}</i>` : ""}</span>`;
+}
+function gotyFrameCard(name, kinds, year) {
+  const m = name && rankMatch(name), g = m && m.via !== "collection" ? m.g : null, has = g && played(g);
+  const both = kinds.length > 1, gold = kinds.includes("gold");
+  const title = both ? `Game of the Year ${year}, and yours` : gold ? `Game of the Year ${year}` : `Your Game of ${year}`;
+  const art = g ? `<div class="art" data-kind="game" data-id="${g.id}"></div>` : `<div class="art virtual" data-vname="${esc(name)}"><span>${esc(name)}</span></div>`;
+  const sub = !g ? "Not in your library" : has ? (g.completed ? `Finished ${fmtDate(g.completed)}` : statusOf(g)) : g.status === "Wishlist" ? "On your wishlist" : "Not played yet";
+  return `<div class="yg ${gold ? "gold" : "white"} ${both ? "both" : ""} ${has ? "played" : "unplayed"}" ${g ? `data-open="${g.id}" data-kind="game"` : `data-vgame="${esc(name)}"`} tabindex="0">
+    <div class="ygcover">${has ? `<div class="gfire" aria-hidden="true"><i></i><i></i><i></i><i></i><i></i></div>` : ""}<div class="gbox">${art}</div>
+      <span class="ygcrowns">${kinds.map(k => `<i class="${k}">${CROWN(k)}</i>`).join("")}</span></div>
+    <small class="ygk">${esc(title)}</small><b>${esc(name)}</b><small>${esc(sub)}</small>${has ? `<span class="milestone">Milestone of ${year}</span>` : ""}</div>`;
+}
+function yearGotyHTML(year) {
+  const y = gotyYear(year), official = y?.tga?.winner, mine = myGoty()[year];
+  if (!official && !mine && !(y?.tga?.nominees?.length)) return "";
+  const same = official && mine && rankKey(official) === rankKey(mine);
+  const cards = same ? [[official, ["gold", "white"]]] : [official && [official, ["gold"]], mine && [mine, ["white"]]].filter(Boolean);
+  const isPlayed = n => { const m = rankMatch(n); return m && m.via !== "collection" && played(m.g); };
+  const playedCards = cards.filter(c => isPlayed(c[0])), waiting = cards.filter(c => !isPlayed(c[0]));
+  return `<aside class="ygoty" aria-label="Game of the Year ${year}">
+    <h4>${CROWN("gold")}<span>Game of the Year ${year}</span></h4>
+    ${!official && y?.tga?.nominees?.length ? `<p class="fine">The Game Awards ${year} haven't picked a winner yet.</p>` : ""}
+    ${playedCards.length ? `<div class="ygrow">${playedCards.map(c => gotyFrameCard(c[0], c[1], year)).join("")}</div>` : ""}
+    ${waiting.length ? `<div class="ygwait"><span class="ygwait-label">Not played yet</span><div class="ygrow">${waiting.map(c => gotyFrameCard(c[0], c[1], year)).join("")}</div></div>` : ""}
+    ${mine ? "" : `<button type="button" class="ghost small ygpick" data-gpick="${year}">${CROWN("white")}Choose your Game of ${year}</button>`}
+  </aside>`;
 }
 /* the other awards a crowned game won (Best Narrative, Best Art Direction…), as small chips under it */
 function fillGotyWins(root) {
@@ -956,7 +991,7 @@ function renderView() {
   activateArt(v);
   drainLazy(v);
   if (state.view === "home") { updateHero(heroGame(), true); fillWhatsNew(); fillGotyHome(); }
-  if (state.view === "stats") fillGotyHistory();
+  if (state.view === "stats") { fillGotyHistory(); loadVirtualArt(v); }
   if (state.view === "shelf") updateBookHero(bookHero(), true);
 }
 
@@ -1396,15 +1431,17 @@ function yearsHTML() {
     const list = [...y.games].sort((a, b) => (a.completed || "").localeCompare(b.completed || ""));
     return `<div class="year ${y.year === now ? "current" : ""} ${state.openYears.has(y.year) ? "open" : ""}" data-year="${y.year}">
       <button aria-expanded="${state.openYears.has(y.year)}">
-        <span class="y">${y.year}</span>
+        <span class="y">${y.year}${yearCrowns(y.year)}</span>
         <span class="bars" title="${y.games.length} games, ${y.replays.length} replays"><span class="g" style="width:${y.games.length / max * 100}%"></span><span class="r" style="width:${y.replays.length / max * 100}%"></span></span>
         <span class="num"><b>${y.games.length}</b><small>games</small></span>
         <span class="num"><b>${Math.round(y.hours) || "–"}</b><small>hours</small></span>
         <span class="num"><b>${avg}</b><small>avg score</small></span>
       </button>
-      <div class="detail">
+      <div class="detail ${yearGotyHTML(y.year) ? "with-goty" : ""}">
+        <div class="ymain">
         <div class="best">${top ? `Best of the year: <b>${esc(top.name)}</b>, ${scoreText(top.score)}` : "Nothing rated yet."}${main ? `  ·  Mostly on ${esc(main[0])}` : ""}${y.replays.length ? `  ·  ${y.replays.length} replay${y.replays.length > 1 ? "s" : ""}` : ""}</div>
         ${list.length ? `<div class="shelf-row">${list.map(g => caseHTML(g, { sub: fmtDate(g.completed) })).join("")}</div>` : `<p class="intro">No games finished yet this year. Set a game to Completed and it shows up here.</p>`}
+        </div>${yearGotyHTML(y.year)}
       </div></div>`;
   }).join("");
   const total = state.games.length || 1;
