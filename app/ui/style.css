@@ -1454,3 +1454,56 @@ body.bar-away.bar-peek .barpeek svg { transform: rotate(180deg); }
 .subtab { border: 0; background: none; color: var(--muted); padding: 7px 18px; border-radius: 999px; font: inherit; font-size: 14.5px; cursor: pointer; transition: background .2s, color .2s; }
 .subtab:hover { color: var(--glass); }
 .subtab[aria-selected="true"] { background: linear-gradient(90deg, #6741D9, #B197FC); color: #fff; font-weight: 600; box-shadow: 0 0 14px rgba(177, 151, 252, .45); }
+
+/* ---------- performance: every looping effect animates only transform or opacity ---------- */
+/* High priority: a static gold outline, and a glow that breathes by opacity (no box-shadow animation) */
+.fx-high .box { animation: none; box-shadow: 0 0 0 1.5px rgba(245, 197, 66, .6), 0 10px 24px rgba(0,0,0,.45); }
+.fx-high .box::before { animation: none; border-color: #F5C542; }
+.fxglow { position: absolute; inset: 0; z-index: 0; border-radius: 6px; pointer-events: none; opacity: .35; will-change: opacity; animation: fxbreathe 3.2s ease-in-out infinite; }
+.fxglow.high { box-shadow: 0 0 18px 4px rgba(245, 197, 66, .55); }
+.fxglow.classic { box-shadow: 0 0 22px 8px rgba(95, 200, 255, .75), 0 0 52px 16px rgba(31, 75, 255, .6); animation-duration: 1.6s; }
+@keyframes fxbreathe { 0%, 100% { opacity: .3; } 50% { opacity: 1; } }
+/* the All Time Classic: static ring and glow under the breathing layer, flames and sparks for the motion */
+.case.fx-classic .box { animation: none; box-shadow: 0 0 12px 3px rgba(31, 75, 255, .7), 0 14px 28px rgba(0,0,0,.55); }
+.case.fx-classic .box::before { animation: none; }
+.cosmos.aura.still { inset: -6% -10%; filter: none; background: radial-gradient(60% 55% at 50% 45%, rgba(31, 75, 255, .45), transparent 70%); }
+.classic-cover .art { animation: none; }
+.classic-cover::after { content: ""; position: absolute; inset: 0; z-index: 0; border-radius: 8px; pointer-events: none; will-change: opacity;
+  box-shadow: 0 0 60px 14px rgba(95, 200, 255, .55), 0 0 110px 30px rgba(31, 75, 255, .45); animation: fxbreathe 1.6s ease-in-out infinite; }
+/* flames: no blur or blend over the whole group (that re-blurred every frame); each tongue is soft on its own */
+.flames { filter: none; }
+.flames i { mix-blend-mode: normal; will-change: transform, opacity; filter: blur(1.5px); }
+/* the top bar: a solid tint instead of blurring whatever scrolls under it */
+.bar { -webkit-backdrop-filter: none; backdrop-filter: none; background-color: rgba(6, 12, 31, .86); }
+.barpeek { -webkit-backdrop-filter: none; backdrop-filter: none; background: rgba(10, 20, 48, .7); }
+@media (prefers-reduced-motion: reduce) { .fxglow, .classic-cover::after { animation: none; opacity: .7; } }
+:is(.grid, .shelf-row) .case:not(.live) :is(.flames i, .fxglow, .sparks i, .freshline i, .typetag.live i) { animation-play-state: paused; }
+body.calm *, body.calm *::before, body.calm *::after { animation-play-state: paused !important; }
+/* no animated box-shadow on the update button either */
+.update-btn { animation: none; }
+/* Legendary (1–5): a white diamond in fire */
+.t-crimson .aw.legend .flare { fill: #FF5A1F; animation: none; opacity: .95; }
+.t-crimson .aw.legend .flare2 { fill: #FFB23F; }
+.t-crimson .aw.legend .core { fill: #FFFFFF; stroke: #DCE6F5; stroke-width: .5; }
+.t-crimson .aw.legend .facet { fill: none; stroke: #9DB0CC; stroke-width: .55; }
+.t-crimson .aw.legend .glint { fill: #FFFFFF; }
+.t-crimson .aw .flare { animation: none; }
+.favstar.award.t-crimson { filter: drop-shadow(0 0 7px rgba(255, 120, 40, .8)) drop-shadow(0 3px 6px rgba(0,0,0,.6)); }
+.favstar.award.t-crimson b { color: #2A1408; text-shadow: none; bottom: auto; top: 56%; font-weight: 900; }
+.rkbadge.t-crimson, .rkcell .rkbadge.t-crimson { background: linear-gradient(135deg, #FFB23F, #FF5A1F 50%, #B3200A); color: #fff; border-color: #FFE2B8; }
+/* lists now arrive in pieces, so covers no longer need to be skipped while off screen: skipping made every scroll lay them out on the fly */
+.grid .case, .shelf-row .case { content-visibility: visible; }
+
+/* ---------- controller ---------- */
+body.pad { cursor: none; }
+body.pad :focus { outline: 3px solid #8FD3FF; outline-offset: 3px; }
+body.pad .case:focus { outline: none; z-index: 3; }
+body.pad .case:focus .box { transform: translateY(-6px) scale(1.03); box-shadow: 0 22px 38px rgba(0, 0, 0, .6), 0 0 0 3px #8FD3FF, 0 0 26px rgba(143, 211, 255, .5); }
+body.pad .case:focus .name { color: #fff; }
+body.pad .ctx li:focus { outline: none; background: rgba(74, 140, 255, .32); box-shadow: inset 3px 0 0 #8FD3FF; }
+.case, .tab, .subtab, .chip, tr[data-id], #view button { scroll-margin: 124px 24px 64px; }
+.padhints { position: fixed; right: 18px; bottom: 16px; z-index: 400; display: flex; gap: 14px; padding: 8px 14px; border-radius: 999px;
+  background: rgba(8, 16, 40, .86); border: 1px solid var(--line-strong); color: var(--glass); font-size: 12.5px; pointer-events: none; }
+.padhints span { display: inline-flex; align-items: center; gap: 6px; }
+.padhints b { display: inline-grid; place-items: center; min-width: 22px; height: 22px; padding: 0 6px; border-radius: 11px; background: #1D3170; color: #fff; font-size: 11px; font-weight: 700; }
+body.pad .toast { bottom: 70px; }

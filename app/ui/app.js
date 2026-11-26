@@ -130,7 +130,38 @@ const coverObserver = new IntersectionObserver(entries => {
     if (item) loadCover(item).then(uri => { if (uri && el.isConnected) el.innerHTML = `<img alt="" decoding="async" src="${uri}">`; });
   }
 }, { rootMargin: "300px" });
-function activateArt(root) { root.querySelectorAll(".art").forEach(el => { if (!el.querySelector("img")) coverObserver.observe(el); }); }
+function activateArt(root) { root.querySelectorAll(".art").forEach(el => { if (!el.querySelector("img")) coverObserver.observe(el); }); fxWatch(root); }
+
+/* effects only move while you can see them: flames, glows and sparks rest once a cover scrolls out of view */
+const FX_MOVING = ".flames, .fxglow, .sparks, .freshline, .typetag.live";
+const fxObserver = new IntersectionObserver(entries => entries.forEach(e => e.target.classList.toggle("live", e.isIntersecting)), { rootMargin: "120px" });
+function fxWatch(root) { root.querySelectorAll?.(".case").forEach(el => { if (el.querySelector(FX_MOVING)) fxObserver.observe(el); }); }
+
+/* big lists arrive in pieces: the first screenful at once, the rest while the app is idle */
+let lazyToken = 0;
+const lazyQueue = [];
+function lazyCases(list, cls = "grid", first = 42, make = g => caseHTML(g)) {
+  if (list.length <= first) return `<div class="${cls}">${list.map(make).join("")}</div>`;
+  lazyQueue.push({ rest: list.slice(first), make });
+  return `<div class="${cls}" data-lazy="${lazyQueue.length - 1}">${list.slice(0, first).map(make).join("")}</div>`;
+}
+function drainLazy(root) {
+  const token = ++lazyToken;
+  const jobs = [...root.querySelectorAll("[data-lazy]")].map(el => ({ el, job: lazyQueue[+el.dataset.lazy] })).filter(x => x.job);
+  lazyQueue.length = 0;
+  const later = window.requestIdleCallback ? f => requestIdleCallback(f, { timeout: 150 }) : f => setTimeout(f, 16);
+  const step = () => {
+    if (token !== lazyToken) return;
+    const j = jobs.find(x => x.job.rest.length);
+    if (!j) return;
+    const tpl = document.createElement("template");
+    tpl.innerHTML = j.job.rest.splice(0, 48).map(j.job.make).join("");
+    activateArt(tpl.content);
+    j.el.append(tpl.content);
+    later(step);
+  };
+  if (jobs.length) later(step);
+}
 function findItem(kind, id) { return kind === "book" ? state.books.find(x => x.id === +id) : (state.games.find(x => x.id === +id) || accountCopies().find(x => x.id === +id)); }
 
 /* ---------- the game case ---------- */
@@ -208,7 +239,10 @@ function effectLayer(g) {
   const st = statusOf(g);
   let out = "";
   const rk = rankOf(g);
-  if (isClassic(g)) out += `<div class="flames classic-flames" aria-hidden="true"><i></i><i></i><i></i><i></i><i></i><i></i><i></i></div>${SPARKS}<div class="cosmos aura" aria-hidden="true"><i></i><i></i></div><span class="classic-award oncover" title="All Time Classic · Mythical">${CLASSIC_IMG}</span>`;
+  // glows breathe through opacity only, which the graphics card handles without repainting anything
+  if (isClassic(g)) out += `<i class="fxglow classic" aria-hidden="true"></i>`;
+  else if (g.priority === "High" && g.status !== "Completed" && g.status !== "Dropped") out += `<i class="fxglow high" aria-hidden="true"></i>`;
+  if (isClassic(g)) out += `<div class="flames classic-flames" aria-hidden="true"><i></i><i></i><i></i><i></i><i></i><i></i><i></i></div>${SPARKS}<div class="cosmos aura still" aria-hidden="true"></div><span class="classic-award oncover" title="All Time Classic · Mythical">${CLASSIC_IMG}</span>`;
   else if (rk && rk <= 10) { const t = rankTier(rk); out += `<span class="favstar award t-${t}" title="${TIER_NAME[t]} · #${rk} in your Top 100">${awardSVG(t)}<b>${rk}</b></span>`; }
   if (g.priority === "Extreme" && g.status !== "Completed" && g.status !== "Dropped") out += `<div class="flames" aria-hidden="true"><i></i><i></i><i></i><i></i><i></i></div>`;
   if ((st === "Paused" || g.status === "Paused") && st !== "Second chance") out += `<div class="cobweb" aria-hidden="true"><svg viewBox="0 0 60 60"><path d="M0 0L60 60M0 0L60 22M0 0L22 60M0 0L60 0M0 0L0 60M10 0Q8 8 0 10M22 0Q18 18 0 22M36 0Q30 30 0 36M52 0Q42 42 0 52"/></svg></div><div class="dust" aria-hidden="true"></div>`;
@@ -284,14 +318,17 @@ function shelves() {
 }
 /* ----- your Top 100 ----- */
 let rankIndex = null, rankDirty = false;
-function rankKey(n) {
+// names are compared thousands of times per screen: work each one out once
+const memo = fn => { const m = new Map(); return n => { const k = String(n ?? ""); let v = m.get(k); if (v === undefined) { if (m.size > 30000) m.clear(); v = fn(k); m.set(k, v); } return v; }; };
+const rankKey = memo(rankKeyRaw);
+function rankKeyRaw(n) {
   const R = { ii: "2", iii: "3", iv: "4", v: "5", vi: "6", vii: "7", viii: "8", ix: "9", x: "10" };
   return String(n || "").normalize("NFD").replace(/[\u0300-\u036f]/g, "").toLowerCase().replace(/[™®©]/g, "").replace(/&/g, " and ")
     .replace(/[^a-z0-9]+/g, " ").split(" ").filter(w => w && w !== "the").map(w => R[w] || w).join(" ");
 }
 function rankOf(g) {
   if (!rankIndex) {
-    rankIndex = new Map(); rankMatches = new Map();
+    rankIndex = new Map(); rankMatches = new Map(); matchPool = null;
     (state.ranking || []).forEach((n, i) => {
       if (!rankIndex.has(rankKey(n))) rankIndex.set(rankKey(n), i + 1);
       const m = rankMatch(n);
@@ -304,7 +341,7 @@ function rankOf(g) {
 /* the game in your library a Top 100 entry means: the same name, another edition of it, or a collection it's part of */
 let rankMatches = new Map();
 const EDITION_WORDS = /\b(special|anniversary|remastered|remaster|definitive|enhanced|complete|ultimate|deluxe|goty|game of year|director s cut|directors cut|legendary|royal|hd|edition|vr|gold|premium|standard|digital|launch|day one)\b/g;
-const baseKey = n => rankKey(String(n || "").replace(/\([^)]*\)/g, " ")).replace(EDITION_WORDS, " ").replace(/\s+/g, " ").trim();
+const baseKey = memo(n => rankKey(String(n || "").replace(/\([^)]*\)/g, " ")).replace(EDITION_WORDS, " ").replace(/\s+/g, " ").trim());
 // what may follow a name and still be the same game: 'Silent Hill 2 Remake', 'Ghostrunner I', 'XCOM 2 Collection'
 const SAME_GAME_TAIL = new Set(["remake", "reloaded", "reload", "redux", "reforged", "remastered", "collection", "i", "1", "classic", "original"]);
 const COLLECTIONS = [
@@ -328,21 +365,36 @@ const COLLECTIONS = [
   ["The Witcher 3: Wild Hunt Complete Edition", ["The Witcher 3: Wild Hunt"]],
   ["Red Dead Redemption", ["Red Dead Redemption: Undead Nightmare"]],
 ].map(([c, parts]) => [rankKey(c), parts.map(baseKey)]);
+let matchPool = null;   // your library with its names already worked out, rebuilt with the Top 100 index
+function rankPool() {
+  if (!matchPool) {
+    const pool = [...state.games, ...accountCopies()];
+    const byKey = new Map(), byBase = new Map();
+    for (const g of pool) {
+      const k = rankKey(g.name), b = baseKey(g.name);
+      (byKey.get(k) || byKey.set(k, []).get(k)).push(g);
+      (byBase.get(b) || byBase.set(b, []).get(b)).push(g);
+    }
+    const nums = x => x.split(" ").filter(w => /^\d+$/.test(w)).join(" ");
+    matchPool = { pool, byKey, byBase, fuzzy: pool.map(g => { const b = baseKey(g.name); return { g, b, n: nums(b), len: b.length }; }), nums };
+  }
+  return matchPool;
+}
 function rankMatch(name) {
-  const pool = [...state.games, ...accountCopies()];
-  const owned = list => list.find(g => g.status !== "Wishlist") || list[0] || null;
+  const { pool, byKey, byBase, fuzzy, nums } = rankPool();
+  const owned = list => (list || []).find(g => g.status !== "Wishlist") || (list || [])[0] || null;
   const k = rankKey(name), b = baseKey(name);
-  let hit = owned(pool.filter(g => rankKey(g.name) === k));
+  let hit = owned(byKey.get(k));
   if (hit) return { g: hit, via: "" };
-  hit = owned(pool.filter(g => baseKey(g.name) === b));
+  hit = owned(byBase.get(b));
   if (hit) return { g: hit, via: "edition" };
   // 'The Elder Scrolls V: Skyrim' and '... Skyrim Special Edition', but never 'Mass Effect' and 'Mass Effect 2'
   const extends_ = (long, short) => short.length > 2 && long.startsWith(short + " ") && long.slice(short.length + 1).split(" ").every(w => SAME_GAME_TAIL.has(w));
   hit = owned(pool.filter(g => { const gb = baseKey(g.name); return extends_(gb, b) || extends_(b, gb); }));
   if (hit) return { g: hit, via: "edition" };
   // small spelling differences ('Clair Obscure' / 'Clair Obscur', 'Persona 3 Reload' / 'Reloaded'), same numbers only
-  const nums = x => x.split(" ").filter(w => /^\d+$/.test(w)).join(" ");
-  hit = owned(pool.filter(g => { const gb = baseKey(g.name); return nums(gb) === nums(b) && dice(gb, b) >= 0.86; }));
+  const bn = nums(b), bl = b.length;
+  hit = owned(fuzzy.filter(x => x.n === bn && Math.abs(x.len - bl) <= bl * 0.3 + 2 && dice(x.b, b) >= 0.86).map(x => x.g));
   if (hit) return { g: hit, via: "edition" };
   for (const [coll, parts] of COLLECTIONS) {
     if (!parts.includes(b)) continue;
@@ -351,20 +403,21 @@ function rankMatch(name) {
   }
   return null;
 }
+const bigrams = memo(x => { const m = new Map(); for (let i = 0; i < x.length - 1; i++) { const g = x.slice(i, i + 2); m.set(g, (m.get(g) || 0) + 1); } return m; });
 function dice(a, b) {
   if (a === b) return 1;
-  const grams = x => { const m = new Map(); for (let i = 0; i < x.length - 1; i++) { const g = x.slice(i, i + 2); m.set(g, (m.get(g) || 0) + 1); } return m; };
+  const grams = bigrams;
   const A = grams(a), B = grams(b); let both = 0;
   A.forEach((n, g) => { both += Math.min(n, B.get(g) || 0); });
   return (2 * both) / Math.max(1, a.length - 1 + b.length - 1);
 }
 function rankedGame(name) { if (!rankIndex) rankOf({ name: "" }); const m = rankMatches.has(name) ? rankMatches.get(name) : rankMatch(name); return m ? m.g : null; }
 /* award tiers: crimson for the podium, diamond for 4-5, gold to 10, silver to 50, bronze for the rest */
-function rankTier(n) { return !n ? "" : n <= 3 ? "crimson" : n <= 5 ? "diamond" : n <= 10 ? "gold" : n <= 50 ? "silver" : "bronze"; }
+function rankTier(n) { return !n ? "" : n <= 5 ? "crimson" : n <= 10 ? "gold" : n <= 50 ? "silver" : "bronze"; }   // "crimson" is Legendary, 1–5
 const TIER_NAME = { classic: "Mythical", crimson: "Legendary", diamond: "Diamond", gold: "Gold", silver: "Silver", bronze: "Bronze" };
 function awardSVG(t) {
-  if (t === "crimson") return `<svg viewBox="0 0 24 24" class="aw"><path class="flare" d="M12 .4c1.6 2.2 3.9 2.6 5 5 1.7-1.1 3.6-.6 4.6.7-1.8.6-2 2.6-1.3 4.3 1.5 3.6.4 8-2.8 10.4-1.5 1.2-3.5 1.9-5.5 1.9s-4-.7-5.5-1.9C3.3 18.4 2.2 14 3.7 10.4c.7-1.7.5-3.7-1.3-4.3 1-1.3 2.9-1.8 4.6-.7 1.1-2.4 3.4-2.8 5-5z"/><g class="swords"><path d="M5.2 4.6l1.6-.4 10.6 10.6-1.2 1.2z"/><path d="M18.8 4.6l-1.6-.4L6.6 14.8l1.2 1.2z"/><path class="hilt" d="M14.6 16.4l3.2-3.2 1 1-1.1 1.1 1.9 1.9-1.2 1.2-1.9-1.9-1 1zM9.4 16.4l-3.2-3.2-1 1 1.1 1.1-1.9 1.9 1.2 1.2 1.9-1.9 1 1z"/></g></svg>`;
-  if (t === "diamond") return `<svg viewBox="0 0 24 24" class="aw"><path class="core" d="M6.5 3h11l4.5 6-10 12.5L2 9z"/><path class="facet" d="M2 9h20M6.5 3 9 9l3 12.5L15 9l2.5-6M9 9l3-6 3 6"/></svg>`;
+  // Legendary: a white diamond in fire (still: no per-frame flicker inside the icon)
+  if (t === "crimson") return `<svg viewBox="0 0 24 24" class="aw legend"><path class="flare" d="M12 .3c1.7 2.3 4.1 2.7 5.2 5.2 1.8-1.2 3.8-.6 4.8.7-1.9.6-2.1 2.7-1.4 4.5 1.6 3.8.4 8.4-2.9 10.9-1.6 1.3-3.6 2-5.7 2s-4.1-.7-5.7-2C3 19.1 1.8 14.5 3.4 10.7c.7-1.8.5-3.9-1.4-4.5 1-1.3 3-1.9 4.8-.7C7.9 3 10.3 2.6 12 .3z"/><path class="flare2" d="M12 4.5c1 1.6 2.6 2 3.3 3.6 1.2-.7 2.4-.3 3 .5-1.2.5-1.3 1.8-.8 3 1 2.5.2 5.4-1.9 7-1.1.9-2.3 1.3-3.6 1.3s-2.5-.4-3.6-1.3c-2.1-1.6-2.9-4.5-1.9-7 .5-1.2.4-2.5-.8-3 .6-.8 1.8-1.2 3-.5C9.4 6.5 11 6.1 12 4.5z"/><path class="core" d="M7.6 8.2h8.8l3 4-7.4 8.6-7.4-8.6z"/><path class="facet" d="M4.6 12.2h14.8M7.6 8.2l2 4L12 20.8l2.4-8.6 2-4M9.6 12.2l2.4-4 2.4 4"/><path class="glint" d="M8.8 9.4l1.2-.4-.4 1.4z"/></svg>`;
   // Gold, Silver and Bronze: a medal on a ribbon
   return `<svg viewBox="0 0 24 24" class="aw medal"><path class="rib" d="M6.5 1.5h4l2 6-3 1.8zM17.5 1.5h-4l-2 6 3 1.8z"/><circle class="core" cx="12" cy="15" r="7.4"/><circle class="ring" cx="12" cy="15" r="5.4"/><path class="star" d="M12 11.2l1.1 2.3 2.5.3-1.8 1.7.5 2.5-2.3-1.2-2.3 1.2.5-2.5-1.8-1.7 2.5-.3z"/></svg>`;
 }
@@ -485,7 +538,7 @@ function rankingHTML() {
   const body = state.mode === "list" ? `<ol class="rklist" id="rkList">${list.map(row).join("")}</ol>`
     : `<div class="grid rkgrid">${list.map(cell).join("")}</div>`;
   return `<section class="ranking ${state.mode === "list" ? "" : "wide"}"><header class="deals-head"><div><h1>Top 100</h1><p class="muted">Drag to reorder (or use the arrows). Every place earns an award that shows on the game's cover everywhere in Masterlog.</p>
-      <div class="tiers" aria-label="Award tiers">${[["classic", "All Time Classic"], ["crimson", "1–3"], ["diamond", "4–5"], ["gold", "6–10"], ["silver", "11–50"], ["bronze", "51–100"]].map(([t, r]) => `<span class="tier t-${t}"><i class="rk-aw">${t === "classic" ? CLASSIC_IMG : awardSVG(t)}</i>${TIER_NAME[t]}<small>${r}</small></span>`).join("")}</div><p class="muted fine">${state.rankingLocal ? " Saved on this PC until you update the connection script (Settings)." : " Saved to the Ranking tab in your sheet."}</p></div>
+      <div class="tiers" aria-label="Award tiers">${[["classic", "All Time Classic"], ["crimson", "1–5"], ["gold", "6–10"], ["silver", "11–50"], ["bronze", "51–100"]].map(([t, r]) => `<span class="tier t-${t}"><i class="rk-aw">${t === "classic" ? CLASSIC_IMG : awardSVG(t)}</i>${TIER_NAME[t]}<small>${r}</small></span>`).join("")}</div><p class="muted fine">${state.rankingLocal ? " Saved on this PC until you update the connection script (Settings)." : " Saved to the Ranking tab in your sheet."}</p></div>
     <div class="deals-actions">${modeSwitch()}${scaleSlider()}<input class="search" id="rankAdd" list="rankAddList" placeholder="Add a game to the ranking"><datalist id="rankAddList">${state.games.filter(g => !rankOf(g)).map(g => `<option value="${esc(g.name)}">`).join("")}</datalist></div></header>
     ${classicHTML()}
     ${body}</section>`;
@@ -567,17 +620,17 @@ function collapse(list) {
     const y = [...ys][0];
     groups.get(base + "|" + y).push(...groups.get(base + "|")); groups.delete(base + "|");
   }
+  // each game's group, looked up directly (this used to scan every group for every game)
+  const groupOfGame = new Map();
+  for (const arr of groups.values()) for (const g of arr) groupOfGame.set(g, arr);
   const out = [];
   for (const g of list) {
-    for (const [k, arr] of groups) {
-      if (arr[0] !== g && !arr.includes(g)) continue;
-      if (arr.done) break;
-      arr.done = true;
-      const sorted = [...arr].sort((a, b) => { const x = copyRank(a), y = copyRank(b); for (let i = 0; i < x.length; i++) if (x[i] !== y[i]) return x[i] - y[i]; return 0; });
-      dupsOf.set(sorted[0], sorted.slice(1));
-      out.push(sorted[0]);
-      break;
-    }
+    const arr = groupOfGame.get(g);
+    if (!arr || arr.done) continue;
+    arr.done = true;
+    const sorted = arr.length > 1 ? [...arr].sort((a, b) => { const x = copyRank(a), y = copyRank(b); for (let i = 0; i < x.length; i++) if (x[i] !== y[i]) return x[i] - y[i]; return 0; }) : arr;
+    dupsOf.set(sorted[0], sorted.slice(1));
+    out.push(sorted[0]);
   }
   return out;
 }
@@ -600,7 +653,24 @@ function renderTabs() {
 const WISH_VIEWS = ["wishlist", "deals", "soon"];
 const wishTabs = () => `<nav class="subtabs" role="tablist" aria-label="Wishlist">${[["wishlist", "Wishlist"], ["deals", "Deals"], ["soon", "Coming soon"]].map(([v, l]) =>
   `<button class="subtab" data-view="${v}" role="tab" aria-selected="${state.view === v}">${l}</button>`).join("")}</nav>`;
+// a redraw keeps your place: whatever had focus (by game, tab or id) gets it back
+function focusKey(el) {
+  if (!el || el === document.body || !$("#view").contains(el) && !$("#tabs").contains(el)) return null;
+  if (el.dataset.id && el.dataset.kind) return `[data-id="${el.dataset.id}"][data-kind="${el.dataset.kind}"]${el.classList.contains("case") ? ".case" : ""}`;
+  if (el.dataset.view) return `${el.classList.contains("subtab") ? ".subtab" : ".tab"}[data-view="${el.dataset.view}"]`;
+  if (el.id) return `#${CSS.escape(el.id)}`;
+  return null;
+}
 function render() {
+  const fk = focusKey(document.activeElement);
+  renderView();
+  if (fk && (!document.activeElement || document.activeElement === document.body)) {
+    const el = [...document.querySelectorAll(`#view ${fk}, #tabs ${fk}`)].find(x => !x.closest(".hero"));
+    el?.focus({ preventScroll: true });
+  }
+}
+function renderView() {
+  lazyQueue.length = 0; lazyToken++;
   renderTabs();
   const v = $("#view");
   hidePeek();
@@ -618,6 +688,7 @@ function render() {
   else if (state.view === "bookyears") v.innerHTML = bookYearsHTML();
   else v.innerHTML = libraryHTML();
   activateArt(v);
+  drainLazy(v);
   if (state.view === "home") { updateHero(heroGame(), true); fillWhatsNew(); }
   if (state.view === "shelf") updateBookHero(bookHero(), true);
 }
@@ -750,7 +821,7 @@ function homeHTML() {
     <section class="shelf">
       <div class="shelf-head"><h2>${esc(s.title)}</h2><span class="count">${s.items.length}</span>
         <button class="more" data-go="${s.view}" data-shelf="${i}">See all</button>${s.title === "Modpacks" ? `<button class="more" data-modpacks>Find modpacks on this PC</button>` : ""}</div>
-      <div class="shelf-row">${s.items.map(g => caseHTML(g)).join("")}</div>
+      ${lazyCases(s.items, "shelf-row", 10)}
     </section>`).join("");
   return `<section class="whatsnew" id="whatsNew" hidden></section><section class="hero"><div class="hero-bg" id="heroBg"></div><div id="heroCase"></div><div id="heroText"></div></section>${rows}`;
 }
@@ -976,7 +1047,7 @@ function backlogHTML() {
   const playing = list.filter(g => g.status === "Playing");
   const lanes = Object.keys(PRIO_ORDER).map(p => [p, list.filter(g => g.priority === p && g.status !== "Playing")]).filter(([, l]) => l.length);
   const lane = (title, items, c, say) => `<section class="blane" style="--c:${c}"><header><h2>${esc(title)}</h2><span class="count">${items.length}</span>${say ? `<small>${say}</small>` : ""}</header>
-    ${state.mode === "list" ? gameListHTML(items) : `<div class="grid">${items.map(g => caseHTML(g)).join("")}</div>`}</section>`;
+    ${state.mode === "list" ? gameListHTML(items) : lazyCases(items, "grid", 24)}</section>`;
   return `<div class="toolbar">
       <div class="line">
         <input class="search" id="search" type="search" placeholder="Search your backlog" value="${esc(f.q)}">
@@ -1019,7 +1090,7 @@ function libraryHTML() {
       ${pinned ? `<div class="line">${pinned}</div>` : ""}
     </div>
     ${!list.length ? `<p class="empty">No games match these filters. Clear the search or pick another platform.</p>`
-      : state.mode === "list" ? gameListHTML(list) : `<div class="grid">${list.map(g => caseHTML(g)).join("")}</div>`}`;
+      : state.mode === "list" ? gameListHTML(list) : lazyCases(list)}`;
 }
 
 /* ----- your years ----- */
@@ -2085,11 +2156,13 @@ function towers() {
   // the background moves slowly, so a dozen frames a second is plenty; it rests while you scroll, read a case or use another window
   let scrolling = 0;
   $("#view").addEventListener("scroll", () => { scrolling = performance.now(); }, { passive: true });
-  const loop = t => {
-    if (t - last > 85 && !document.hidden && document.hasFocus() && t - scrolling > 250 && !$("#panel").classList.contains("open")) { draw(t); last = t; }
-    requestAnimationFrame(loop);
+  // ten frames a second on a timer (not every screen refresh); it rests while you scroll, read a case, walk or use another window
+  const loop = () => {
+    const t = performance.now();
+    if (!document.hidden && document.hasFocus() && t - scrolling > 250 && !$("#panel").classList.contains("open") && !Walk.active) { draw(t); last = t; }
+    setTimeout(loop, document.hidden || !document.hasFocus() ? 1000 : 160);
   };
-  requestAnimationFrame(loop);
+  loop();
 }
 
 /* ---------- navigation: mouse, keyboard, controller ---------- */
@@ -2419,7 +2492,7 @@ function bindGlobal() {
   document.addEventListener("keydown", e => {
     if (e.key === "F11") { e.preventDefault(); toggleBigPicture(); return; }
     if (e.key === "l" && e.ctrlKey) { e.preventDefault(); Walk.active ? Walk.close() : openWalk(); return; }
-    if (e.key === "Escape") { if ($("#panel").classList.contains("open")) closePanel(); return; }
+    if (e.key === "Escape") { if ($("#panel").classList.contains("open") && !document.getElementById("ctx") && !document.querySelector("dialog[open]")) closePanel(); return; }
     if (Walk.active && !$("#panel").classList.contains("open")) return;
     if (["INPUT", "SELECT", "TEXTAREA"].includes(document.activeElement?.tagName) || document.querySelector("dialog[open]")) return;
     const dir = { ArrowLeft: "l", ArrowRight: "r", ArrowUp: "u", ArrowDown: "d" }[e.key];
@@ -2428,6 +2501,9 @@ function bindGlobal() {
     if (e.key === "Tab" && e.shiftKey && e.ctrlKey) switchCatalog(isBooks() ? "games" : "books");
   });
   document.addEventListener("visibilitychange", () => { if (!document.hidden) sync(false); });
+  // every animation rests while Masterlog isn't the window you're using
+  const calm = () => document.body.classList.toggle("calm", document.hidden || !document.hasFocus());
+  addEventListener("blur", calm); addEventListener("focus", calm); document.addEventListener("visibilitychange", calm);
   pollPad();
 }
 async function quickMark(btn) {
@@ -2816,48 +2892,208 @@ function cycleTab(d) {
   const tabs = TABS[state.catalog].filter(t => t !== "|").map(t => t[0]);
   go(tabs[(tabs.indexOf(state.view) + d + tabs.length) % tabs.length]);
 }
-function move(dir) {
-  const root = $("#panel").classList.contains("open") ? $("#panel") : document;
-  const items = [...root.querySelectorAll(".case, .primary, .ghost, .chip, .tab, .catalog, .year > button, tr[data-id]")].filter(el => el.offsetParent && !el.closest(".hero"));
-  const cur = document.activeElement && items.includes(document.activeElement) ? document.activeElement : null;
-  if (!cur) { (items.find(el => el.classList.contains("case")) || items[0])?.focus(); return; }
+/* ---------- Keyboard and controller navigation ---------- */
+// what can take focus, in whichever layer is on top: menu, dialog, panel, then the page
+const NAV_SEL = ".case, button:not([disabled]), a[data-url], a[href], [data-url][tabindex], .chip, .tab, .subtab, .catalog, input:not([type=hidden]):not([disabled]), select, summary, tr[data-id], .itile, li[role^=menuitem]:not(.sep), [role=button][tabindex='0'], [tabindex='0']";
+function navLayer() {
+  const ctx = document.getElementById("ctx");
+  if (ctx) return ctx;
+  const dlg = [...document.querySelectorAll("dialog[open]")].pop();
+  if (dlg) return dlg;
+  if ($("#panel").classList.contains("open")) return $("#panel");
+  return document;
+}
+function navTargets(root = navLayer()) {
+  const out = [];
+  for (const el of root.querySelectorAll(NAV_SEL)) {
+    if (el.closest(".hero, [hidden], .sub") && !el.closest(".has-sub:focus-within > .sub")) continue;
+    if (root === document && el.closest("#panel, dialog, #ctx, #walk")) continue;
+    if (!el.getClientRects().length) continue;
+    out.push(el);
+  }
+  return out;
+}
+function inView(el) { const r = el.getBoundingClientRect(); return r.bottom > 110 && r.top < innerHeight && r.right > 0 && r.left < innerWidth; }
+function focusFirst(root = navLayer()) {
+  const items = navTargets(root);
+  const pick = (root === document ? items.find(el => el.classList.contains("case") && inView(el)) : null) || items.find(inView) || items[0];
+  pick && focusNav(pick, false);
+}
+function focusNav(el, smooth = true) {
+  el.focus({ preventScroll: true });
+  el.scrollIntoView({ block: "nearest", inline: "nearest", behavior: smooth ? "smooth" : "auto" });
+}
+function move(dir, smooth = true) {
+  const root = navLayer();
+  const cur = document.activeElement;
+  if (!cur || cur === document.body || !root.contains(cur) || !cur.getClientRects().length) return focusFirst(root);
+  // a submenu opens to the right of its row and closes back to it
+  if (cur.matches(".has-sub") && dir === (cur.closest(".ctx")?.classList.contains("flip") ? "l" : "r")) {
+    const first = cur.querySelector(".sub li:not([disabled])"); if (first) return focusNav(first);
+  }
+  const parentSub = cur.closest(".sub")?.closest(".has-sub");
+  if (parentSub && dir === (cur.closest(".ctx")?.classList.contains("flip") ? "r" : "l")) return focusNav(parentSub);
   const a = cur.getBoundingClientRect(), ax = a.left + a.width / 2, ay = a.top + a.height / 2;
+  const horiz = dir === "l" || dir === "r";
   let best = null, bestScore = Infinity;
-  for (const el of items) {
-    if (el === cur) continue;
+  for (const el of navTargets(root)) {
+    if (el === cur || el.contains(cur) || cur.contains(el)) continue;
     const b = el.getBoundingClientRect(), bx = b.left + b.width / 2, by = b.top + b.height / 2;
     const dx = bx - ax, dy = by - ay;
-    const ok = dir === "l" ? dx < -5 : dir === "r" ? dx > 5 : dir === "u" ? dy < -5 : dy > 5;
-    if (!ok) continue;
-    const main = dir === "l" || dir === "r" ? Math.abs(dx) : Math.abs(dy);
-    const cross = dir === "l" || dir === "r" ? Math.abs(dy) : Math.abs(dx);
-    const score = main + cross * 2.5;
+    if (!(dir === "l" ? b.right <= a.left + 4 && dx < -5 : dir === "r" ? b.left >= a.right - 4 && dx > 5 : dir === "u" ? b.bottom <= a.top + 4 && dy < -5 : b.top >= a.bottom - 4 && dy > 5)) continue;
+    // stay in the same row or column when one lines up
+    const overlap = horiz ? Math.min(a.bottom, b.bottom) - Math.max(a.top, b.top) : Math.min(a.right, b.right) - Math.max(a.left, b.left);
+    const gap = horiz ? (dir === "l" ? a.left - b.right : b.left - a.right) : (dir === "u" ? a.top - b.bottom : b.top - a.bottom);
+    const cross = overlap > 0 ? 0 : Math.abs(horiz ? dy : dx);
+    const score = Math.max(0, gap) + cross * 3 + (overlap > 0 ? 0 : 60);
     if (score < bestScore) { bestScore = score; best = el; }
   }
-  if (best) { best.focus(); best.scrollIntoView({ block: "nearest", inline: "nearest", behavior: "smooth" }); try { FX.play.move(); } catch {} }
+  if (best) { focusNav(best, smooth); try { FX.play.move(); } catch {} }
+  else if (root === document && !horiz) { const v = $("#view"); v.scrollBy({ top: dir === "u" ? -innerHeight * 0.6 : innerHeight * 0.6, behavior: smooth ? "smooth" : "auto" }); }
 }
-function pollPad() {
-  const held = {};
-  const step = () => {
-    const pad = navigator.getGamepads?.()[0];
-    if (pad) {
-      const walking = Walk.active && !$("#panel").classList.contains("open");
-      const press = (i, fn) => { const on = pad.buttons[i]?.pressed; if (on && !held[i] && !walking) fn(); held[i] = on; };
-      press(12, () => move("u")); press(13, () => move("d")); press(14, () => move("l")); press(15, () => move("r"));
-      press(0, () => document.activeElement?.click());
-      press(1, () => closePanel());
-      press(4, () => cycleTab(-1)); press(5, () => cycleTab(1));
-      press(8, () => switchCatalog(isBooks() ? "games" : "books"));
-      press(9, toggleBigPicture);
-      const [x, y] = pad.axes;
-      const stick = Math.abs(x) > 0.6 ? (x > 0 ? "r" : "l") : Math.abs(y) > 0.6 ? (y > 0 ? "d" : "u") : null;
-      if (stick && !held.stick && !walking) move(stick);
-      held.stick = stick;
+// B / Escape: close whatever is on top, one layer at a time
+const caseFor = (id, kind) => [...document.querySelectorAll(`#view .case[data-id="${id}"][data-kind="${kind}"], #view tr[data-id="${id}"][data-kind="${kind}"]`)].find(x => !x.closest(".hero"));
+function navBack() {
+  const ctx = document.getElementById("ctx");
+  if (ctx) { const id = ctx.dataset.id, kind = ctx.dataset.kind; const sub = document.activeElement?.closest?.(".sub")?.closest(".has-sub");
+    if (sub) return focusNav(sub);
+    closeCtx(); const c = caseFor(id, kind); c && focusNav(c, false); return; }
+  const dlg = [...document.querySelectorAll("dialog[open]")].pop();
+  if (dlg) { const c = dlg.querySelector("[data-close], .close, button[value=cancel], [formmethod=dialog]"); c ? c.click() : dlg.close(); return; }
+  if ($("#panel").classList.contains("open")) { const id = panelItem?.id, kind = panelItem?.kind; closePanel(); const c = id != null && caseFor(id, kind === "book" ? "book" : "game"); c ? focusNav(c, false) : focusFirst(); return; }
+  if (["INPUT", "SELECT", "TEXTAREA"].includes(document.activeElement?.tagName)) { document.activeElement.blur(); return; }
+  const home = state.catalog === "books" ? "shelf" : state.catalog === "news" ? "breaking" : "home";
+  if (state.view !== home) { go(home); requestAnimationFrame(() => focusFirst()); }
+}
+function navActivate() {
+  const el = document.activeElement;
+  if (!el || el === document.body) return focusFirst();
+  if (el.matches(".has-sub")) { const first = el.querySelector(".sub li:not([disabled])"); return first && focusNav(first); }
+  if (el.matches("input[type=text], input[type=search], input[type=number], input:not([type]), textarea")) { el.select?.(); return; }
+  if (el.tagName === "SUMMARY") { el.parentElement.open = !el.parentElement.open; return; }
+  if (el.matches(".itile")) { el.dispatchEvent(new KeyboardEvent("keydown", { key: "Enter", bubbles: true })); return; }
+  el.click();
+}
+// left/right change a dropdown or slider in place instead of leaving it
+function navAdjust(el, d) {
+  if (el?.tagName === "SELECT") { const i = Math.max(0, Math.min(el.options.length - 1, el.selectedIndex + d)); if (i !== el.selectedIndex) { el.selectedIndex = i; el.dispatchEvent(new Event("change", { bubbles: true })); } return true; }
+  if (el?.matches?.("input[type=range]")) { d > 0 ? el.stepUp() : el.stepDown(); el.dispatchEvent(new Event("input", { bubbles: true })); el.dispatchEvent(new Event("change", { bubbles: true })); return true; }
+  return false;
+}
+function navOptions() {
+  const el = document.activeElement?.closest?.(".case[data-kind], tr[data-kind]");
+  if (!el || document.getElementById("ctx")) return;
+  const kind = el.dataset.kind === "book" ? "book" : "game", item = findItem(kind, el.dataset.id);
+  if (!item) return;
+  const r = el.getBoundingClientRect();
+  ctxMenu(item, r.left + Math.min(r.width * 0.6, 160), Math.max(116, r.top + 24), kind);
+}
+function navSearch() {
+  const s = $("#search") || $("#bsearch");
+  if (s && !navLayer().contains?.(s) && navLayer() !== document) return;
+  if (s) { s.focus(); s.select(); s.scrollIntoView({ block: "nearest" }); }
+}
+function cycleSub(d) {
+  const layer = navLayer();
+  if (layer === $("#panel")) return cyclePanelTab(d);
+  const subs = [...document.querySelectorAll("#view .subtab")];
+  if (subs.length) { const i = subs.findIndex(x => x.classList.contains("on") || x.getAttribute("aria-selected") === "true"); subs[(i + d + subs.length) % subs.length].click(); requestAnimationFrame(() => focusFirst()); }
+}
+function cyclePanelTab(d) {
+  const t = [...$("#panel").querySelectorAll(".ptabs [data-ptab]")].filter(x => x.getClientRects().length);
+  if (!t.length) return;
+  const i = t.findIndex(x => x.classList.contains("on") || x.getAttribute("aria-selected") === "true");
+  t[(i + d + t.length) % t.length].click();
+}
+/* Controller: polled only while one is plugged in, and slowly while Masterlog is in the background.
+   A select · B back · X options · Y search · LB/RB tabs · LT/RT sub-tabs · right stick scrolls ·
+   View switches games/books · Menu big picture · R3 walk mode */
+const Pad = (() => {
+  const held = {}, rep = {};
+  let raf = 0, timer = 0, lastInput = 0;
+  const FIRST = 360, NEXT = 95;
+  const present = () => [...(navigator.getGamepads?.() || [])].find(p => p && p.connected) || null;
+  function showHints(on) {
+    document.body.classList.toggle("pad", on);
+    const h = document.getElementById("padHints");
+    if (h) h.hidden = !on;
+  }
+  function hintText() {
+    const h = document.getElementById("padHints");
+    if (!h || h.hidden) return;
+    const layer = navLayer();
+    const set = layer.id === "ctx" ? [["A", "Choose"], ["B", "Close"]]
+      : layer.tagName === "DIALOG" ? [["A", "Select"], ["B", "Close"]]
+      : layer.id === "panel" ? [["A", "Select"], ["LB RB", "Tabs"], ["B", "Close"]]
+      : [["A", "Open"], ["X", "Options"], ["Y", "Search"], ["LB RB", "Tabs"], ["B", "Back"]];
+    const html = set.map(([k, t]) => `<span><b>${k}</b>${t}</span>`).join("");
+    if (h.dataset.html !== html) { h.innerHTML = html; h.dataset.html = html; }
+  }
+  // fire once on press, then repeat while held (for moving through long lists)
+  function repeatable(key, on, now, fn) {
+    if (!on) { rep[key] = 0; return; }
+    if (!rep[key]) { rep[key] = now + FIRST; fn(true); }
+    else if (now >= rep[key]) { rep[key] = now + NEXT; fn(false); }
+  }
+  function frame(now) {
+    raf = 0;
+    const pad = present();
+    if (!pad) { stop(); return; }
+    const walking = Walk.active && !$("#panel").classList.contains("open");
+    const btn = i => !!pad.buttons[i]?.pressed || (pad.buttons[i]?.value || 0) > 0.5;
+    let acted = false;
+    const press = (i, fn) => { const on = btn(i); if (on && !held[i] && !walking) { fn(); acted = true; } held[i] = on; };
+    if (!walking) {
+      const [lx = 0, ly = 0, rx = 0, ry = 0] = pad.axes;
+      const dirs = { u: btn(12) || ly < -0.55, d: btn(13) || ly > 0.55, l: btn(14) || lx < -0.55, r: btn(15) || lx > 0.55 };
+      for (const k of ["u", "d", "l", "r"]) repeatable(k, dirs[k], now, first => {
+        acted = true;
+        const el = document.activeElement;
+        if ((k === "l" || k === "r") && navAdjust(el, k === "r" ? 1 : -1)) return;
+        move(k, first);
+      });
+      // right stick scrolls whatever you're looking at
+      const sy = Math.abs(ry) > 0.2 ? ry : 0, sx = Math.abs(rx) > 0.2 ? rx : 0;
+      if (sy || sx) {
+        acted = true;
+        const layer = navLayer();
+        const box = layer === document ? $("#view") : layer.querySelector(".pbody, .scroll, form") || layer;
+        const row = document.activeElement?.closest?.(".shelf-row");
+        box.scrollTop += sy * Math.abs(sy) * 28;
+        if (sx && row) row.scrollLeft += sx * Math.abs(sx) * 28;
+      }
     }
-    requestAnimationFrame(step);
-  };
-  requestAnimationFrame(step);
-}
+    press(0, navActivate);
+    press(1, navBack);
+    press(2, navOptions);
+    press(3, navSearch);
+    press(4, () => navLayer() === $("#panel") ? cyclePanelTab(-1) : (cycleTab(-1), requestAnimationFrame(() => focusFirst())));
+    press(5, () => navLayer() === $("#panel") ? cyclePanelTab(1) : (cycleTab(1), requestAnimationFrame(() => focusFirst())));
+    press(6, () => cycleSub(-1));
+    press(7, () => cycleSub(1));
+    press(8, () => { switchCatalog(state.catalog === "books" ? "games" : "books"); requestAnimationFrame(() => focusFirst()); });
+    press(9, toggleBigPicture);
+    press(11, () => Walk.active ? Walk.close() : openWalk());
+    if (acted) { lastInput = now; if (!document.body.classList.contains("pad")) showHints(true); }
+    if (document.body.classList.contains("pad")) hintText();
+    schedule();
+  }
+  function schedule() {
+    if (raf || timer) return;
+    // full speed while Masterlog is in front; a slow check otherwise so a press still wakes it
+    if (document.hidden || !document.hasFocus()) timer = setTimeout(() => { timer = 0; schedule(); }, 500);
+    else raf = requestAnimationFrame(frame);
+  }
+  function stop() { cancelAnimationFrame(raf); clearTimeout(timer); raf = timer = 0; for (const k in rep) rep[k] = 0; }
+  function start() { if (present()) schedule(); }
+  addEventListener("gamepadconnected", () => { start(); toast("Controller connected. A to open, B to go back, X for options.", "ok"); });
+  addEventListener("gamepaddisconnected", () => { if (!present()) { stop(); showHints(false); } });
+  addEventListener("focus", start);
+  // the mouse takes over again: hide the controller hints and focus ring
+  addEventListener("mousemove", () => { if (document.body.classList.contains("pad") && performance.now() - lastInput > 600) showHints(false); }, { passive: true });
+  return { start };
+})();
+function pollPad() { Pad.start(); }
 
 /* ---------- Deals, prices and countdowns ---------- */
 const dealState = { data: null, loading: false, t: 0 };
@@ -2915,16 +3151,23 @@ function priceTag(g) {
   return best.off > 0 ? `<span class="pricetag sale" title="${esc(best.store)}"><b>-${best.off}%</b>${esc(money(best.price, best.cur))}</span>`
     : `<span class="pricetag" title="${esc(best.store)}">${esc(money(best.price, best.cur))}</span>`;
 }
+function dealSig() {
+  const d = dealState.data;
+  if (!d) return "";
+  return JSON.stringify(Object.entries(d.games || {}).map(([n, e]) => [n, e?.steam?.final, e?.steam?.discount, e?.release?.ts, e?.ps?.final])) + (d.dlc || []).length + (d.bundles || []).length;
+}
 async function loadDeals(force) {
   if (!api || dealState.loading) return;
   if (!force && dealState.data && Date.now() - dealState.t < 60 * 1000 && !dealState.data.running) return;
   dealState.loading = true;
+  const before = dealSig();
   try { dealState.data = await api.deals(!!force); dealState.t = Date.now(); } catch {}
   dealState.loading = false;
   maybeSaleEvent();
-  if (state.catalog === "games" && (state.view === "deals" || state.view === "wishlist" || state.view === "home")) {
-    if (state.view === "deals") { $("#view").innerHTML = dealsHTML(); activateArt($("#view")); }
-    else render();
+  // redraw only when prices or dates actually changed, and never Home (its prices catch up on the next visit)
+  if (dealSig() !== before && state.catalog === "games" && (state.view === "deals" || state.view === "wishlist")) {
+    if (state.view === "deals") { const v = $("#view"), y = v.scrollTop; v.innerHTML = dealsHTML(); activateArt(v); v.scrollTop = y; }
+    else { const v = $("#view"), y = v.scrollTop; render(); v.scrollTop = y; }
   }
   if (dealState.data?.running) setTimeout(() => loadDeals(false), 15000);
 }
