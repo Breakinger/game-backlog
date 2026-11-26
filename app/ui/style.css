@@ -1076,11 +1076,8 @@ body.away *, body.away *::before, body.away *::after { animation-play-state: pau
 .ctx-rank input { width: 64px; padding: 3px 6px; border-radius: 5px; border: 1px solid var(--line-strong); background: rgba(6,12,31,.7); color: var(--glass); font: inherit; }
 .ctx-rank button { border: 0; border-radius: 5px; padding: 4px 8px; background: var(--focus); color: #fff; cursor: pointer; font: inherit; font-size: 12.5px; }
 
-/* covers sit exactly in the window under the band (a 2:3 frame, like the store art); art in another shape
-   is shown whole over a soft blur of itself instead of being cropped */
-.art.odd { background: #0B1124; }
-.art.odd::before { content: ""; position: absolute; inset: -12px; background: var(--img) center / cover no-repeat; filter: blur(14px) brightness(.55) saturate(1.2); z-index: 0; }
-.art.odd img { position: relative; z-index: 1; object-fit: contain !important; }
+/* covers always fill the window under the band exactly (2:3); the app fetches art in that shape, and anything
+   else is cropped to fit rather than letterboxed */
 .vcase .art.virtual { aspect-ratio: 2 / 3; }
 .rk .art { aspect-ratio: 2 / 3; }
 
@@ -1261,3 +1258,11 @@ body.away *, body.away *::before, body.away *::after { animation-play-state: pau
 .welcome-link { display: flex; gap: 10px; margin: 18px 0 8px; max-width: 640px; }
 .welcome-link input { flex: 1; }
 .pcs-h { font-size: 15px; font-weight: 500; margin: 16px 0 4px; }
+.ctx li.ctx-danger { color: #FF9A9A; }
+.ctx li.ctx-danger.armed { background: rgba(232, 38, 58, .28); color: #FFE4E4; font-weight: 600; }
+
+/* Top 100 entries shown by their own art (not in your library yet, or owned inside a collection) */
+.vcase { display: block; width: 100%; padding: 0; border: 0; background: none; color: inherit; font: inherit; text-align: left; cursor: pointer; }
+.vcase .vbox { position: relative; padding: 4%; border-radius: 8px; background: linear-gradient(160deg, #1A2342, #0C1228); box-shadow: inset 0 0 0 2px rgba(255,255,255,.08), 0 14px 28px rgba(0,0,0,.55); }
+.vcase .vbox .art.virtual { border-radius: 4px; box-shadow: none; }
+.vcase:not([data-open]) .vbox { filter: grayscale(.6) brightness(.8); }

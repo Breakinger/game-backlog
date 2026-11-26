@@ -76,7 +76,7 @@ def companies_agree(meta, developers, publishers):
     return bool(mine & theirs)
 
 
-COVER_VERSION = 3
+COVER_VERSION = 4   # 4: covers must be the cover shape (2:3); box scans with console banners and wide art are passed over
 APPID_VERSION = 2  # raising this re-downloads every cover you didn't pick yourself
 PC_PLATFORMS = {"Steam", "GOG", "Epic Games", "EA", "EA App", "Ubisoft Connect", "PC (Other)", "itch.io", "Emulation", ""}
 PS_PLATFORMS = {"PS5", "PS4", "PS2"}
@@ -95,6 +95,53 @@ def _get(url, headers=None, timeout=15):
     h.update(headers or {})
     with urllib.request.urlopen(urllib.request.Request(url, headers=h), timeout=timeout) as r:
         return r.read(), r.headers.get("Content-Type", "")
+
+
+# ---------- cover shape ----------
+SHAPE = 2 / 3          # the cover window on the cases
+SHAPE_OK = 0.06        # within 6%: a real cover (box scans are 3:4, about 12% off)
+
+
+def image_size(b):
+    """Width and height from a PNG, JPEG, WebP or GIF header, without decoding the image."""
+    try:
+        if b[:8] == b"\x89PNG\r\n\x1a\n":
+            return int.from_bytes(b[16:20], "big"), int.from_bytes(b[20:24], "big")
+        if b[:6] in (b"GIF87a", b"GIF89a"):
+            return int.from_bytes(b[6:8], "little"), int.from_bytes(b[8:10], "little")
+        if b[:4] == b"RIFF" and b[8:12] == b"WEBP":
+            kind = b[12:16]
+            if kind == b"VP8 ":
+                return int.from_bytes(b[26:28], "little") & 0x3FFF, int.from_bytes(b[28:30], "little") & 0x3FFF
+            if kind == b"VP8L":
+                bits = int.from_bytes(b[21:25], "little")
+                return (bits & 0x3FFF) + 1, ((bits >> 14) & 0x3FFF) + 1
+            if kind == b"VP8X":
+                return int.from_bytes(b[24:27], "little") + 1, int.from_bytes(b[27:30], "little") + 1
+        if b[:2] == b"\xff\xd8":
+            i = 2
+            while i < len(b) - 9:
+                if b[i] != 0xFF:
+                    i += 1
+                    continue
+                marker = b[i + 1]
+                if marker in (0xC0, 0xC1, 0xC2, 0xC3, 0xC5, 0xC6, 0xC7, 0xC9, 0xCA, 0xCB, 0xCD, 0xCE, 0xCF):
+                    return int.from_bytes(b[i + 7:i + 9], "big"), int.from_bytes(b[i + 5:i + 7], "big")
+                if marker in (0xD8, 0x01) or 0xD0 <= marker <= 0xD7:
+                    i += 2
+                    continue
+                i += 2 + int.from_bytes(b[i + 2:i + 4], "big")
+    except Exception:
+        pass
+    return None
+
+
+def shape_off(img):
+    """How far an image is from the cover shape: 0 is a perfect 2:3, 0.12 a 3:4 box scan, unknown counts as far."""
+    size = image_size(img or b"")
+    if not size or not size[0] or not size[1]:
+        return 1.0
+    return abs(size[0] / size[1] - SHAPE) / SHAPE
 
 
 class Art:
@@ -261,6 +308,27 @@ class Art:
         return out
 
     def _official(self, name, platform, hints):
+        """The first source with a proper portrait cover wins. Box scans (console banner on top, 3:4) and wide art
+        are kept only as a last resort, closest shape first."""
+        best, best_src, best_off = None, None, 9
+        for img, src in self._official_all(name, platform, hints):
+            off = shape_off(img)
+            if off <= SHAPE_OK:
+                return img, src
+            if off < best_off:
+                best, best_src, best_off = img, src, off
+        if self.sgdb_key and best_off > SHAPE_OK:   # SteamGridDB's covers are made to the exact shape
+            appid = hints.get("appid") or self.steam_appid(name)
+            try:
+                for x in self.sgdb_grids(name, appid, limit=6):
+                    img = self._first_image([x["url"]])
+                    if img and shape_off(img) <= SHAPE_OK:
+                        return img, "sgdb"
+            except Exception:
+                pass
+        return best, best_src
+
+    def _official_all(self, name, platform, hints):
         """Official art for the platform you own it on. Returns (image bytes, source) or (None, None)."""
         appid = hints.get("appid") or (self.steam_appid(name) if platform in PC_PLATFORMS or platform in PS_PLATFORMS | NINTENDO else None)
         order = []
@@ -282,12 +350,14 @@ class Art:
         order.append(("metacritic", lambda: [self.mc_cover(name)]))
         for src, urls in order:
             try:
-                img = self._first_image([u for u in urls() if u])
+                for u in [u for u in urls() if u][:4]:
+                    img = self._first_image([u])
+                    if img:
+                        yield img, src
+                        if shape_off(img) <= SHAPE_OK:
+                            return
             except Exception:
-                img = None
-            if img:
-                return img, src
-        return None, None
+                continue
 
     def candidates(self, name, platform="", hints=None, query=None):
         """Every cover we can find for the picker, official ones first."""
@@ -364,6 +434,14 @@ class Art:
         if entry:
             fname = entry.get("file")
             have = fname and os.path.exists(os.path.join(self.dir, fname))
+            if have and entry.get("v", 1) < COVER_VERSION and entry.get("src") not in USER_CHOSEN and plat_group(entry.get("plat", "")) == plat_group(platform or ""):
+                try:
+                    with open(os.path.join(self.dir, fname), "rb") as fh:
+                        if shape_off(fh.read(65536)) <= SHAPE_OK:
+                            entry["v"] = COVER_VERSION    # already the right shape: keep it
+                            self._save()
+                except OSError:
+                    pass
             current = entry.get("v", 1) >= COVER_VERSION and plat_group(entry.get("plat", "")) == plat_group(platform or "")
             if have and (entry.get("src") in USER_CHOSEN or current):
                 return self._data_uri(os.path.join(self.dir, fname))

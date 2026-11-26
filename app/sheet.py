@@ -273,6 +273,12 @@ class ScriptClient:
         result["script_version"] = out.get("script") or 1
         return result
 
+    def delete(self, tab, row, name):
+        return self._call(body={"action": "delete", "key": self.key, "tab": tab, "row": row, "name": name})
+
+    def restore(self, deleted):
+        return self._call(body={"action": "restore", "key": self.key, "deleted": deleted})
+
     def state_get(self):
         return self._call(body={"action": "state_get", "key": self.key})
 

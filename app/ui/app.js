@@ -289,9 +289,75 @@ function rankKey(n) {
     .replace(/[^a-z0-9]+/g, " ").split(" ").filter(w => w && w !== "the").map(w => R[w] || w).join(" ");
 }
 function rankOf(g) {
-  if (!rankIndex) { rankIndex = new Map(); (state.ranking || []).forEach((n, i) => { if (!rankIndex.has(rankKey(n))) rankIndex.set(rankKey(n), i + 1); }); }
+  if (!rankIndex) {
+    rankIndex = new Map(); rankMatches = new Map();
+    (state.ranking || []).forEach((n, i) => {
+      if (!rankIndex.has(rankKey(n))) rankIndex.set(rankKey(n), i + 1);
+      const m = rankMatch(n);
+      rankMatches.set(n, m);
+      if (m && !rankIndex.has(rankKey(m.g.name))) rankIndex.set(rankKey(m.g.name), i + 1);   // its edition or collection in your library wears the award
+    });
+  }
   return rankIndex.get(rankKey(g.name)) || null;
 }
+/* the game in your library a Top 100 entry means: the same name, another edition of it, or a collection it's part of */
+let rankMatches = new Map();
+const EDITION_WORDS = /\b(special|anniversary|remastered|remaster|definitive|enhanced|complete|ultimate|deluxe|goty|game of year|director s cut|directors cut|legendary|royal|hd|edition|vr|gold|premium|standard|digital|launch|day one)\b/g;
+const baseKey = n => rankKey(String(n || "").replace(/\([^)]*\)/g, " ")).replace(EDITION_WORDS, " ").replace(/\s+/g, " ").trim();
+// what may follow a name and still be the same game: 'Silent Hill 2 Remake', 'Ghostrunner I', 'XCOM 2 Collection'
+const SAME_GAME_TAIL = new Set(["remake", "reloaded", "reload", "redux", "reforged", "remastered", "collection", "i", "1", "classic", "original"]);
+const COLLECTIONS = [
+  ["Mass Effect Legendary Edition", ["Mass Effect", "Mass Effect 2", "Mass Effect 3"]],
+  ["Halo: The Master Chief Collection", ["Halo: Combat Evolved", "Halo: Combat Evolved Anniversary", "Halo 2", "Halo 2 Anniversary", "Halo 3", "Halo 3: ODST", "Halo: Reach", "Halo 4"]],
+  ["Uncharted: The Nathan Drake Collection", ["Uncharted: Drake's Fortune", "Uncharted 2: Among Thieves", "Uncharted 3: Drake's Deception"]],
+  ["Uncharted: Legacy of Thieves Collection", ["Uncharted 4: A Thief's End", "Uncharted: The Lost Legacy"]],
+  ["BioShock: The Collection", ["BioShock", "BioShock 2", "BioShock Infinite"]],
+  ["Metal Gear Solid: Master Collection Vol. 1", ["Metal Gear Solid", "Metal Gear Solid 2: Sons of Liberty", "Metal Gear Solid 3: Snake Eater"]],
+  ["Grand Theft Auto: The Trilogy", ["Grand Theft Auto III", "Grand Theft Auto: Vice City", "Grand Theft Auto: San Andreas"]],
+  ["Crash Bandicoot N. Sane Trilogy", ["Crash Bandicoot", "Crash Bandicoot 2: Cortex Strikes Back", "Crash Bandicoot: Warped"]],
+  ["Spyro Reignited Trilogy", ["Spyro the Dragon", "Spyro 2: Ripto's Rage", "Spyro: Year of the Dragon"]],
+  ["Dark Souls Trilogy", ["Dark Souls", "Dark Souls II", "Dark Souls III"]],
+  ["Batman: Arkham Collection", ["Batman: Arkham Asylum", "Batman: Arkham City", "Batman: Arkham Knight"]],
+  ["Assassin's Creed: The Ezio Collection", ["Assassin's Creed II", "Assassin's Creed Brotherhood", "Assassin's Creed Revelations"]],
+  ["The Orange Box", ["Half-Life 2", "Half-Life 2: Episode One", "Half-Life 2: Episode Two", "Portal", "Team Fortress 2"]],
+  ["Kingdom Hearts HD 1.5 + 2.5 ReMIX", ["Kingdom Hearts", "Kingdom Hearts II", "Kingdom Hearts Re:Chain of Memories", "Birth by Sleep"]],
+  ["Final Fantasy X/X-2 HD Remaster", ["Final Fantasy X", "Final Fantasy X-2"]],
+  ["Tony Hawk's Pro Skater 1 + 2", ["Tony Hawk's Pro Skater", "Tony Hawk's Pro Skater 2"]],
+  ["Super Mario 3D All-Stars", ["Super Mario 64", "Super Mario Sunshine", "Super Mario Galaxy"]],
+  ["The Witcher 3: Wild Hunt Complete Edition", ["The Witcher 3: Wild Hunt"]],
+  ["Red Dead Redemption", ["Red Dead Redemption: Undead Nightmare"]],
+].map(([c, parts]) => [rankKey(c), parts.map(baseKey)]);
+function rankMatch(name) {
+  const pool = [...state.games, ...accountCopies()];
+  const owned = list => list.find(g => g.status !== "Wishlist") || list[0] || null;
+  const k = rankKey(name), b = baseKey(name);
+  let hit = owned(pool.filter(g => rankKey(g.name) === k));
+  if (hit) return { g: hit, via: "" };
+  hit = owned(pool.filter(g => baseKey(g.name) === b));
+  if (hit) return { g: hit, via: "edition" };
+  // 'The Elder Scrolls V: Skyrim' and '... Skyrim Special Edition', but never 'Mass Effect' and 'Mass Effect 2'
+  const extends_ = (long, short) => short.length > 2 && long.startsWith(short + " ") && long.slice(short.length + 1).split(" ").every(w => SAME_GAME_TAIL.has(w));
+  hit = owned(pool.filter(g => { const gb = baseKey(g.name); return extends_(gb, b) || extends_(b, gb); }));
+  if (hit) return { g: hit, via: "edition" };
+  // small spelling differences ('Clair Obscure' / 'Clair Obscur', 'Persona 3 Reload' / 'Reloaded'), same numbers only
+  const nums = x => x.split(" ").filter(w => /^\d+$/.test(w)).join(" ");
+  hit = owned(pool.filter(g => { const gb = baseKey(g.name); return nums(gb) === nums(b) && dice(gb, b) >= 0.86; }));
+  if (hit) return { g: hit, via: "edition" };
+  for (const [coll, parts] of COLLECTIONS) {
+    if (!parts.includes(b)) continue;
+    hit = owned(pool.filter(g => { const gk = rankKey(g.name); return gk === coll || gk.startsWith(coll + " ") || baseKey(g.name) === baseKey(coll) && coll.split(" ").length > baseKey(coll).split(" ").length && gk.length >= coll.length - 2; }));
+    if (hit) return { g: hit, via: "collection" };
+  }
+  return null;
+}
+function dice(a, b) {
+  if (a === b) return 1;
+  const grams = x => { const m = new Map(); for (let i = 0; i < x.length - 1; i++) { const g = x.slice(i, i + 2); m.set(g, (m.get(g) || 0) + 1); } return m; };
+  const A = grams(a), B = grams(b); let both = 0;
+  A.forEach((n, g) => { both += Math.min(n, B.get(g) || 0); });
+  return (2 * both) / Math.max(1, a.length - 1 + b.length - 1);
+}
+function rankedGame(name) { if (!rankIndex) rankOf({ name: "" }); const m = rankMatches.has(name) ? rankMatches.get(name) : rankMatch(name); return m ? m.g : null; }
 /* award tiers: crimson for the podium, diamond for 4-5, gold to 10, silver to 50, bronze for the rest */
 function rankTier(n) { return !n ? "" : n <= 3 ? "crimson" : n <= 5 ? "diamond" : n <= 10 ? "gold" : n <= 50 ? "silver" : "bronze"; }
 const TIER_NAME = { crimson: "Crimson award", diamond: "Diamond award", gold: "Gold award", silver: "Silver", bronze: "Bronze" };
@@ -358,7 +424,27 @@ async function fillClassicAwards() {
     ${list.length > 12 ? `<details><summary>All ${list.length}</summary><ul class="awardlist">${list.slice(12).map(li).join("")}</ul></details>` : ""}
     <p class="fine">From <a role="link" tabindex="0" data-url="${esc(r.url)}">Wikipedia</a>.</p>`;
 }
-function rankedGame(name) { const k = rankKey(name); return state.games.find(g => rankKey(g.name) === k) || null; }
+function rankVia(n, g) { const m = rankMatches.get(n); return m?.via === "collection" ? `In ${esc(g.name)} · ` : m?.via === "edition" ? `As ${esc(g.name)} · ` : ""; }
+/* Top 100 games that aren't anywhere in your library get added to it (once; Undo takes them out again) */
+async function addMissingRanked() {
+  if (!api || !state.canEdit || state.rankingLocal || !state.games.length || !(state.ranking || []).length) return;
+  rankOf({ name: "" });
+  const tried = new Set(uiGet("rank_added", []));
+  const missing = state.ranking.filter(n => !rankMatches.get(n) && !tried.has(rankKey(n)));
+  if (!missing.length || addMissingRanked.busy) return;
+  addMissingRanked.busy = true;
+  uiSet("rank_added", [...tried, ...missing.map(rankKey)]);
+  const r = await Promise.resolve(api.add_from_ranking(missing)).catch(e => ({ error: String(e) }));
+  addMissingRanked.busy = false;
+  if (!r || r.error || !r.added?.length) return;
+  const names = r.added.map(a => a.name);
+  toast(`Added ${names.length === 1 ? names[0] : names.length + " games"} from your Top 100 to your library as Completed. Change the platform with a right-click.`, "ok", {
+    label: "Undo", run: async () => {
+      for (const a of r.added.slice().reverse()) await Promise.resolve(api.delete_item("games", a.row, a.name)).catch(() => null);
+      sync(true);
+    } });
+  sync(true);
+}
 function rankingHTML() {
   const list = state.ranking || [];
   const row = (n, i) => {
@@ -367,14 +453,15 @@ function rankingHTML() {
     const t = rankTier(i + 1);
     return `<li class="rk t-${t} ${fav ? "fav" : ""}" data-ri="${i}">
       <span class="rk-n t-${t}" title="${TIER_NAME[t]}">${i < 10 ? `<i class="rk-aw t-${t}">${awardSVG(t)}</i>` : ""}${i + 1}</span>${art}
-      <div class="rk-t"><b>${esc(n)}</b><small>${g ? `${esc(plat(g.platform).label)} · ${esc(statusOf(g))}${g.score != null ? ` · ${scoreText(g.score)}` : ""}` : "Not in your library"}</small></div>
+      <div class="rk-t"><b>${esc(n)}</b><small>${g ? `${rankVia(n, g)}${esc(plat(g.platform).label)} · ${esc(statusOf(g))}${g.score != null ? ` · ${scoreText(g.score)}` : ""}` : "Not in your library yet"}</small></div>
       <div class="rk-act"><button class="icon" data-rkmove="${i}:-1" title="Move up" aria-label="Move up">▲</button><button class="icon" data-rkmove="${i}:1" title="Move down" aria-label="Move down">▼</button>
         ${g ? `<button class="ghost small" data-open="${g.id}" data-kind="game">Open</button>` : ""}<button class="icon" data-rkdel="${i}" title="Remove from Top 100" aria-label="Remove">✕</button></div></li>`;
   };
   const cell = (n, i) => {
     const g = rankedGame(n), fav = i < 10;
-    const inner = g ? caseHTML(g, { sub: `${plat(g.platform).label} · ${statusOf(g)}` })
-      : `<div class="vcase"><div class="art virtual" data-vname="${esc(n)}"><span>${esc(n)}</span></div><div class="label"><div class="name">${esc(n)}</div><div class="sub">Not in your library</div></div></div>`;
+    const m = g && rankMatches.get(n);
+    const inner = g && m?.via !== "collection" ? caseHTML(g, { sub: `${m?.via ? "Owned as " + g.name + " · " : ""}${plat(g.platform).label} · ${statusOf(g)}` })
+      : `<button class="vcase" ${g ? `data-open="${g.id}" data-kind="game"` : ""} aria-label="${esc(n)}"><div class="vbox"><div class="art virtual" data-vname="${esc(n)}"><span>${esc(n)}</span></div></div><div class="label"><div class="name">${esc(n)}</div><div class="sub">${g ? `In ${esc(g.name)} · ${esc(plat(g.platform).label)}` : "Not in your library yet"}</div></div></button>`;
     const t = rankTier(i + 1);
     return `<div class="rkcell t-${t} ${fav ? "fav" : ""}" data-ri="${i}"><span class="rkbadge t-${t}" title="${TIER_NAME[t]}">${i < 10 ? `<i class="rk-aw">${awardSVG(t)}</i>` : ""}${i + 1}</span>${inner}</div>`;
   };
@@ -1521,6 +1608,7 @@ async function sync(manual) {
       if (panelItem) refreshPanelHead();
     }
     refreshUpdated();
+    setTimeout(addMissingRanked, 1500);
   } else {
     state.error = res?.error || "Unknown error";
     if (state.games.length) {
@@ -2375,6 +2463,7 @@ function ctxMenu(g, x, y, kind = "game") {
     <li class="sep" role="separator"></li>
     <li role="menuitem" tabindex="-1" data-act="cover">Change cover…</li>
     <li role="menuitem" tabindex="-1" data-act="refresh">Refresh info</li>
+    ${state.canEdit && !g.virtual ? `<li class="sep" role="separator"></li><li role="menuitem" tabindex="-1" data-act="delete" class="ctx-danger">${g.status === "Wishlist" ? "Remove from wishlist…" : "Delete from Masterlog…"}</li>` : ""}
   </ul>`;
   placeCtx(m, x, y);
 }
@@ -2397,6 +2486,7 @@ function bookCtxMenu(b, x, y) {
     ${byAuthor > 1 || inSeries > 1 ? `<li class="sep" role="separator"></li>` : ""}
     <li role="menuitem" tabindex="-1" data-act="cover">Change cover…</li>
     <li role="menuitem" tabindex="-1" data-act="refresh">Refresh info</li>
+    ${state.canEdit ? `<li class="sep" role="separator"></li><li role="menuitem" tabindex="-1" data-act="delete" class="ctx-danger">Delete from Masterlog…</li>` : ""}
   </ul>`;
   placeCtx(m, x, y);
 }
@@ -2426,6 +2516,7 @@ async function ctxAction(li) {
     toast(`${g.name}: ${k.replace("_", " ")} set to ${v || "none"}.`, "ok");
     return;
   }
+  if (act === "delete") { if (!armDelete(li, g)) return; closeCtx(); return deleteItem("games", g); }
   if (act === "rank") { const v = m.querySelector(".ctx-rank input").value; closeCtx(); placeInRanking(g, v === "" ? 0 : Math.max(1, Math.round(+v))); return render(); }
   closeCtx();
   if (act === "open") return openPanel("game", g.id);
@@ -2446,6 +2537,7 @@ async function bookCtxAction(li, m) {
   const b = findItem("book", m.dataset.id);
   if (!b || li.hasAttribute("disabled")) return;
   const act = li.dataset.act;
+  if (act === "delete") { if (!armDelete(li, b)) return; closeCtx(); return deleteItem("books", b); }
   closeCtx();
   if (li.dataset.set) {
     const k = li.dataset.set, v = li.dataset.val;
@@ -2463,6 +2555,36 @@ async function bookCtxAction(li, m) {
     if (state.catalog !== "books") switchCatalog("books");
     return go("books");
   }
+}
+/* deleting asks twice in the menu itself (no pop-up), then offers Undo */
+function armDelete(li, item) {
+  if (li.dataset.armed) return true;
+  li.dataset.armed = "1";
+  li.classList.add("armed");
+  li.textContent = `Click again to delete "${item.name}"`;
+  try { FX.play.tab(); } catch {}
+  return false;
+}
+async function deleteItem(tab, item) {
+  const list = tab === "books" ? state.books : state.games;
+  const at = list.indexOf(item);
+  if (at < 0) return;
+  list.splice(at, 1);
+  if (panelItem && findItem(panelItem.kind, panelItem.id) == null) closePanel();
+  if (panelItem && panelItem.id === item.id && panelItem.kind === (tab === "books" ? "book" : "game")) closePanel();
+  rankIndex = null; virtualKey = null;
+  render();
+  const r = await Promise.resolve(api?.delete_item(tab, item.row, item.name)).catch(e => ({ error: String(e) }));
+  if (!r || r.error) {
+    list.splice(at, 0, item); rankIndex = null; render();
+    return toast(`Couldn't delete: ${r?.error || "no connection"}`, "err");
+  }
+  try { FX.play.back(); } catch {}
+  toast(`Deleted ${item.name}.`, "ok", { label: "Undo", run: async () => {
+    const u = await Promise.resolve(api.undo_delete(r.undo)).catch(e => ({ error: String(e) }));
+    if (u?.error) toast(`Couldn't put it back: ${u.error}`, "err"); else { toast(`${item.name} is back.`, "ok"); sync(true); }
+  } });
+  setTimeout(() => sync(false), 2500);
 }
 async function refreshGame() {
   const g = findItem(panelItem?.kind, panelItem?.id);
@@ -2880,17 +3002,7 @@ async function checkNewsDot() {
   } catch {}
 }
 
-/* a cover that isn't the 2:3 shape of the frame is shown whole instead of cropped */
-document.addEventListener("load", e => {
-  const img = e.target;
-  if (img.tagName !== "IMG") return;
-  const box = img.closest(".case .art, .opencase .face.outside .art, .rk .art, .vcase .art, .covercand");
-  if (!box || box.closest(".book")) return;
-  const r = img.naturalWidth / img.naturalHeight;
-  const odd = r && Math.abs(r - 2 / 3) / (2 / 3) > 0.08;
-  box.classList.toggle("odd", !!odd);
-  if (odd) box.style.setProperty("--img", `url("${img.src}")`);
-}, true);
+/* covers are always cropped to the 2:3 frame (see style.css); nothing to measure here any more */
 
 /* animations rest when Masterlog isn't the window you're using */
 addEventListener("blur", () => document.body.classList.add("away"));

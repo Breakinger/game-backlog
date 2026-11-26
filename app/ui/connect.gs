@@ -1,5 +1,5 @@
 /**
- * Masterlog connection (version 4). Besides reading and writing the sheet, it lets more PCs use Masterlog:
+ * Masterlog connection (version 5: adds deleting rows, with undo). Besides reading and writing the sheet, it lets more PCs use Masterlog:
  * a new PC asks here, you tick Allow next to its code in the "Masterlog PCs" tab, and it gets its own key.
  * It also keeps your PCs in step (All Time Classic, hidden games, DLC marks, covers, your ambience track)
  * and passes your account keys between them sealed, so this script never sees them in the clear.
@@ -64,6 +64,8 @@ function route_(p) {
   if (p.action === 'read') return read_();
   if (p.action === 'update') return withLock_(() => update_(p));
   if (p.action === 'add') return withLock_(() => add_(p));
+  if (p.action === 'delete') return withLock_(() => delete_(p));
+  if (p.action === 'restore') return withLock_(() => restore_(p));
   if (p.action === 'rank') return withLock_(() => rank_(p));
   if (p.action === 'state_get') return stateGet_(p.device);
   if (p.action === 'state_put') return withLock_(() => statePut_(p));
@@ -136,7 +138,7 @@ function read_() {
     plays: table_('plays'),
     books: table_('books'),
     ranking: ranking_(),
-    script: 4,
+    script: 5,
   };
 }
 
@@ -226,6 +228,44 @@ function add_(p) {
   if (!row) { sh.insertRowAfter(sh.getMaxRows()); row = sh.getMaxRows(); }
   const skipped = write_(sh, row, h, p.values);
   return { ok: true, row: row, skipped: skipped };
+}
+
+/* deleting a row hands back everything in it, so the app can put it back (Undo) */
+function delete_(p) {
+  const sh = sheetFor_(p.tab);
+  const h = headerRow_(sh);
+  const row = locate_(sh, h, Number(p.row), p.name);
+  if (row <= h) throw new Error('That row can\'t be deleted.');
+  const width = sh.getLastColumn();
+  const range = sh.getRange(row, 1, 1, width);
+  const saved = { tab: p.tab, row: row, values: range.getValues()[0], formulas: range.getFormulas()[0] };
+  saved.values = saved.values.map(v => v instanceof Date ? { date: v.toISOString() } : v);
+  sh.deleteRow(row);
+  return { ok: true, deleted: saved };
+}
+
+function restore_(p) {
+  const d = p.deleted || {};
+  const sh = sheetFor_(d.tab);
+  const h = headerRow_(sh);
+  const width = (d.values || []).length;
+  if (!width) throw new Error('Nothing to put back.');
+  const row = Math.max(h + 1, Math.min(Number(d.row) || sh.getLastRow() + 1, sh.getLastRow() + 1));
+  if (row <= sh.getLastRow()) sh.insertRowBefore(row); else if (row > sh.getMaxRows()) sh.insertRowAfter(sh.getMaxRows());
+  const neighbour = row > h + 1 ? row - 1 : row + 1;
+  if (neighbour <= sh.getLastRow() && neighbour !== row) {
+    const src = sh.getRange(neighbour, 1, 1, width), dest = sh.getRange(row, 1, 1, width);
+    src.copyTo(dest, SpreadsheetApp.CopyPasteType.PASTE_FORMAT, false);
+    src.copyTo(dest, SpreadsheetApp.CopyPasteType.PASTE_DATA_VALIDATION, false);
+  }
+  for (let c = 0; c < width; c++) {
+    const cell = sh.getRange(row, c + 1);
+    const f = (d.formulas || [])[c];
+    let v = d.values[c];
+    if (v && typeof v === 'object' && v.date) v = new Date(v.date);
+    if (f) cell.setFormula(f); else cell.setValue(v === null || v === undefined ? '' : v);
+  }
+  return { ok: true, row: row };
 }
 
 /* ---------- what your PCs share besides the sheet (kept in this script's private properties) ---------- */

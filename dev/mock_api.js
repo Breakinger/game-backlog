@@ -23,6 +23,8 @@
     restart_app: async () => true,
     pair_poll: async () => { window.__pp = (window.__pp || 0) + 1; return window.__pp < 2 ? { waiting: true, code: "K7Q-29F" } : { ok: true, title: "Game Backlog" }; },
     pair_cancel: async () => true,
+    add_from_ranking: async names => wait({ added: names.slice(0, 3).map((n, i) => ({ name: n, platform: "PC (Other)", row: 900 + i })), failed: [] }),
+    delete_item: async () => wait({ ok: true, undo: "abc" }), undo_delete: async () => wait({ ok: true }),
     book_cover_options: async b => wait({ items: [0, 1, 2, 3, 4, 5].map(k => ({ url: "https://x/" + k, thumb: art(b.name + k, k, true), source: k < 4 ? "Open Library" : "Google Books", note: String(1990 + k) })) }),
     pick_book_cover: async (b) => ({ uri: art(b.name + "picked", 5, true) }), set_book_cover: async () => null, clear_book_cover: async b => art(b.name, 1, true),
     awards: async g => wait({ wins: [{ award: "The Game Awards", category: "Game of the Year", year: "2011" }, { award: "BAFTA Games Awards", category: "Best Game", year: "2012" }, { award: "D.I.C.E. Awards", category: "Game of the Year", year: "2012" }, { award: "Golden Joystick Awards", category: "RPG of the Year", year: "2011" }, { award: "Spike VGA", category: "Best RPG", year: "2011" }], goty: 2, nominations: 31, url: "https://en.wikipedia.org/wiki/X#Accolades" }, 600),

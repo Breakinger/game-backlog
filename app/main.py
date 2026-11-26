@@ -502,6 +502,67 @@ class Api:
         except Exception as e:
             return {"error": str(e)}
 
+    # ----- deleting (with undo) -----
+    def delete_item(self, tab, row, name):
+        client = self._script()
+        if not client:
+            return {"error": "Deleting needs the sheet connection. Open Settings to set it up."}
+        try:
+            out = client.delete(tab, row, name)
+        except Exception as e:
+            msg = str(e)
+            if "Unknown action" in msg:
+                msg = "Deleting needs the newest connection script. In Settings → Sheet & sources, copy the script into your sheet and deploy a new version."
+            return {"error": msg}
+        if not hasattr(self, "_deleted"):
+            self._deleted = {}
+        tok = secrets.token_hex(6)
+        self._deleted[tok] = out.get("deleted")
+        return {"ok": True, "undo": tok}
+
+    def undo_delete(self, tok):
+        d = getattr(self, "_deleted", {}).pop(tok, None)
+        client = self._script()
+        if not d or not client:
+            return {"error": "That can't be undone any more."}
+        try:
+            client.restore(d)
+            return {"ok": True}
+        except Exception as e:
+            return {"error": str(e)}
+
+    # ----- Top 100 games that aren't in your library yet -----
+    def _guess_platform(self, name):
+        """Where you have it, going by your linked accounts; otherwise PC (Other), for you to change."""
+        for src, entry in (self._accounts.state.get("sources") or {}).items():
+            for a in entry.get("games") or []:
+                if a.get("platform") and art.same_title(name, a.get("name", ""), 0.85):
+                    return a["platform"]
+        return "PC (Other)"
+
+    def add_from_ranking(self, names):
+        client = self._script()
+        if not client:
+            return {"error": "Adding needs the sheet connection."}
+        try:
+            if not client.headers:
+                client.read()
+        except Exception as e:
+            return {"error": str(e)}
+        added, failed = [], []
+        for n in (names or [])[:25]:
+            n = (n or "").strip()
+            if not n:
+                continue
+            plat = self._guess_platform(n)
+            try:
+                out = client.add("games", {"name": n, "status": "Completed", "platform": plat, "format": "Digital",
+                                           "notes": "Added from your Top 100"})
+                added.append({"name": n, "platform": plat, "row": out.get("row")})
+            except Exception as e:
+                failed.append({"name": n, "error": str(e)})
+        return {"added": added, "failed": failed}
+
     def add(self, tab, values):
         client = self._script()
         if not client:
