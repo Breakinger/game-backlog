@@ -46,6 +46,10 @@ function bindGlobal() {
   $("#copyScript").addEventListener("click", copyScript);
   $("#copyManifest").addEventListener("click", copyManifest);
   document.querySelectorAll("[data-stab]").forEach(b => b.addEventListener("click", () => showSettingsTab(b.dataset.stab)));
+  document.querySelectorAll("[data-diag]").forEach(b => b.addEventListener("click", () => {
+    if (b.dataset.diag === "clear") Promise.resolve(api?.clear_diagnostics?.()).then(() => { if (!$("#diagText").hidden) copyDiagnostics(true); toast("Cleared the saved errors."); }).catch(() => {});
+    else copyDiagnostics(b.dataset.diag === "show");
+  }));
   $("#settingsForm").addEventListener("input", e => {
     if (["sound_on", "ambient_volume", "fx_volume"].includes(e.target.name)) applySound({ ...state.settings, ...soundSettings() });
     if (e.target.name === "pad_scroll") { state.settings.pad_scroll = +e.target.value; $("#padScrollVal").textContent = `${(+e.target.value).toFixed(1)}×`; }

@@ -1957,8 +1957,6 @@ body.chrome:not(.bigpic) .caseview .refreshinfo { right: 70px; }
 /* History years: room above the covers for flames and crowns, and the year's Game of the Year in its own frame */
 .year .detail .shelf-row { padding-top: 44px; }
 .year .best { position: relative; z-index: 2; }
-.ltop { flex-wrap: wrap; }
-.ltop .name { flex: 1 1 96px; }
 .ltop .medals { flex: none; }
 .year.open .detail.with-goty { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 26px; align-items: start; }
 .ymain { min-width: 0; }
@@ -2190,6 +2188,34 @@ form:has(select[name="platform"] option:checked:is([value="PS5"], [value="PS4"],
 .relnewer small { color: var(--muted); font-size: 11.5px; }
 .mhint { display: block; color: var(--muted); font-size: 11.5px; margin-top: 4px; font-weight: 400; }
 /* medals hang beside the name without pushing the line under it down, so every case's text lines up */
-.ltop > :not(.name) { margin-bottom: calc((17px * var(--scale) + 4px) * -1.42 + 1.3em - 2px); }
-.label:has(.ltop > :not(.name)) .sub { padding-right: calc(17px * var(--scale) + 10px); }
 .mf input[type=date] { color-scheme: dark; }
+
+/* diagnostics, under Source status */
+.diag { margin-top: 18px; padding-top: 14px; border-top: 1px solid var(--line); }
+.diagbtns { display: flex; flex-wrap: wrap; gap: 8px; }
+#diagText { width: 100%; min-height: 220px; margin-top: 10px; padding: 10px 12px; border-radius: 10px; border: 1px solid var(--line-strong); background: rgba(6, 12, 31, .75); color: var(--glass); font: 12px/1.5 ui-monospace, Consolas, monospace; resize: vertical; white-space: pre; }
+
+/* the line under a cover: the name, and at most one small row of honours beside it, the same height on every game,
+   so names, medals and the line below them line up across a shelf */
+.ltop { display: flex; flex-wrap: nowrap; align-items: flex-start; gap: 5px; min-height: calc(20px * var(--scale) + 2px); }
+.ltop .name { flex: 1 1 0; min-width: 0; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; }
+.ltop .medals { flex: none; margin-top: -1px; height: calc(20px * var(--scale) + 2px); gap: 2px; align-items: center; }
+.ltop .medal { height: 100%; width: auto; margin: 0; }
+.ltop .medal.m-rank { aspect-ratio: 24 / 34; } .ltop .medal.m-full { aspect-ratio: 30 / 32; } .ltop .medal.m-plat { aspect-ratio: 30 / 34; }
+.ltop .medal.m-goty, .ltop .medal.m-mygoty { aspect-ratio: 26 / 20; height: 78%; }
+.ltop .medal.m-rank b { font-size: max(7px, calc(7px * var(--scale))); }
+/* both crowns at once: the official gold one, with yours tucked in front */
+.medal.m-goty.both { position: relative; overflow: visible; }
+.medal.m-goty.both .mini { position: absolute; right: -22%; bottom: -18%; width: 64%; filter: drop-shadow(0 0 3px rgba(220, 232, 255, .9)) drop-shadow(0 1px 1px rgba(0,0,0,.6)); }
+.medal.m-goty.both .mini svg { width: 100%; height: auto; display: block; }
+
+/* effects sit behind everything that isn't their own glow: other covers, names, the line under them */
+#view { isolation: isolate; }
+.case, .case.fx-classic .stage { isolation: auto; }
+.case :is(.flames, .classic-flames, .sparks, .fxglow, .cosmos.aura) { z-index: -1; }
+/* and they're calmer: flames lick the top edge instead of towering over the row above */
+.flames { top: -9%; height: 26%; opacity: .7; }
+.classic-flames, .classic-flames.big { top: -12%; height: 30%; left: 2%; right: 2%; opacity: .8; }
+.sparks { top: -4%; height: 34%; }
+.cosmos.aura { inset: -4% -6%; filter: blur(8px); }
+.classic-award.oncover { left: -7%; top: -5%; width: 34%; }

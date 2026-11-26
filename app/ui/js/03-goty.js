@@ -59,6 +59,7 @@ function gotyMedals(g) {
   if (!e) return "";
   const dim = played(g) ? "" : " dim";
   let out = "";
+  if (e.official.length && e.mine.length) return `<span class="medal m-goty both${dim}" title="Game of the Year ${e.official.join(", ")} · The Game Awards, and your Game of the Year ${e.mine.join(", ")}${dim ? " · not played yet" : ""}">${CROWN("gold")}<i class="mini">${CROWN("white")}</i></span>`;
   if (e.official.length) out += `<span class="medal m-goty${dim}" title="Game of the Year ${e.official.join(", ")} · The Game Awards${dim ? " · not played yet" : ""}">${CROWN("gold")}</span>`;
   if (e.mine.length) out += `<span class="medal m-mygoty${dim}" title="Your Game of the Year ${e.mine.join(", ")}${dim ? " · not played yet" : ""}">${CROWN("white")}</span>`;
   return out;

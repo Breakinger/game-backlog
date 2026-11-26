@@ -224,6 +224,11 @@
       <p class="intro">Every outside site Masterlog reads from, and whether it answered lately. When one stops working, that part of the app goes quiet (no awards, no sale dates…); this is where you'll see why. A red one has been failing for over a day, and the settings button gets a dot.</p>
       <div class="hsum" id="healthSum" aria-live="polite"></div>
       <ul class="hlist" id="healthList"></ul>
+      <div class="diag">
+        <div class="diagbtns"><button type="button" class="primary" id="diagCopy" data-diag="copy">Copy diagnostics</button><button type="button" class="ghost" data-diag="show">Show it first</button><button type="button" class="ghost" data-diag="clear">Clear errors</button></div>
+        <p class="fine">Something not working? Copy this and paste it into a chat with Claude. It holds the app's version, your system, these sources and the last errors, with keys, tokens, e-mails, Steam IDs and folder names taken out.</p>
+        <textarea id="diagText" readonly hidden spellcheck="false" aria-label="Diagnostics report"></textarea>
+      </div>
       <p class="fine">Only the site's name, the time and a short reason are kept here, on this PC. Sources you haven't used yet don't appear.</p>
     </div>
     <div class="spane" data-spane="pcs" hidden>

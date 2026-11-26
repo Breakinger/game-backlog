@@ -181,6 +181,8 @@ class Api:
         self._dir = data_dir()
         import health
         health.install(self._dir)   # note which outside sources answer (Settings → Sources)
+        import diag
+        diag.install(self._dir)     # keep recent errors for Settings → Source status → Copy diagnostics
         self._settings_path = os.path.join(self._dir, "settings.json")
         self._cache_path = os.path.join(self._dir, "last_sync.json")
         self._settings = dict(DEFAULTS)
@@ -1331,6 +1333,26 @@ class Api:
 
     def updated(self, games):
         return _safe(self._info.updated, games) or {}
+
+    def ui_error(self, where, msg):
+        """An error in the window (a script error or a failed call), kept for the diagnostics report."""
+        import diag
+        diag.note(f"window {str(where)[:80]}", str(msg)[:600])
+        return True
+
+    def diagnostics(self, ui=None):
+        """Settings → Source status → Copy diagnostics: versions, sources and recent errors, scrubbed of keys and names."""
+        import diag, health
+        try:
+            info = self.platform_info()
+        except Exception:
+            info = {}
+        return diag.report(VERSION, info, dict(self._settings or {}), health.H.report() if health.H else {}, ui if isinstance(ui, dict) else None)
+
+    def clear_diagnostics(self):
+        import diag
+        diag.clear()
+        return True
 
     def sources_health(self):
         """Settings → Sources: which outside sites answered lately, and what went wrong when they didn't."""

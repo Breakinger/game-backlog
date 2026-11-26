@@ -74,6 +74,9 @@
       { key: "steam_store", name: "Steam Store", what: "Prices, descriptions, release dates, Steam Deck ratings", status: "ok", ok_t: 1795711056 }
     ] }, 150),
     release_year: async name => wait(2018, 200),
+    diagnostics: async ui => wait(`Masterlog 1.0.48 · installed build · 2026-11-27 00:40\nSystem: Windows 10 · AMD64\nWindow: ${Object.entries(ui || {}).map(([k, v]) => `${k} ${JSON.stringify(v)}`).join(", ")}\n\nSources:\n  OK  Steam store, worked 2m ago\n  BAD IGDB for 2d: HTTP 401\n\nRecent errors (1):\n  3m ago · window api.release_info · HTTP 401`, 200),
+    clear_diagnostics: async () => true,
+    ui_error: async () => true,
     release_info: async g => wait(/resident evil|re4/i.test(g.name || "") ? { date: 1111622400, precision: "day", platforms: ["GameCube"], ports: [{ platform: "PS2", date: 1130112000, precision: "day" }, { platform: "PC", date: 1172534400, precision: "day" }], newer: [{ name: "Resident Evil 4 (2023)", kind: "remake", date: 1679616000 }], source: "IGDB" } : { date: 1540512000, precision: "day", platforms: ["PS4", "Xbox One"], ports: [{ platform: "PC", date: 1572566400, precision: "day" }], newer: [], manual: !!g.release, source: "Wikipedia" }, 250),
     release_dates: async games => wait({ dates: Object.fromEntries(games.map((g, i) => [g.name, 946684800 + (i * 7919 % 9000) * 86400])), pending: 0 }, 200),
     release_years: async names => wait({ years: Object.fromEntries(names.map((n, i) => [n, [2022, 2023, 2024, 2025, 2019, 2020][i % 6]])), pending: 0 }, 300),
