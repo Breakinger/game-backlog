@@ -2154,3 +2154,6 @@ body.calm .glint { animation-play-state: paused; }
 .stabs { flex-wrap: wrap; row-gap: 0; }
 .stabs button { white-space: nowrap; padding: 9px 12px; }
 #settings .spane { min-width: 0; overflow-wrap: anywhere; }
+
+/* Modify: "Play on" only for PC games (a console game plays on its console) */
+form:has(select[name="platform"] option:checked:is([value="PS5"], [value="PS4"], [value="PS2"], [value="Switch"], [value="Switch 2"])) [data-field="play_on"] { display: none; }

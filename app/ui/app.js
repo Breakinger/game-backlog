@@ -1216,22 +1216,33 @@ function selectCell(cat, field, item) {
   if (!state.canEdit) return `<span class="cellpill" style="${color ? `--c:${color}` : ""}">${esc(v || "–")}</span>`;
   return `<select class="cellsel" data-field="${field}" style="${color ? `--c:${color}` : ""}"><option value=""></option>${opts(cat, field).map(o => `<option ${o === v ? "selected" : ""}>${esc(o)}</option>`).join("")}</select>`;
 }
+/* a column appears only where it means something: no Finished, Runs, Hours or Score for games nobody has played
+   yet (your backlog), and Play on only for PC games, since every console game plays on its console */
 function gameListHTML(list) {
-  const head = ["Game", "Status", "Priority", "Finished", "Platform", "Play on", "Format", "Upgrade", "DLC", "100%", "Modded", "Runs", "Hours", "Score", "Genre"];
-  return `<div class="sheet-wrap"><table class="sheet"><thead><tr>${head.map(h => `<th>${h}</th>`).join("")}</tr></thead><tbody>
+  const any = fn => list.some(fn);
+  const cols = [
+    ["Game", true], ["Status", true], ["Priority", true],
+    ["Finished", any(g => g.completed || g.status === "Completed" || g.dropped)], ["Platform", true],
+    ["Play on", any(g => !CONSOLES.has(g.platform))], ["Format", true], ["Upgrade", any(g => g.upgrade && g.upgrade !== "No upgrade")],
+    ["DLC", true], ["100%", any(g => played(g))], ["Modded", true],
+    ["Runs", any(g => g.runs)], ["Hours", any(g => g.hours_text)], ["Score", any(g => g.score != null)], ["Genre", true],
+  ];
+  const on = Object.fromEntries(cols);
+  const td = (k, html) => on[k] ? html : "";
+  return `<div class="sheet-wrap"><table class="sheet"><thead><tr>${cols.filter(c => c[1]).map(([h]) => `<th>${h}</th>`).join("")}</tr></thead><tbody>
     ${list.map(g => {
       const p = plat(g.platform);
       const canCheck = state.canEdit && owned(g) && g.status !== "Completed" && g.type !== "Live service";
       return `<tr data-id="${g.id}" data-kind="game" tabindex="0" class="${g.status === "Wishlist" ? "unowned" : ""}">
         <td class="name ${g.status === "Completed" ? "done" : ""}">${esc(g.name)}${state.updated[g.name] ? ` <span class="fresh-dot" title="Newly updated">NEW</span>` : ""}${canCheck ? `<button class="rowcheck" data-qc="${g.id}" data-qkind="game" title="Mark as completed">✓</button>` : ""}</td>
         <td>${selectCell("games", "status", g)}</td><td>${selectCell("games", "priority", g)}</td>
-        <td class="date">${g.completed ? "✓ " + g.completed : g.status === "Completed" ? "unknown" : g.dropped ? "✗ " + g.dropped : ""}</td>
+        ${td("Finished", `<td class="date">${g.completed ? "✓ " + g.completed : g.status === "Completed" ? "unknown" : g.dropped ? "✗ " + g.dropped : ""}</td>`)}
         <td><span class="platpill" style="background:${p.chip};color:${p.chipText}">${esc(g.platform)}</span></td>
-        <td class="muted">${CONSOLES.has(g.platform) ? "" : esc(g.play_on)}</td><td class="muted">${esc(g.format)}</td>
-        <td>${g.upgrade && g.upgrade !== "No upgrade" ? `<span class="upgcell ${g.upgrade.startsWith("Free") ? "free" : "paid"}">${esc(g.upgrade)}</span>` : `<span class="muted">${esc(g.upgrade)}</span>`}</td>
-        <td>${cellBool(g.dlc_owned)}${g.dlc_done ? `<span class="tick on small">done</span>` : ""}</td><td>${cellBool(g.platinum)}</td><td>${cellBool(g.modded)}</td>
-        <td class="num">${g.runs || ""}</td><td class="num">${esc(g.hours_text)}</td>
-        <td class="num">${g.score != null ? `<span class="scorecell" style="--s:${g.score / 10}">${scoreText(g.score)}</span>` : ""}</td>
+        ${td("Play on", `<td class="muted">${CONSOLES.has(g.platform) ? "" : esc(g.play_on)}</td>`)}<td class="muted">${esc(g.format)}</td>
+        ${td("Upgrade", `<td>${g.upgrade && g.upgrade !== "No upgrade" ? `<span class="upgcell ${g.upgrade.startsWith("Free") ? "free" : "paid"}">${esc(g.upgrade)}</span>` : ""}</td>`)}
+        <td>${cellBool(g.dlc_owned)}${g.dlc_done ? `<span class="tick on small">done</span>` : ""}</td>${td("100%", `<td>${played(g) ? cellBool(g.platinum) : ""}</td>`)}<td>${cellBool(g.modded)}</td>
+        ${td("Runs", `<td class="num">${g.runs || ""}</td>`)}${td("Hours", `<td class="num">${esc(g.hours_text)}</td>`)}
+        ${td("Score", `<td class="num">${g.score != null ? `<span class="scorecell" style="--s:${g.score / 10}">${scoreText(g.score)}</span>` : ""}</td>`)}
         <td class="muted clip">${esc(g.genre)}</td></tr>`;
     }).join("")}</tbody></table></div>`;
 }
@@ -2092,7 +2103,7 @@ function fieldHTML(cat, [k, label, type], item) {
     const tint = o => k === "status" ? STATUS_COLOR[o] : k === "priority" ? PRIO_COLOR[o] : "";
     return `<fieldset class="mf chips" data-field="${k}"><legend>${label}</legend><div class="chiprow">${list.map(o => `<label class="mchip" style="${tint(o) ? `--c:${tint(o)}` : ""}"><input type="radio" name="${k}" value="${esc(o)}" ${(v ?? "") === o ? "checked" : ""}><span>${esc(o || NONE_LABEL[k] || "None")}</span></label>`).join("")}</div></fieldset>`;
   }
-  if (type === "select") return `<label class="mf">${label}<select name="${k}"><option value="">Not set</option>${opts(cat, k).map(o => `<option ${o === v ? "selected" : ""}>${esc(o)}</option>`).join("")}</select></label>`;
+  if (type === "select") return `<label class="mf" data-field="${k}">${label}<select name="${k}"><option value="">Not set</option>${opts(cat, k).map(o => `<option value="${esc(o)}" ${o === v ? "selected" : ""}>${esc(o)}</option>`).join("")}</select></label>`;
   if (k === "score") {
     const has = v != null && v !== "";
     return `<div class="mf score ${has ? "" : "unset"}" data-field="score"><span class="mlabel">${label}</span><div class="scorebox"><b class="scorenum">${has ? (+v).toFixed(1).replace(/\.0$/, "") : "–"}</b><small>/10</small>
