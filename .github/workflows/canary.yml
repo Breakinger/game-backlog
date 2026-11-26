@@ -37,7 +37,7 @@ jobs:
           git config user.name "masterlog-canary"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
           rm -rf /tmp/fx && cp -r tests/fixtures /tmp/fx
-          if git fetch -q origin fixtures-snapshot; then git checkout -q -B fixtures-snapshot FETCH_HEAD; else git checkout -q --orphan fixtures-snapshot && git rm -rq --cached . && git clean -fdq -e tests; fi
+          if git fetch -q origin fixtures-snapshot; then git checkout -q -f -B fixtures-snapshot FETCH_HEAD; else git checkout -q --orphan fixtures-snapshot && git rm -rq --cached . && git clean -fdq -e tests; fi
           rm -rf fixtures && mkdir fixtures && cp /tmp/fx/wp_*.json /tmp/fx/pcgw_*.json fixtures/   # openly licensed copies only
           git add fixtures
           git commit -qm "Fresh copies of the pages Masterlog reads, $(date -u +%F)" || echo "nothing changed"
