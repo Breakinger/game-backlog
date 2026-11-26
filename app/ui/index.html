@@ -97,11 +97,13 @@
       </details>
       <label>IGDB Client ID <input name="igdb_id" type="text" autocomplete="off" placeholder="Leave empty to keep what's saved"></label>
       <label>IGDB Client secret <input name="igdb_secret" type="password" autocomplete="off" placeholder="Leave empty to keep what's saved"><small id="igdbState"></small></label>
-      <details class="howto"><summary>If Reddit news won't load: add a free Reddit app ID</summary>
-        <ol><li>Signed in to Reddit, open <b>reddit.com/prefs/apps</b> and press <b>create another app</b>.</li>
-          <li>Name it Masterlog, choose <b>installed app</b>, set the redirect URI to <b>http://localhost</b>, then <b>create app</b>.</li>
-          <li>Copy the short ID shown under the app's name and paste it below. It can only read public posts.</li></ol></details>
-      <label>Reddit app ID (optional) <input name="reddit_id" type="text" autocomplete="off" placeholder="Leave empty to keep what's saved"><small id="redditState"></small></label>
+      <details class="howto"><summary>Nexus Mods: list the mods you track and endorse (free)</summary>
+        <ol><li>Signed in to Nexus Mods, open <button type="button" class="linkish" data-url="https://next.nexusmods.com/settings/api-keys">your API keys page</button>.</li>
+          <li>Scroll to the bottom, copy your <b>Personal API Key</b> and paste it below. Masterlog only reads with it; it never downloads or changes anything.</li></ol></details>
+      <label>Nexus Mods API key (optional) <input name="nexus_key" type="password" autocomplete="off" placeholder="Leave empty to keep what's saved"><small id="nexusState"></small></label>
+      <details class="howto" id="redditBox"><summary>Reddit</summary>
+        <p class="fine">Reddit stopped handing out new app IDs in November 2025, so you don't need one: Masterlog reads the subreddits through its own browser engine when Reddit blocks plain requests. If you already have an approved Reddit app, you can still paste its ID here.</p>
+        <label>Reddit app ID (optional) <input name="reddit_id" type="text" autocomplete="off" placeholder="Leave empty to keep what's saved"><small id="redditState"></small></label></details>
       <label>YouTube API key (optional) <input name="youtube_key" type="password" autocomplete="off" placeholder="Leave empty to keep what's saved"><small id="ytState"></small></label>
       <label>Check the sheet for changes every
         <select name="refresh_minutes">

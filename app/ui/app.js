@@ -49,7 +49,7 @@ const state = {
   syncedAt: null, error: null, settings: {}, updated: {}, facts: {}, candidates: [],
   view: "home", focusId: null, mode: "covers",
   filter: { q: "", status: new Set(), plats: new Set(), playOn: "All", prio: new Set(), formats: new Set(), sort: "priority" },
-  bfilter: { q: "", status: "All", sort: "series" },
+  bfilter: { q: "", status: new Set(), prio: new Set(), formats: new Set(), author: null, series: null, sort: "series" },
   openYears: new Set([new Date().getFullYear()]),
 };
 const covers = new Map();       // key -> dataURI | null
@@ -153,7 +153,7 @@ function caseHTML(g, o = {}) {
   else if (g.status === "Dropped") badge = `<span class="badge drop">✗</span>`;
   else if (g.priority === "Extreme" || g.priority === "High") badge = `<span class="badge" style="color:${PRIO_COLOR[g.priority]}">${g.priority}</span>`;
   const rkn = rankOf(g);
-  const rankChip = rkn && rkn > 10 ? `<span class="rankchip" title="#${rkn} in your Top 100">#${rkn}</span>` : "";
+  const rankChip = rkn && rkn > 10 ? `<span class="rankchip t-${rankTier(rkn)}" title="${TIER_NAME[rankTier(rkn)]} · #${rkn} in your Top 100">#${rkn}</span>` : "";
   const fresh = state.updated[g.name] ? `<span class="freshline" title="${esc(state.updated[g.name].title || "")}"><i></i>Newly updated!</span>` : "";
   const upOwned = g.upgrade_owned || factsOf(g).ps5_version;
   const up = g.upgrade && UPGRADE_TO[g.platform] && g.upgrade !== "No upgrade" ? `<span class="tag up ${upOwned ? "owned" : g.upgrade.startsWith("Free") ? "free" : "paid"}" title="${esc(upgradeLabel(g))}${upOwned ? " · you own the upgrade" : ""}">${upOwned ? `${esc(UPGRADE_TO[g.platform].replace("PlayStation ", "PS").replace("Nintendo ", ""))} ✓` : `${g.upgrade.startsWith("Free") ? "FREE" : "PAID"} ↑`}</span>` : "";
@@ -192,6 +192,7 @@ function achBadge(g) {
    cobwebs on paused games, dropped games tossed aside, an extra life for second chances */
 function effectClass(g) {
   const st = statusOf(g), out = [];
+  if (isClassic(g)) return "fx-classic";   // the classic outshines every other effect
   if (st === "Second chance") out.push("fx-chance");
   else if (g.status === "Dropped") out.push("fx-dropped");
   else if (g.status === "Completed") out.push("fx-done");
@@ -206,7 +207,8 @@ function effectLayer(g) {
   const st = statusOf(g);
   let out = "";
   const rk = rankOf(g);
-  if (rk && rk <= 10) out += `<span class="favstar" title="All-time favourite · #${rk} in your Top 100"><svg viewBox="0 0 24 24"><path d="M12 2.5l2.9 6 6.6.9-4.8 4.6 1.2 6.5L12 17.4l-5.9 3.1 1.2-6.5-4.8-4.6 6.6-.9z"/></svg><b>${rk}</b></span>`;
+  if (isClassic(g)) out += `<div class="cosmos aura" aria-hidden="true"><i></i><i></i></div><span class="classic-award oncover" title="All Time Classic${rk ? ` · #${rk} in your Top 100` : ""}">${CLASSIC_IMG}</span>`;
+  else if (rk && rk <= 10) { const t = rankTier(rk); out += `<span class="favstar award t-${t}" title="${TIER_NAME[t]} · #${rk} in your Top 100">${awardSVG(t)}<b>${rk}</b></span>`; }
   if (g.priority === "Extreme" && g.status !== "Completed" && g.status !== "Dropped") out += `<div class="flames" aria-hidden="true"><i></i><i></i><i></i><i></i><i></i></div>`;
   if ((st === "Paused" || g.status === "Paused") && st !== "Second chance") out += `<div class="cobweb" aria-hidden="true"><svg viewBox="0 0 60 60"><path d="M0 0L60 60M0 0L60 22M0 0L22 60M0 0L60 0M0 0L0 60M10 0Q8 8 0 10M22 0Q18 18 0 22M36 0Q30 30 0 36M52 0Q42 42 0 52"/></svg></div><div class="dust" aria-hidden="true"></div>`;
   if (st === "Second chance") out += `<span class="extralife" title="Second chance"><svg viewBox="0 0 24 24"><path d="M12 21s-7.5-4.6-9.5-9.1C1 8.4 3.2 5 6.6 5c2 0 3.4 1.1 4.2 2.4C11.6 6.1 13 5 15 5c3.4 0 5.6 3.4 4.1 6.9C17.1 16.4 12 21 12 21z"/></svg><b>↻ 1UP</b></span>`;
@@ -230,12 +232,28 @@ function subline(g) {
 }
 
 /* ---------- the book ---------- */
+function bookFx(b) {
+  const out = [];
+  if (b.status === "Read") out.push("fx-done");
+  else if (b.status === "Dropped") out.push("fx-dropped");
+  else if (b.priority === "Extreme") out.push("fx-extreme");
+  else if (b.priority === "High") out.push("fx-high");
+  if (b.status === "Reading") out.push("fx-reading");
+  return out.join(" ");
+}
+function bookFxLayer(b) {
+  let out = "";
+  if (b.priority === "Extreme" && b.status !== "Read" && b.status !== "Dropped") out += `<div class="flames" aria-hidden="true"><i></i><i></i><i></i><i></i><i></i></div>`;
+  if (b.status === "Reading") out += `<span class="bookmark" title="Reading now" aria-hidden="true"></span>`;
+  if (b.score != null && b.score >= 9 && b.status === "Read") out += `<span class="favstar bookfav" title="Scored ${scoreText(b.score)}"><svg viewBox="0 0 24 24"><path d="M12 21s-7.5-4.6-9.5-9.1C1 8.4 3.2 5 6.6 5c2 0 3.4 1.1 4.2 2.4C11.6 6.1 13 5 15 5c3.4 0 5.6 3.4 4.1 6.9C17.1 16.4 12 21 12 21z"/></svg><b>${(+b.score).toFixed(b.score % 1 ? 1 : 0)}</b></span>`;
+  return out;
+}
 function bookHTML(b, o = {}) {
   const cached = covers.get(coverKey(b));
   const art = cached ? `<img alt="" decoding="async" src="${cached}">` : `<div class="fallback book-fallback"><div class="t">${esc(b.name)}</div><div class="d">${esc(b.author)}</div></div>`;
   const badge = b.status === "Read" ? `<span class="badge done">✓</span>` : b.status === "Reading" ? `<span class="badge reading">Reading</span>` : b.priority === "Extreme" || b.priority === "High" ? `<span class="badge" style="color:${PRIO_COLOR[b.priority]}">${b.priority}</span>` : "";
-  return `<button class="case book ${b.status === "Wishlist" ? "unowned" : ""}" data-id="${b.id}" data-kind="book" aria-label="${esc(b.name)}">
-    <div class="stage"><div class="pages"></div>
+  return `<button class="case book ${b.status === "Wishlist" ? "unowned" : ""} ${bookFx(b)}" data-id="${b.id}" data-kind="book" aria-label="${esc(b.name)}">
+    <div class="stage"><div class="pages"></div>${bookFxLayer(b)}
       <div class="box"><div class="art" data-kind="book" data-id="${b.id}">${art}</div><div class="bspine"></div><div class="sheen"></div>${badge}${o.noLabel ? "" : quickBtn(b)}</div>
     </div>
     ${o.noLabel ? "" : `<div class="label"><div class="name">${esc(b.name)}</div><div class="sub">${esc(o.sub ?? [b.author, b.series && b.number ? `${b.series} #${b.number}` : b.series].filter(Boolean).join("  ·  "))}</div></div>`}
@@ -274,14 +292,81 @@ function rankOf(g) {
   if (!rankIndex) { rankIndex = new Map(); (state.ranking || []).forEach((n, i) => { if (!rankIndex.has(rankKey(n))) rankIndex.set(rankKey(n), i + 1); }); }
   return rankIndex.get(rankKey(g.name)) || null;
 }
+/* award tiers: crimson for the podium, diamond for 4-5, gold to 10, silver to 50, bronze for the rest */
+function rankTier(n) { return !n ? "" : n <= 3 ? "crimson" : n <= 5 ? "diamond" : n <= 10 ? "gold" : n <= 50 ? "silver" : "bronze"; }
+const TIER_NAME = { crimson: "Crimson award", diamond: "Diamond award", gold: "Gold award", silver: "Silver", bronze: "Bronze" };
+function awardSVG(t) {
+  const star = "M12 3.2l2.6 5.4 5.9.8-4.3 4.1 1.1 5.8L12 16.6l-5.3 2.7 1.1-5.8-4.3-4.1 5.9-.8z";
+  if (t === "crimson") return `<svg viewBox="0 0 24 24" class="aw"><path class="flare" d="M12 .6c1.5 2 3.6 2.4 4.6 4.6 1.6-1 3.4-.6 4.3.6-1.7.6-1.9 2.4-1.2 4 1.4 3.3.4 7.4-2.6 9.6-1.4 1.1-3.2 1.8-5.1 1.8s-3.7-.7-5.1-1.8c-3-2.2-4-6.3-2.6-9.6.7-1.6.5-3.4-1.2-4 .9-1.2 2.7-1.6 4.3-.6C8.4 3 10.5 2.6 12 .6z"/><path class="core" d="${star}"/></svg>`;
+  if (t === "diamond") return `<svg viewBox="0 0 24 24" class="aw"><path class="core" d="M6.5 3h11l4.5 6-10 12.5L2 9z"/><path class="facet" d="M2 9h20M6.5 3 9 9l3 12.5L15 9l2.5-6M9 9l3-6 3 6"/></svg>`;
+  return `<svg viewBox="0 0 24 24" class="aw"><path class="core" d="${star}"/></svg>`;
+}
+/* ----- the All Time Classic: one game, crowned by you ----- */
+function classicGame() {
+  const n = state.settings.classic;
+  if (!n) return null;
+  const k = rankKey(n), all = collapse(withCopies(state.games));
+  return all.find(g => rankKey(g.name) === k) || state.games.find(g => rankKey(g.name) === k) || null;
+}
+const isClassic = g => !!state.settings.classic && rankKey(g.name) === rankKey(state.settings.classic);
+function setClassic(g) {
+  const before = state.settings.classic;
+  state.settings.classic = g ? g.name : "";
+  api?.set_pref("classic", state.settings.classic);
+  render();
+  if (g) { try { FX.play.notify(); } catch {} toast(`${g.name} is your All Time Classic.`, "party", before && rankKey(before) !== rankKey(g.name) ? { label: "Undo", run: () => setClassic(state.games.find(x => x.name === before) || { name: before }) } : null); }
+  else toast("The All Time Classic award is free again.");
+}
+const CLASSIC_IMG = `<img class="classic-logo" alt="" src="img/classic.png" draggable="false">`;
+function classicHTML() {
+  const g = classicGame();
+  if (!g) return `<section class="classic empty"><div class="cosmos" aria-hidden="true"></div><div class="classic-award small">${CLASSIC_IMG}</div>
+    <div><h2>All Time Classic</h2><p class="muted">One game, above the whole ranking. Right-click any cover and choose <b>Crown as All Time Classic</b>.</p></div></section>`;
+  const runs = state.plays.filter(p => rankKey(p.game) === rankKey(g.name)).sort((a, b) => (a.run || 0) - (b.run || 0));
+  const fa = factsOf(g);
+  const runHours = runs.reduce((t, r) => t + (r.hours || 0), 0);
+  const hours = Math.max(runHours, g.hours || 0, fa.minutes ? fa.minutes / 60 : 0);
+  const done = runs.filter(r => r.finished).length || (g.status === "Completed" ? Math.max(1, g.runs || 1) : 0);
+  const cover = covers.get(coverKey(g));
+  const stat = (v, l) => v ? `<div class="cstat"><b>${v}</b><span>${l}</span></div>` : "";
+  return `<section class="classic" data-open="${g.id}" data-kind="game">
+    <div class="cosmos" aria-hidden="true"><i></i><i></i><i></i></div>
+    <div class="classic-cover"><div class="art" data-kind="game" data-id="${g.id}">${cover ? `<img alt="" src="${cover}">` : `<div class="fallback"><div class="t">${esc(g.name)}</div></div>`}</div><div class="classic-award">${CLASSIC_IMG}</div></div>
+    <div class="classic-body">
+      <div class="classic-kicker">All Time Classic</div>
+      <h2>${esc(g.name)}</h2>
+      <p class="muted">${esc([g.developer, g.publisher && g.publisher !== g.developer ? g.publisher : "", plat(g.platform).label].filter(Boolean).join("  ·  "))}</p>
+      <div class="cstats">${stat(hours ? `${Math.round(hours * 10) / 10} h` : "", "played")}${stat(runs.length || g.runs || "", (runs.length || g.runs) === 1 ? "run" : "runs")}${stat(done, "finished")}${stat(g.score != null ? scoreText(g.score) : "", "your score")}${stat(rankOf(g) ? `#${rankOf(g)}` : "", "in your Top 100")}</div>
+      ${runs.length ? `<ol class="cruns">${runs.map(r => `<li><b>Run ${r.run || "·"}</b><span>${esc(plat(r.platform || g.platform).label)}${r.play_on ? ` on ${esc(r.play_on)}` : ""}</span><span>${r.hours ? `${r.hours} h` : ""}</span><span>${r.finished ? (r.finished_on ? `Finished ${fmtDate(r.finished_on)}` : "Finished") : "Unfinished"}</span><span class="tags">${r.modded ? "<i>Modded</i>" : ""}${r.dlc ? "<i>DLC</i>" : ""}${r.platinum ? "<i>100%</i>" : ""}</span>${r.notes ? `<small>${esc(r.notes)}</small>` : ""}</li>`).join("")}</ol>` : ""}
+      <div class="cawards" id="classicAwards"><span class="spinner"></span> Looking up the awards it won…</div>
+    </div>
+    ${state.canEdit ? `<button class="ghost small classic-off" data-unclassic title="Take the award back">Remove award</button>` : ""}
+  </section>`;
+}
+async function fillClassicAwards() {
+  const box = $("#classicAwards"), g = classicGame();
+  if (!box || !g || !api) return;
+  const r = await Promise.resolve(api.awards(g)).catch(() => null);
+  if (!$("#classicAwards") || classicGame() !== g) return;
+  const wins = r?.wins || [];
+  if (!wins.length) { box.innerHTML = `<p class="muted">No awards listed for it on Wikipedia${r?.url ? ` (<a role="link" tabindex="0" data-url="${esc(r.url)}">check the page</a>)` : ""}. Some classics win hearts, not trophies.</p>`; return; }
+  const goty = wins.filter(w => /game of the year/i.test(w.category + " " + w.award));
+  const list = [...goty, ...wins.filter(w => !goty.includes(w))];
+  const li = w => `<li class="${goty.includes(w) ? "goty" : ""}"><b>${esc(w.category || w.award)}</b><span>${esc(w.category ? w.award : "")}${w.year ? ` · ${esc(w.year)}` : ""}</span></li>`;
+  box.innerHTML = `<h3>${wins.length} award${wins.length === 1 ? "" : "s"} won${goty.length ? `, ${goty.length} Game of the Year` : ""}${r.nominations ? ` <small>from ${r.nominations} nominations</small>` : ""}</h3>
+    <ul class="awardlist">${list.slice(0, 12).map(li).join("")}</ul>
+    ${list.length > 12 ? `<details><summary>All ${list.length}</summary><ul class="awardlist">${list.slice(12).map(li).join("")}</ul></details>` : ""}
+    <p class="fine">From <a role="link" tabindex="0" data-url="${esc(r.url)}">Wikipedia</a>.</p>`;
+}
 function rankedGame(name) { const k = rankKey(name); return state.games.find(g => rankKey(g.name) === k) || null; }
 function rankingHTML() {
   const list = state.ranking || [];
   const row = (n, i) => {
     const g = rankedGame(n), fav = i < 10;
     const art = g ? `<div class="art" data-kind="game" data-id="${g.id}"></div>` : `<div class="art virtual" data-vname="${esc(n)}"></div>`;
-    return `<li class="rk ${fav ? "fav" : ""}" data-ri="${i}">
-      <span class="rk-n">${fav ? "★" : ""}${i + 1}</span>${art}
+    const t = rankTier(i + 1);
+    return `<li class="rk t-${t} ${fav ? "fav" : ""}" data-ri="${i}">
+      <span class="rk-n t-${t}" title="${TIER_NAME[t]}">${i < 10 ? `<i class="rk-aw t-${t}">${awardSVG(t)}</i>` : ""}${i + 1}</span>${art}
       <div class="rk-t"><b>${esc(n)}</b><small>${g ? `${esc(plat(g.platform).label)} · ${esc(statusOf(g))}${g.score != null ? ` · ${scoreText(g.score)}` : ""}` : "Not in your library"}</small></div>
       <div class="rk-act"><button class="icon" data-rkmove="${i}:-1" title="Move up" aria-label="Move up">▲</button><button class="icon" data-rkmove="${i}:1" title="Move down" aria-label="Move down">▼</button>
         ${g ? `<button class="ghost small" data-open="${g.id}" data-kind="game">Open</button>` : ""}<button class="icon" data-rkdel="${i}" title="Remove from Top 100" aria-label="Remove">✕</button></div></li>`;
@@ -290,12 +375,15 @@ function rankingHTML() {
     const g = rankedGame(n), fav = i < 10;
     const inner = g ? caseHTML(g, { sub: `${plat(g.platform).label} · ${statusOf(g)}` })
       : `<div class="vcase"><div class="art virtual" data-vname="${esc(n)}"><span>${esc(n)}</span></div><div class="label"><div class="name">${esc(n)}</div><div class="sub">Not in your library</div></div></div>`;
-    return `<div class="rkcell ${fav ? "fav" : ""}" data-ri="${i}"><span class="rkbadge">${fav ? "★ " : ""}${i + 1}</span>${inner}</div>`;
+    const t = rankTier(i + 1);
+    return `<div class="rkcell t-${t} ${fav ? "fav" : ""}" data-ri="${i}"><span class="rkbadge t-${t}" title="${TIER_NAME[t]}">${i < 10 ? `<i class="rk-aw">${awardSVG(t)}</i>` : ""}${i + 1}</span>${inner}</div>`;
   };
   const body = state.mode === "list" ? `<ol class="rklist" id="rkList">${list.map(row).join("")}</ol>`
     : `<div class="grid rkgrid">${list.map(cell).join("")}</div>`;
-  return `<section class="ranking ${state.mode === "list" ? "" : "wide"}"><header class="deals-head"><div><h1>Top 100</h1><p class="muted">Drag to reorder (or use the arrows). The top 10 are your all-time favourites and get gold stars on their covers.${state.rankingLocal ? " Saved on this PC until you update the connection script (Settings)." : " Saved to the Ranking tab in your sheet."}</p></div>
+  return `<section class="ranking ${state.mode === "list" ? "" : "wide"}"><header class="deals-head"><div><h1>Top 100</h1><p class="muted">Drag to reorder (or use the arrows). Every place earns an award that shows on the game's cover everywhere in Masterlog.</p>
+      <div class="tiers" aria-label="Award tiers">${[["crimson", "1–3"], ["diamond", "4–5"], ["gold", "6–10"], ["silver", "11–50"], ["bronze", "51–100"]].map(([t, r]) => `<span class="tier t-${t}"><i class="rk-aw">${awardSVG(t)}</i>${TIER_NAME[t]}<small>${r}</small></span>`).join("")}</div><p class="muted fine">${state.rankingLocal ? " Saved on this PC until you update the connection script (Settings)." : " Saved to the Ranking tab in your sheet."}</p></div>
     <div class="deals-actions">${modeSwitch()}${scaleSlider()}<input class="search" id="rankAdd" list="rankAddList" placeholder="Add a game to the ranking"><datalist id="rankAddList">${state.games.filter(g => !rankOf(g)).map(g => `<option value="${esc(g.name)}">`).join("")}</datalist></div></header>
+    ${classicHTML()}
     ${body}</section>`;
 }
 /* put a game at a place in the Top 100: everything from that place down moves one step */
@@ -411,7 +499,7 @@ function render() {
   if (empty) { v.innerHTML = welcomeHTML(); bindWelcome(); return; }
   if (state.view === "home") v.innerHTML = homeHTML();
   else if (state.view === "stats") v.innerHTML = yearsHTML();
-  else if (state.view === "ranking") { v.innerHTML = rankingHTML(); activateArt(v); loadVirtualArt(v); return; }
+  else if (state.view === "ranking") { v.innerHTML = rankingHTML(); activateArt(v); loadVirtualArt(v); fillClassicAwards(); return; }
   else if (state.view === "deals") { v.innerHTML = dealsHTML(); activateArt(v); loadDeals(false); return; }
   else if (state.view === "shelf") v.innerHTML = bookShelfHTML();
   else if (state.view === "books") v.innerHTML = bookLibraryHTML();
@@ -780,22 +868,33 @@ function bookMiniScores(info) {
   if (pages) out.push(`<span class="mini"><b class="plain">${pages}</b>pages</span>`);
   return out.join("");
 }
+const freshBookFilter = () => ({ q: "", status: new Set(), prio: new Set(), formats: new Set(), author: null, series: null, sort: state.bfilter?.sort || "series" });
 function bookFiltered() {
   const f = state.bfilter, q = f.q.trim().toLowerCase();
-  const list = state.books.filter(b => (f.status === "All" || b.status === f.status) && (!q || `${b.name} ${b.author} ${b.series}`.toLowerCase().includes(q)));
+  const S = asSet(f.status), P = asSet(f.prio), F = asSet(f.formats);
+  const list = state.books.filter(b => (!S.size || S.has(b.status)) && (!P.size || P.has(b.priority || "None")) && (!F.size || F.has(b.format))
+    && (!f.author || b.author === f.author) && (!f.series || b.series === f.series)
+    && (!q || `${b.name} ${b.author} ${b.series}`.toLowerCase().includes(q)));
   const sorts = { series: bySeries, name: (a, b) => a.name.localeCompare(b.name), author: (a, b) => a.author.localeCompare(b.author) || bySeries(a, b), priority: byPrio };
   return list.sort(sorts[f.sort] || bySeries);
 }
 function bookLibraryHTML() {
   const f = state.bfilter, list = bookFiltered();
+  const bActive = asSet(f.status).size + asSet(f.prio).size + asSet(f.formats).size + (f.author ? 1 : 0) + (f.series ? 1 : 0);
   return `<div class="toolbar"><div class="line">
       <input class="search" id="bsearch" type="search" placeholder="Search books, authors, series" value="${esc(f.q)}">
-      ${seg(f, "status", ["All", "To read", "Reading", "Read", "Dropped", "Wishlist"]).replace('data-seg="status"', 'data-bseg="status"')}
+      ${scaleSlider()}
       <select class="pick" id="bsort">${[["series", "By series"], ["author", "By author"], ["name", "By title"], ["priority", "By priority"]].map(([v, l]) => `<option value="${v}" ${f.sort === v ? "selected" : ""}>${l}</option>`).join("")}</select>
       ${modeSwitch()}
       <span class="total">${list.length} ${list.length === 1 ? "book" : "books"}</span>
+      ${bActive ? `<button class="ghost small" id="bclear">Clear filters (${bActive})</button>` : ""}
       ${state.canEdit ? `<button class="ghost small" data-add="books">+ Add book</button>` : ""}
-    </div></div>
+      <button class="ghost small walkbtn" data-walk title="Walk through your bookshelves (Ctrl+L)">Walk the shelves</button>
+    </div>
+    <div class="line">${multi(asSet(f.status), "status", opts("books", "status")).replace('data-multi="status"', 'data-bmulti="status"')}</div>
+    <div class="line">${multi(asSet(f.prio), "prio", [...Object.keys(PRIO_ORDER), "None"], { None: "No priority" }).replace('data-multi="prio"', 'data-bmulti="prio"')}${multi(asSet(f.formats), "formats", opts("books", "format")).replace('data-multi="formats"', 'data-bmulti="formats"')}</div>
+    ${f.author || f.series ? `<div class="line">${f.author ? `<button class="chip on" data-bunpin="author">By ${esc(f.author)} ✕</button>` : ""}${f.series ? `<button class="chip on" data-bunpin="series">Series: ${esc(f.series)} ✕</button>` : ""}</div>` : ""}
+    </div>
     ${!list.length ? `<p class="empty">No books match.</p>` : state.mode === "list" ? bookListHTML(list) : `<div class="grid books-grid">${list.map(b => bookHTML(b)).join("")}</div>`}`;
 }
 function bookYearsHTML() {
@@ -816,7 +915,7 @@ function openCaseHTML(kind, item) {
     const cached = covers.get(coverKey(item));
     return `<div class="opencase book">
       <div class="leaf back"><div class="page"><div class="manual-body" id="pageRight">${bookPageHTML(item)}</div></div></div>
-      <div class="leaf front"><div class="face outside"><div class="art" data-kind="book" data-id="${item.id}">${cached ? `<img alt="" decoding="async" src="${cached}">` : ""}</div><div class="bspine"></div></div>
+      <div class="leaf front"><div class="face outside"><div class="art" data-kind="book" data-id="${item.id}">${cached ? `<img alt="" decoding="async" src="${cached}">` : ""}<button type="button" class="artedit" data-coverpick title="Change cover" aria-label="Change cover"><svg viewBox="0 0 24 24" width="16" height="16"><path fill="currentColor" d="M4 5h11l2 2h3v12H4zm2 2v10h12V9h-2l-2-2zm2 8 3-4 2 3 1.5-2 2.5 3z"/></svg></button></div><div class="bspine"></div></div>
         <div class="face inside"><div class="manual paper"><div class="manual-body" id="manual"><p class="muted">Opening…</p></div></div></div></div></div>`;
   }
   const p = plat(item.platform), cached = covers.get(coverKey(item));
@@ -860,7 +959,7 @@ function openPanel(kind, id, tab = "overview") {
   if (!same) {
     try { FX.play.open(); } catch {}
     panel.innerHTML = `<div class="cv-bg"><div class="cv-art" id="cvArt"></div></div>
-      <button class="icon close" aria-label="Close">✕</button>${kind === "game" ? `<button class="icon refreshinfo" data-refresh title="Refresh info: fetch cover, synopsis, ratings and media again" aria-label="Refresh info">↻</button>` : ""}
+      <button class="icon close" aria-label="Close">✕</button><button class="icon refreshinfo" data-refresh title="${kind === "game" ? "Refresh info: fetch cover, synopsis, ratings and media again" : "Refresh info: fetch the cover, ratings and description again"}" aria-label="Refresh info">↻</button>
       <div class="cv-stage">${openCaseHTML(kind, item)}</div>
       <div class="cv-info"><div class="cv-head"><h2>${esc(item.name)}</h2><div class="pills">${kind === "game" ? pillsHTML(item) : bookPills(item)}</div></div>
         <div class="ptabs" role="tablist">${tabs.map(([k, l]) => `<button data-ptab="${k}" aria-selected="${k === tab}">${l}</button>`).join("")}</div>
@@ -1079,7 +1178,7 @@ function wikiHTML(g, w) {
     <section class="wsec"><h3>Map Genie</h3>
       ${mg ? `<p class="muted">Interactive maps with every item, collectible and secret marked.</p><div class="mapgrid">${mg.maps.map(m => `<button class="mapbtn" data-inside="${esc(m.url)}" data-title="${esc(mg.game)}: ${esc(m.name)}"><span>🗺</span>${esc(m.name)}</button>`).join("")}</div>
         <div class="links"><button class="ghost small" data-url="${esc(mg.url)}">All of ${esc(mg.game)} on Map Genie (browser)</button></div>` : `<p class="muted">Map Genie doesn't have maps for this game.</p>`}</section>
-    ${pc ? `<div class="links"><button class="ghost small" data-url="${esc(w?.pcgamingwiki || "")}">PCGamingWiki (fixes and settings)</button></div>` : ""}`;
+    ${pc ? `<div class="links"><button class="ghost small" data-url="${esc(w?.pcgamingwiki || "")}">PCGamingWiki (fixes and settings)</button><button class="ghost small" data-nexus="${esc(g.name)}">Mods on Nexus Mods</button></div>` : ""}`;
 }
 function newsHTML(g, items) {
   if (!items.length) return `<p class="muted">No recent news found.</p>`;
@@ -1141,8 +1240,9 @@ function editHTML(cat, item) {
     ${cat === "games" ? `<div class="checks">${form.filter(f => f[2] === "check").map(f => fieldHTML(cat, f, item)).join("")}</div>` : ""}
     <p class="fine">Finish and drop dates, runs and "Beaten on" are filled in by the sheet itself. Renaming a game also renames its replays and fetches the cover for the new name.</p>
     ${cat === "games" ? `<label class="rankfield">Top 100 place <input type="number" name="top_rank" min="1" max="${(state.ranking || []).length + 1}" value="${rankOf(item) || ""}" placeholder="Not ranked">
-      <small>Type 55 and it goes to #55; #55 and everything below it move down one. Clear it to take the game out.</small></label>` : ""}
-    ${cat === "games" ? `<div class="row"><button type="button" class="ghost small" data-coverpick>Change cover…</button><button type="button" class="ghost small" data-refresh>Refresh info</button></div>` : ""}
+      <small>Type 55 and it goes to #55; #55 and everything below it move down one. Clear it to take the game out.</small></label>
+      <div class="row"><button type="button" class="ghost small" data-classic="${item.id}">${isClassic(item) ? "Remove All Time Classic" : "Crown as All Time Classic"}</button></div>` : ""}
+    <div class="row"><button type="button" class="ghost small" data-coverpick>Change cover…</button><button type="button" class="ghost small" data-refresh>Refresh info</button></div>
     <div class="row"><span class="spacer"></span><button type="submit" class="primary">Save changes</button></div></form>`;
 }
 function readForm(form, cat, item) {
@@ -1186,19 +1286,15 @@ function refreshPanelHead() {
 }
 /* ----- walk the shelves (walk.js draws it) ----- */
 function walkSections() {
-  const G = collapse(withCopies(state.games)), favs = [], used = new Set();
-  (state.ranking || []).slice(0, 10).forEach(n => { const g = G.find(x => rankKey(x.name) === rankKey(n)); if (g && !used.has(g)) { used.add(g); favs.push(g); } });
-  const byName = (a, b) => a.name.localeCompare(b.name);
-  const item = g => ({ g, p: plat(g.platform), fav: used.has(g) });
-  const shelves = [{ title: "Your top 10", accent: "#FFC93C", items: favs.map(item) }];
-  const rest = G.filter(g => !used.has(g));
-  const own = rest.filter(g => g.status !== "Wishlist");
-  const order = [["PS5", "PS5"], ["Switch 2", "Switch 2"], ["Switch", "Switch"], ["Steam", "Steam"], ["PS4", "PS4"], ["PS2", "PS2"]];
-  const taken = new Set();
-  for (const [key, title] of order) {
-    const items = own.filter(g => (ALIAS[g.platform] || g.platform) === key).sort(byName);
+  const G = collapse(withCopies(state.games)), byName = (a, b) => a.name.localeCompare(b.name);
+  const item = g => ({ g, p: plat(g.platform), tier: isClassic(g) ? "classic" : rankTier(rankOf(g)) });
+  const own = G.filter(g => g.status !== "Wishlist"), taken = new Set(), shelves = [];
+  // PS5 and PS4 games share a shelf: they run on the same console
+  const order = [["PlayStation", ["PS5", "PS4"], "PS5"], ["Switch 2", ["Switch 2"], "Switch 2"], ["Switch", ["Switch"], "Switch"], ["Steam", ["Steam"], "Steam"], ["PS2", ["PS2"], "PS2"]];
+  for (const [title, keys, look] of order) {
+    const items = own.filter(g => keys.includes(ALIAS[g.platform] || g.platform)).sort(byName);
     items.forEach(g => taken.add(g));
-    if (items.length) shelves.push({ title, accent: firstHex(plat(key).accent), items: items.map(item) });
+    if (items.length) shelves.push({ title, accent: firstHex(plat(look).accent), items: items.map(item) });
   }
   for (const grp of ["Heroic", "Exiled"]) {
     const items = own.filter(g => !taken.has(g) && GROUPS[g.platform] === grp).sort(byName);
@@ -1207,19 +1303,42 @@ function walkSections() {
   }
   const other = own.filter(g => !taken.has(g)).sort(byName);
   if (other.length) shelves.push({ title: "Everything else", accent: "#ADB5BD", items: other.map(item) });
-  const wish = rest.filter(g => g.status === "Wishlist").sort((a, b) => (PRIO_ORDER[a.priority] ?? 9) - (PRIO_ORDER[b.priority] ?? 9) || byName(a, b));
+  const wish = G.filter(g => g.status === "Wishlist").sort((a, b) => (PRIO_ORDER[a.priority] ?? 9) - (PRIO_ORDER[b.priority] ?? 9) || byName(a, b));
   if (wish.length) shelves.push({ title: "Wishlist", accent: "#7FA6FF", items: wish.map(item) });
-  return shelves.filter(s => s.items.length);
+  return shelves;
+}
+// books stand like books: their own height and a thickness that varies a little from one to the next
+const BOOK_SHADES = ["#5B1E1E", "#1F3A5B", "#2E4A2A", "#4A3463", "#6B4A1E", "#203F45", "#5A2843", "#3B3B3B", "#1E2F5B", "#57411F"];
+function bookWalkItem(b) {
+  const h = [...(b.series || b.author || b.name)].reduce((a, c) => (a * 31 + c.charCodeAt(0)) >>> 0, 7);
+  const t = 0.022 + ((h >> 3) % 7) * 0.004, tall = 0.21 + ((h >> 6) % 4) * 0.012;
+  return { g: b, book: true, p: { label: b.format || "Book", shell: BOOK_SHADES[h % BOOK_SHADES.length], band: "#000", text: "#fff" }, dims: { d: tall * 0.66, h: tall, t, gap: 0.003 } };
+}
+function bookWalkSections() {
+  const B = state.books, shelves = [];
+  const add = (title, items, accent) => { if (items.length) shelves.push({ title, accent, items: items.map(bookWalkItem) }); };
+  add("Reading now", B.filter(b => b.status === "Reading"), "#5BD38A");
+  const series = [...new Set(B.filter(b => b.status !== "Wishlist").map(b => b.series).filter(Boolean))].sort();
+  for (const sr of series) add(sr, B.filter(b => b.series === sr && b.status !== "Wishlist" && b.status !== "Reading").sort(bySeries), "#C9A45C");
+  add("Standalone", B.filter(b => !b.series && !["Wishlist", "Reading"].includes(b.status)).sort((a, b) => (a.author || "").localeCompare(b.author || "") || a.name.localeCompare(b.name)), "#C9A45C");
+  add("Wishlist", B.filter(b => b.status === "Wishlist").sort(byPrio), "#7FA6FF");
+  return shelves;
 }
 const firstHex = c => (String(c).match(/#[0-9a-f]{3,8}/i) || ["#4A8CFF"])[0];
 function openWalk() {
-  if (isBooks()) switchCatalog("games");
-  if (!state.games.length) return toast("Your library is empty, so there's nothing on the shelves yet.");
+  const books = isBooks();
+  if (state.catalog === "news") switchCatalog("games");
+  if (books ? !state.books.length : !state.games.length) return toast(books ? "No books yet, so the shelves are empty." : "Your library is empty, so there's nothing on the shelves yet.");
   closePanel();
   const ok = Walk.open({
-    sections: walkSections,
+    sections: books ? bookWalkSections : walkSections,
+    // posters on the walls: your Top 100 for games, your best-rated reads for books
+    posters: () => books
+      ? state.books.filter(b => b.status === "Read" || b.score != null).sort((a, b) => (b.score || 0) - (a.score || 0)).slice(0, 40).map(b => ({ name: b.name, url: () => loadCover(b) }))
+      : [...new Set([state.settings.classic, ...(state.ranking || [])].filter(Boolean))].map(n => { const g = rankedGame(n) || { name: n, platform: "" }; return { name: n, url: () => Promise.resolve(api?.hero(n)).catch(() => null).then(u => u || loadCover(g)) }; }),
+    featureFirst: !books && !!state.settings.classic,
     cover: g => loadCover(g),
-    open: g => openPanel("game", g.id),
+    open: g => openPanel(books ? "book" : "game", g.id),
     error: msg => toast(msg, "err"),
     closed: () => $("#walkBtn")?.focus(),
   });
@@ -1372,7 +1491,10 @@ function openSettings(showHowTo, tab = "sheet") {
   $("#igdbState").textContent = st.has_igdb ? "IGDB is connected. Paste new values to replace them." : "Not connected.";
   $("#igdbState").className = st.has_igdb ? "ok" : "";
   f.youtube_key.value = ""; f.reddit_id.value = "";
-  $("#redditState").textContent = st.has_reddit ? "Reddit app connected. Type a single space and Save to remove it." : "Only needed if Leaks, Marvel & DC or the deal subreddits won't load.";
+  $("#redditState").textContent = st.has_reddit ? "Reddit app connected. Type a single space and Save to remove it." : "Not needed.";
+  f.nexus_key.value = "";
+  $("#nexusState").textContent = st.has_nexus ? "Nexus Mods is connected. Paste a new key to replace it, or type a space to remove it." : "Optional. Collections installed through Vortex show up without it.";
+  $("#nexusState").className = st.has_nexus ? "ok" : "";
   $("#redditState").className = st.has_reddit ? "ok" : "";
   $("#ytState").textContent = st.has_youtube ? "Using the official YouTube API. Type a single space and Save to remove it." : "Not needed: trailers are found on YouTube without it. A key (Google Cloud → YouTube Data API v3) just makes the search official.";
   $("#ytState").className = st.has_youtube ? "ok" : "";
@@ -1432,6 +1554,11 @@ async function saveSettings() {
     const r = await api.set_ebay_keys(f.ebay_id.value, f.ebay_secret.value);
     if (r.error) toast(r.error, "err"); else { state.settings.has_ebay = !r.removed; toast(r.removed ? "eBay removed." : "eBay connected. Physical prices appear in Deals shortly.", "ok"); }
     f.ebay_id.value = ""; f.ebay_secret.value = "";
+  }
+  if (f.nexus_key.value) {
+    const r = await api.set_nexus_key(f.nexus_key.value);
+    if (r.error) toast(r.error, "err"); else { state.settings.has_nexus = !r.removed; toast(r.removed ? "Nexus Mods removed." : `Nexus Mods connected${r.name ? ` as ${r.name}` : ""}.`, "ok"); }
+    f.nexus_key.value = "";
   }
   if (f.reddit_id.value) {
     const r = await api.set_reddit_app(f.reddit_id.value);
@@ -1756,6 +1883,14 @@ function bindGlobal() {
     const up = e.target.closest("[data-unpin]"); if (up) { state.filter[up.dataset.unpin] = null; return render(); }
     const segB = e.target.closest("[data-seg] button");
     if (segB) { state.filter[segB.parentElement.dataset.seg] = segB.dataset.v; return render(); }
+    const bmb = e.target.closest("[data-bmulti] button");
+    if (bmb) {
+      const key = bmb.parentElement.dataset.bmulti, set = asSet(state.bfilter[key]);
+      if (bmb.dataset.v === "All") set.clear(); else set.has(bmb.dataset.v) ? set.delete(bmb.dataset.v) : set.add(bmb.dataset.v);
+      state.bfilter[key] = set; return render();
+    }
+    if (e.target.closest("#bclear")) { state.bfilter = { ...freshBookFilter(), q: state.bfilter.q }; return render(); }
+    const bup = e.target.closest("[data-bunpin]"); if (bup) { state.bfilter[bup.dataset.bunpin] = null; return render(); }
     const bseg = e.target.closest("[data-bseg] button");
     if (bseg) { state.bfilter[bseg.parentElement.dataset.bseg] = bseg.dataset.v; return render(); }
     const add = e.target.closest("[data-add]"); if (add) return openAdd(add.dataset.add);
@@ -1763,6 +1898,8 @@ function bindGlobal() {
     if (e.target.closest("[data-catalog-go]")) { switchCatalog("news"); return go("yours"); }
     if (e.target.closest("[data-modpacks]")) return openModpacks();
     if (e.target.closest("[data-walk]")) return openWalk();
+    if (e.target.closest("[data-unclassic]")) { e.stopPropagation(); return setClassic(null); }
+    if (e.target.closest(".classic [data-url], .classic details, .classic summary")) return;
     if (e.target.closest("[data-itch]")) { api?.browse_itch(); return toast("itch.io opened. On any game's page, press \"+ Add to Masterlog wishlist\".", "ok"); }
     const mv = e.target.closest("[data-rkmove]");
     if (mv) { const [i, d] = mv.dataset.rkmove.split(":").map(Number), j = i + d, L = state.ranking; if (j < 0 || j >= L.length) return; [L[i], L[j]] = [L[j], L[i]]; try { FX.play.move(); } catch {} return saveRanking(); }
@@ -1830,6 +1967,29 @@ function bindGlobal() {
     }, 230);
   });
   addEventListener("click", e => { if (swallowClick) { e.stopPropagation(); e.preventDefault(); swallowClick = false; } }, true);
+  // right-click a cover (game or book) for quick changes
+  document.addEventListener("contextmenu", e => {
+    const c = e.target.closest?.(".case[data-kind], tr[data-kind]");
+    if (!c || e.target.closest("#panel, #walk")) { closeCtx(); return; }
+    const kind = c.dataset.kind === "book" ? "book" : "game", item = findItem(kind, c.dataset.id);
+    if (!item) return;
+    e.preventDefault(); hidePeek();
+    ctxMenu(item, e.clientX, e.clientY, kind);
+  });
+  document.addEventListener("click", e => {
+    const m = document.getElementById("ctx");
+    if (!m) return;
+    if (!m.contains(e.target)) return closeCtx();
+    const li = e.target.closest("li[data-act], li[data-set], button[data-act]");
+    if (li) { e.preventDefault(); e.stopPropagation(); ctxAction(li); }
+  }, true);
+  document.addEventListener("keydown", e => {
+    const m = document.getElementById("ctx");
+    if (!m) return;
+    if (e.key === "Escape") { e.stopPropagation(); closeCtx(); }
+    if (e.key === "Enter" && e.target.closest?.(".ctx-rank")) { e.preventDefault(); ctxAction(m.querySelector('[data-act="rank"]')); }
+  }, true);
+  view.addEventListener("scroll", closeCtx, { passive: true });
   view.addEventListener("change", e => {
     if (e.target.id === "rankAdd" && e.target.value.trim()) { const n = e.target.value.trim(); if (!state.ranking.some(x => rankKey(x) === rankKey(n))) { state.ranking.push(n); saveRanking(`${n} added at #${state.ranking.length}. Drag it where it belongs.`); } return; }
     if (e.target.id === "scale") applyScale(+e.target.value, true);
@@ -1905,6 +2065,8 @@ function bindGlobal() {
     const gt = e.target.closest("[data-g]"); if (gt) return showGallery(+gt.dataset.g, galleryItems[+gt.dataset.g]?.video);
     const gp = e.target.closest("[data-gplay]"); if (gp) return showGallery(+gp.dataset.gplay, true);
     if (e.target.closest("[data-coverpick]")) { e.stopPropagation(); return openCoverPicker(); }
+    const nx = e.target.closest("[data-nexus]"); if (nx) { Promise.resolve(api?.nexus_link(nx.dataset.nexus)).then(u => u && api.open_inside(u, `${nx.dataset.nexus} mods`)); return; }
+    const cl = e.target.closest("[data-classic]"); if (cl) { const g = findItem("game", cl.dataset.classic); if (g) { setClassic(isClassic(g) ? null : g); showPanelTab("edit"); } return; }
     if (e.target.closest("[data-refresh]")) return refreshGame();
     const dl = e.target.closest("[data-dlcown]"); if (dl) return markDlc(dl.dataset.dlcown);
     const ins = e.target.closest("[data-inside]"); if (ins) { api?.open_inside(ins.dataset.inside, ins.dataset.title || "Masterlog"); return; }
@@ -1965,17 +2127,18 @@ async function markDlc(name) {
 /* ---------- modpacks from your mod managers ---------- */
 async function openModpacks() {
   if (!api) return;
-  $("#importForm").innerHTML = `<h2>Modpacks on this PC</h2><div class="news-loading"><span class="spinner"></span> Looking in CurseForge, r2modman, Thunderstore, Vortex and Mod Organizer 2…</div>`;
+  $("#importForm").innerHTML = `<h2>Modpacks on this PC</h2><div class="news-loading"><span class="spinner"></span> Looking in CurseForge, r2modman, Thunderstore, Vortex, Mod Organizer 2 and Nexus Mods…</div>`;
   $("#importForm")._list = []; $("#importForm")._picked = new Set();
   $("#importDialog").showModal();
   const r = await api.modpacks_scan().catch(() => ({ items: [] }));
   const items = r.items || [];
   $("#importForm")._mods = items;
   $("#importForm").innerHTML = `<h2>Modpacks on this PC</h2>
-    <p class="fine">Profiles and modpacks from your mod managers. Add one and it gets its own cover in Modpacks, on Home and in Library.</p>
-    ${items.length ? `<ul class="modlist">${items.map((p, i) => `<li><div><b>${esc(p.name)}</b><small>${esc(p.manager)}${p.mods ? ` · ${p.mods} mods` : ""}${p.detail ? ` · ${esc(p.detail)}` : ""}${p.last ? ` · used ${esc(ago(p.last))}` : ""}</small></div>
-      ${p.added ? `<span class="owntag">In Masterlog</span>` : `<button type="button" class="primary small" data-addmod="${i}">Add</button>`}</li>`).join("")}</ul>`
-      : `<p class="muted">No modpacks found. Masterlog looks in the default folders of CurseForge (Minecraft), r2modman, Thunderstore Mod Manager, Vortex and Mod Organizer 2.</p>`}
+    <p class="fine">Profiles and modpacks from your mod managers, Nexus Mods collections you installed with Vortex${r.nexus ? ", and the mods you track and endorse on Nexus Mods" : ""}. Add one and it gets its own cover in Modpacks, on Home and in Library.</p>
+    ${!r.nexus ? `<p class="fine">Add your free Nexus Mods API key in Settings → Accounts to also see the mods you track and endorse there.</p>` : ""}${r.nexus_app ? `<p class="fine">The Nexus Mods app is installed too. Its loadouts are kept in a database other apps can't read yet, so they aren't listed.</p>` : ""}
+    ${items.length ? `<ul class="modlist">${items.map((p, i) => `<li class="${p.manager.startsWith("Nexus") ? "nexus" : ""}"><div><b>${esc(p.name)}</b><small>${esc(p.manager)}${p.mods ? ` · ${p.mods} mods` : ""}${p.detail ? ` · ${esc(p.detail)}` : ""}${p.last ? ` · used ${esc(ago(p.last))}` : ""}</small></div>
+      ${p.url ? `<button type="button" class="ghost small" data-url="${esc(p.url)}">On Nexus</button>` : ""}${p.added ? `<span class="owntag">In Masterlog</span>` : `<button type="button" class="primary small" data-addmod="${i}">Add</button>`}</li>`).join("")}</ul>`
+      : `<p class="muted">No modpacks found. Masterlog looks in the default folders of CurseForge (Minecraft), r2modman, Thunderstore Mod Manager, Vortex (including its Nexus Mods collections) and Mod Organizer 2.</p>`}
     <div class="row"><span class="spacer"></span><button value="close" class="ghost">Close</button></div>`;
 }
 async function addModpack(i, btn) {
@@ -2061,8 +2224,9 @@ async function claudeApply() {
 }
 
 /* ---------- right-click a cover: quick changes right where you are ---------- */
-function ctxMenu(g, x, y) {
+function ctxMenu(g, x, y, kind = "game") {
   closeCtx();
+  if (kind === "book") return bookCtxMenu(g, x, y);
   const edit = state.canEdit ? "" : " disabled";
   const sub = (label, key, values, current, fmt = v => v) => `<li class="has-sub" role="menuitem" tabindex="-1"><span>${label}</span><i>›</i><ul class="sub" role="menu">${values.map(v =>
     `<li role="menuitemradio" tabindex="-1" aria-checked="${(current ?? "") === v}" data-set="${key}" data-val="${esc(v)}"${edit}>${esc(fmt(v))}</li>`).join("")}</ul></li>`;
@@ -2070,7 +2234,7 @@ function ctxMenu(g, x, y) {
   const genres = splitList(g.genre), studios = [...new Set(splitList(`${g.developer},${g.publisher}`))];
   const rk = rankOf(g);
   const m = document.createElement("div");
-  m.id = "ctx"; m.className = "ctx"; m.setAttribute("role", "menu"); m.dataset.id = g.id;
+  m.id = "ctx"; m.className = "ctx"; m.setAttribute("role", "menu"); m.dataset.id = g.id; m.dataset.kind = "game";
   m.innerHTML = `<div class="ctx-head">${esc(g.name)}</div><ul>
     <li role="menuitem" tabindex="-1" data-act="open">Open</li>
     ${sub("Status", "status", opts("status", ["Library", "Playing", "Paused", "Wishlist", "Completed", "Dropped"]), g.status)}
@@ -2078,6 +2242,7 @@ function ctxMenu(g, x, y) {
     ${sub("Platform", "platform", opts("platform", Object.keys(PLAT)), g.platform, v => plat(v).label)}
     ${sub("Format", "format", ["Physical", "Digital"], g.format)}
     ${sub("Type", "type", ["", "Live service", "Modded"], g.type || "", v => v || "Normal game")}
+    ${state.canEdit ? `<li role="menuitem" tabindex="-1" data-act="classic" class="ctx-classic">${isClassic(g) ? "Remove All Time Classic" : "Crown as All Time Classic"}</li>` : ""}
     <li role="menuitem" tabindex="-1" class="ctx-rank"><span>Top 100</span><input type="number" min="1" max="${(state.ranking || []).length + 1}" value="${rk || ""}" placeholder="place" aria-label="Top 100 place"><button type="button" data-act="rank">Set</button></li>
     <li class="sep" role="separator"></li>
     ${genres.length ? `<li role="menuitem" tabindex="-1" data-act="genre">Similar genre <small>${esc(genres.slice(0, 3).join(", "))}</small></li>` : ""}
@@ -2087,6 +2252,31 @@ function ctxMenu(g, x, y) {
     <li role="menuitem" tabindex="-1" data-act="cover">Change cover…</li>
     <li role="menuitem" tabindex="-1" data-act="refresh">Refresh info</li>
   </ul>`;
+  placeCtx(m, x, y);
+}
+const ctxSub = (label, key, values, current, fmt = v => v) => `<li class="has-sub" role="menuitem" tabindex="-1"><span>${label}</span><i>›</i><ul class="sub" role="menu">${values.map(v =>
+  `<li role="menuitemradio" tabindex="-1" aria-checked="${(current ?? "") === v}" data-set="${key}" data-val="${esc(v)}"${state.canEdit ? "" : " disabled"}>${esc(fmt(v))}</li>`).join("")}</ul></li>`;
+function bookCtxMenu(b, x, y) {
+  const o = (k, d) => state.options.books?.[k]?.length ? state.options.books[k] : d;
+  const inSeries = b.series ? state.books.filter(x => x.series === b.series).length : 0;
+  const byAuthor = b.author ? state.books.filter(x => x.author === b.author).length : 0;
+  const m = document.createElement("div");
+  m.id = "ctx"; m.className = "ctx"; m.setAttribute("role", "menu"); m.dataset.id = b.id; m.dataset.kind = "book";
+  m.innerHTML = `<div class="ctx-head">${esc(b.name)}${b.author ? `<small>${esc(b.author)}</small>` : ""}</div><ul>
+    <li role="menuitem" tabindex="-1" data-act="open">Open</li>
+    ${ctxSub("Status", "status", o("status", FALLBACK_OPTIONS.books.status), b.status)}
+    ${ctxSub("Priority", "priority", [...o("priority", FALLBACK_OPTIONS.books.priority), ""], b.priority, v => v || "No priority")}
+    ${ctxSub("Format", "format", o("format", FALLBACK_OPTIONS.books.format), b.format)}
+    <li class="sep" role="separator"></li>
+    ${byAuthor > 1 ? `<li role="menuitem" tabindex="-1" data-act="author">More by ${esc(b.author)} <small>${byAuthor} books</small></li>` : ""}
+    ${inSeries > 1 ? `<li role="menuitem" tabindex="-1" data-act="series">The rest of ${esc(b.series)} <small>${inSeries} books</small></li>` : ""}
+    ${byAuthor > 1 || inSeries > 1 ? `<li class="sep" role="separator"></li>` : ""}
+    <li role="menuitem" tabindex="-1" data-act="cover">Change cover…</li>
+    <li role="menuitem" tabindex="-1" data-act="refresh">Refresh info</li>
+  </ul>`;
+  placeCtx(m, x, y);
+}
+function placeCtx(m, x, y) {
   document.body.append(m);
   // keep it on screen, and open submenus to whichever side has room
   const r = m.getBoundingClientRect();
@@ -2098,7 +2288,9 @@ function ctxMenu(g, x, y) {
 }
 function closeCtx() { document.getElementById("ctx")?.remove(); }
 async function ctxAction(li) {
-  const m = document.getElementById("ctx"), g = findItem("game", m?.dataset.id);
+  const m = document.getElementById("ctx");
+  if (m?.dataset.kind === "book") return bookCtxAction(li, m);
+  const g = findItem("game", m?.dataset.id);
   if (!g || li.hasAttribute("disabled")) return;
   const act = li.dataset.act;
   if (li.dataset.set) {
@@ -2113,6 +2305,7 @@ async function ctxAction(li) {
   if (act === "rank") { const v = m.querySelector(".ctx-rank input").value; closeCtx(); placeInRanking(g, v === "" ? 0 : Math.max(1, Math.round(+v))); return render(); }
   closeCtx();
   if (act === "open") return openPanel("game", g.id);
+  if (act === "classic") return setClassic(isClassic(g) ? null : (g.virtual ? state.games.find(x => x.row === g.row) || g : g));
   if (act === "cover") { panelItem = { kind: "game", id: g.id }; coverFor = null; return openCoverPicker(); }
   if (act === "refresh") { openPanel("game", g.id); return refreshGame(); }
   if (act === "genre" || act === "dev" || act === "pub") {
@@ -2125,10 +2318,38 @@ async function ctxAction(li) {
 }
 
 /* fetch everything about a game again, in case something came out wrong */
+async function bookCtxAction(li, m) {
+  const b = findItem("book", m.dataset.id);
+  if (!b || li.hasAttribute("disabled")) return;
+  const act = li.dataset.act;
+  closeCtx();
+  if (li.dataset.set) {
+    const k = li.dataset.set, v = li.dataset.val;
+    if ((b[k] ?? "") === v) return;
+    const changes = { [k]: v };
+    if (k === "status" && v === "Read" && !b.finished) changes.finished = new Date().toISOString().slice(0, 10);
+    await saveEdit("books", b, changes, true);
+    return toast(`${b.name}: ${k} set to ${v || "none"}.`, "ok");
+  }
+  if (act === "open") return openPanel("book", b.id);
+  if (act === "cover") { panelItem = { kind: "book", id: b.id }; coverFor = null; return openCoverPicker(); }
+  if (act === "refresh") { openPanel("book", b.id); return refreshGame(); }
+  if (act === "author" || act === "series") {
+    state.bfilter = { ...freshBookFilter(), sort: act === "series" ? "series" : "author", [act]: act === "author" ? b.author : b.series };
+    if (state.catalog !== "books") switchCatalog("books");
+    return go("books");
+  }
+}
 async function refreshGame() {
   const g = findItem(panelItem?.kind, panelItem?.id);
   if (!g || !api) return;
   toast(`Fetching ${g.name} again…`);
+  if (panelItem.kind === "book") {
+    const r = await api.refresh_book(g).catch(() => null);
+    covers.set(coverKey(g), r?.uri || null);
+    closePanel(); render(); openPanel("book", g.id, "overview");
+    return toast(`${g.name} refreshed.`, "ok");
+  }
   const r = await api.refresh_game(g).catch(() => null);
   if (r?.renamed) {
     toast(`"${g.name}" is officially "${r.renamed}" (${r.source}). Renamed so its info can be found.`, "ok", { label: "Undo", run: async () => { await api.undo_rename(g.name, r.renamed, r.row); sync(true); } });
@@ -2154,21 +2375,22 @@ async function openCoverPicker(query = "") {
   $("#coverQuery").value = query || "";
   $("#coverQuery").placeholder = `Search a different name than "${g.name}"`;
   const grid = $("#coverGrid");
-  grid.innerHTML = `<div class="g-empty"><span class="spinner"></span> Looking in Steam, PlayStation Store, IGDB and SteamGridDB…</div>`;
+  const isBook = g.author !== undefined;
+  grid.innerHTML = `<div class="g-empty"><span class="spinner"></span> Looking in ${isBook ? "Open Library and Google Books" : "Steam, PlayStation Store, IGDB and SteamGridDB"}…</div>`;
   if (!$("#coverDialog").open) $("#coverDialog").showModal();
-  const r = await api.cover_options(g.name, g.platform || "", query).catch(e => ({ items: [], error: String(e) }));
+  const r = await (isBook ? api.book_cover_options(g, query) : api.cover_options(g.name, g.platform || "", query)).catch(e => ({ items: [], error: String(e) }));
   if (coverFor !== g) return;
   const items = r.items || [];
   grid.innerHTML = items.length
     ? items.map((c, i) => `<button type="button" class="covercand" role="listitem" data-cand="${i}" title="${esc(c.source)}${c.note ? ` · ${esc(c.note)}` : ""}"><img alt="" loading="lazy" decoding="async" src="${esc(c.thumb)}"><span class="src ${c.source === "SteamGridDB" ? "" : "official"}">${esc(c.source)}</span></button>`).join("")
-    : `<p class="muted">No covers found${r.error ? ` (${esc(r.error)})` : ""}. Try a different name, or add a SteamGridDB key or IGDB in Settings for more choices.</p>`;
+    : `<p class="muted">No covers found${r.error ? ` (${esc(r.error)})` : ""}. ${isBook ? "Try the title as it's printed, or choose an image file." : "Try a different name, or add a SteamGridDB key or IGDB in Settings for more choices."}</p>`;
   grid._items = items;
 }
 async function pickCover(i) {
   const g = coverFor, c = $("#coverGrid")._items?.[i];
   if (!g || !c) return;
   const btn = document.querySelector(`[data-cand="${i}"]`); btn?.classList.add("busy");
-  const r = await api.pick_cover(g.name, c.url).catch(e => ({ error: String(e) }));
+  const r = await (g.author !== undefined ? api.pick_book_cover(g, c.url) : api.pick_cover(g.name, c.url)).catch(e => ({ error: String(e) }));
   btn?.classList.remove("busy");
   if (r.error) return toast(r.error, "err");
   coverChanged(g, r.uri, `New cover from ${c.source}.`);
@@ -2176,15 +2398,16 @@ async function pickCover(i) {
 async function customCover(set) {
   const g = coverFor || findItem(panelItem.kind, panelItem.id);
   if (!g) return;
-  const res = await Promise.resolve(set ? api?.set_cover(g.name) : api?.clear_cover(g.name)).catch(e => ({ error: String(e) }));
+  const isBook = g.author !== undefined;
+  const res = await Promise.resolve(isBook ? (set ? api?.set_book_cover(g) : api?.clear_book_cover(g)) : set ? api?.set_cover(g.name) : api?.clear_cover(g.name)).catch(e => ({ error: String(e) }));
   if (res && res.error) return toast(res.error, "err");
   if (set && !res) return;
-  if (!set) { covers.delete(coverKey(g)); const uri = await api.cover(g.name, g.platform || ""); return coverChanged(g, uri, "Back to the automatic cover."); }
+  if (!set) { covers.delete(coverKey(g)); const uri = isBook ? res : await api.cover(g.name, g.platform || ""); return coverChanged(g, uri, "Back to the automatic cover."); }
   coverChanged(g, res, "Cover updated.");
 }
 function coverChanged(g, uri, msg) {
   covers.set(coverKey(g), uri || null);
-  if (uri && panelItem?.kind === "game" && panelItem.id === g.id) $("#panel").querySelectorAll(".opencase img").forEach(img => { img.src = uri; });
+  if (uri && panelItem && findItem(panelItem.kind, panelItem.id) === g) $("#panel").querySelectorAll(".opencase img").forEach(img => { img.src = uri; });
   if ($("#coverDialog").open) $("#coverDialog").close();
   try { FX.play.save(); } catch {}
   render();

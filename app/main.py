@@ -53,7 +53,7 @@ DEFAULTS = {"sheet_url": sheet.DEFAULT_SHEET, "sheet_key": "", "sgdb_key": "", "
             "heroic_linked": False, "big_picture": False, "ambience_path": "", "steam_cc": "GE", "ps_locale": "en-us",
             "money": "native", "auto_names": True, "scale": 1, "ui_state": {}, "eshop_country": "DE"}
 PREFS = ("view_mode", "refresh_minutes", "sound_on", "ambient_volume", "fx_volume", "intro", "big_picture",
-         "steam_cc", "ps_locale", "money", "auto_names", "scale", "ui_state", "eshop_country")
+         "steam_cc", "ps_locale", "money", "auto_names", "scale", "ui_state", "eshop_country", "classic")
 PRIVATE = ("sgdb_key", "sheet_key", "ambience_path")
 AUDIO_TYPES = {".mp3": "audio/mpeg", ".ogg": "audio/ogg", ".opus": "audio/ogg", ".m4a": "audio/mp4", ".aac": "audio/aac",
                ".wav": "audio/wav", ".flac": "audio/flac", ".webm": "audio/webm"}
@@ -72,6 +72,52 @@ def audio_marks(path):
     except OSError:
         pass
     return {"intro_end": 0, "loop_end": 0, "xfade": 3}
+
+
+class BrowserFetch:
+    """Reads a Reddit listing through a hidden window of the app's own browser engine (Edge WebView2). Reddit turns away
+    plain requests from apps but serves a normal browser, and since November 2025 it no longer hands out app IDs.
+    Only reddit.com pages are ever loaded here, and only to read public posts."""
+    HOSTS = ("www.reddit.com", "old.reddit.com")
+
+    def __init__(self):
+        self.lock = threading.Lock()
+        self.win = None
+        self.origin = None
+        self.ready = threading.Event()
+
+    def get(self, url, timeout=25):
+        import webview
+        u = urllib.parse.urlsplit(url)
+        if u.scheme != "https" or u.netloc not in self.HOSTS:
+            raise ValueError("only Reddit pages are read this way")
+        origin = f"https://{u.netloc}"
+        with self.lock:
+            if self.win is None or self.origin != origin:
+                self.ready.clear()
+                if self.win is None:
+                    self.win = webview.create_window("Masterlog · Reddit reader", origin + "/robots.txt", hidden=True, width=480, height=320)
+                    self.win.events.loaded += lambda *a: self.ready.set()
+                else:
+                    self.win.load_url(origin + "/robots.txt")
+                self.origin = origin
+                if not self.ready.wait(timeout):
+                    self.origin = None
+                    raise TimeoutError("Reddit didn't load")
+            path = url[len(origin):]
+            # same-origin fetch inside the page, so it goes out exactly like the browser's own request
+            self.win.evaluate_js("window.__ml = null; fetch(" + json.dumps(path) + ", {credentials: 'include', headers: {Accept: 'application/json'}})"
+                                 ".then(r => r.ok ? r.text() : Promise.reject('HTTP ' + r.status))"
+                                 ".then(t => { window.__ml = {ok: true, t: t}; }).catch(e => { window.__ml = {ok: false, e: String(e)}; }); 1")
+            end = time.time() + timeout
+            while time.time() < end:
+                r = self.win.evaluate_js("window.__ml")
+                if r:
+                    if not r.get("ok"):
+                        raise IOError(r.get("e") or "Reddit refused")
+                    return r.get("t") or ""
+                time.sleep(0.3)
+            raise TimeoutError("Reddit didn't answer")
 
 
 class ItchBridge:
@@ -128,6 +174,7 @@ class Api:
         self._info.youtube_key = lambda: (self._vault.get("youtube") or {}).get("key")
         self._feeds = feeds.Feeds()
         feeds.REDDIT_APP["id"] = (self._vault.get("reddit") or {}).get("id")
+        feeds.BROWSER_FETCH["fn"] = BrowserFetch().get
         self._twitch = twitch.Twitch(self._igdb)
         self._deals = deals.Deals(self._art, self._dir)
         self._deals.ebay = deals.Ebay(self._vault)
@@ -257,6 +304,7 @@ class Api:
         s["has_igdb"] = self._igdb.configured()
         s["has_youtube"] = self._vault.has("youtube")
         s["has_reddit"] = self._vault.has("reddit")
+        s["has_nexus"] = self._vault.has("nexus")
         s["has_ebay"] = self._deals.ebay.configured() if getattr(self, "_deals", None) else False
         s["connected"] = bool(sheet.is_script_link(self._settings.get("sheet_url")) and self._settings.get("sheet_key"))
         s["link_kind"] = "script" if sheet.is_script_link(self._settings.get("sheet_url")) else ("csv" if self._settings.get("sheet_url") else "")
@@ -439,6 +487,40 @@ class Api:
             return self._art.book_cover(title, author)
         except Exception:
             return None
+
+    # the same cover tools for books
+    def book_cover_options(self, book, query=""):
+        try:
+            return {"items": self._art.book_candidates(book.get("name", ""), book.get("author", ""), (query or "").strip() or None)}
+        except Exception as e:
+            return {"items": [], "error": str(e)}
+
+    def pick_book_cover(self, book, url):
+        try:
+            return {"uri": self._art.set_book_from_url(book.get("name", ""), book.get("author", ""), url)}
+        except Exception as e:
+            return {"error": str(e)}
+
+    def set_book_cover(self, book):
+        import webview
+        paths = self._window.create_file_dialog(webview.OPEN_DIALOG, file_types=("Images (*.png;*.jpg;*.jpeg;*.webp)",))
+        if not paths:
+            return None
+        try:
+            return self._art.set_book_custom(book.get("name", ""), book.get("author", ""), paths[0])
+        except Exception as e:
+            return {"error": str(e)}
+
+    def clear_book_cover(self, book):
+        self._art.forget_book(book.get("name", ""), book.get("author", ""), mine_too=True)
+        return self.book_cover(book.get("name", ""), book.get("author", ""))
+
+    def refresh_book(self, book):
+        """Fetch a book's cover, ratings and description again."""
+        title, author = book.get("name", ""), book.get("author", "")
+        self._art.forget_book(title, author)
+        self._info.cache.forget(art.Art.book_key(title, author))
+        return {"ok": True, "uri": self.book_cover(title, author)}
 
     def links(self, game):
         facts = self._facts().get(game.get("name"), {})
@@ -815,7 +897,7 @@ class Api:
 
     # ----- modpacks from your mod managers -----
     def modpacks_scan(self):
-        found = modpacks.scan()
+        found = modpacks.scan((self._vault.get("nexus") or {}).get("key"))
         have = {art._norm(g["name"]) for g in self._sheet_games()}
         for p in found["items"]:
             p["name"] = f"{p['game']}: {p['profile']}"
@@ -831,6 +913,8 @@ class Api:
         notes = f"{p.get('manager')} profile" + (f" · {p.get('mods')} mods" if p.get("mods") else "") + (f" · {p.get('detail')}" if p.get("detail") else "")
         values = {"name": p["name"], "status": "Playing", "platform": "PC (Other)" if p.get("game") == "Minecraft" else "Steam",
                   "play_on": "PC", "format": "Digital", "type": "Modded", "modded": True, "notes": notes}
+        if str(p.get("url") or "").startswith("https://www.nexusmods.com/"):
+            values["store_link"] = p["url"]
         try:
             client.add("games", values)
             return {"ok": True}
@@ -959,6 +1043,22 @@ class Api:
         self._feeds.cache.clear()
         return {"ok": True}
 
+    def set_nexus_key(self, key):
+        """Optional: your free personal Nexus Mods API key, to list the mods you track and endorse there."""
+        key = (key or "").strip()
+        if not key:
+            self._vault.set("nexus", None)
+            return {"ok": True, "removed": True}
+        try:
+            who = modpacks.nexus_validate(key)
+        except Exception as e:
+            return {"error": f"Nexus Mods didn't accept that key ({e})."}
+        self._vault.set("nexus", {"key": key})
+        return {"ok": True, "name": who.get("name")}
+
+    def nexus_link(self, name):
+        return _safe(modpacks.nexus_link, name, (self._vault.get("nexus") or {}).get("key")) or ""
+
     def set_ebay_keys(self, client_id, secret):
         """Optional: your free eBay developer keys, for the cheapest physical copy of wishlist games."""
         client_id, secret = (client_id or "").strip(), (secret or "").strip()
@@ -981,6 +1081,18 @@ class Api:
 
     def updated(self, games):
         return _safe(self._info.updated, games) or {}
+
+    def awards(self, game):
+        """Awards the game won in real life (Wikipedia's accolades), for the All Time Classic."""
+        name = (game or {}).get("name", "")
+        key = info._norm(name)
+        hit = self._info.cache.get("awards", key)
+        if hit is not None:
+            return hit
+        out = _safe(info.awards, name)
+        if out is not None:
+            self._info.cache.put("awards", key, out)
+        return out or {"wins": [], "goty": 0, "nominations": 0}
 
     def book_info(self, book):
         return _safe(self._info.book, book)

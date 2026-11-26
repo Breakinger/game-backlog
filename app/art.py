@@ -390,8 +390,81 @@ class Art:
         return uri
 
     # ---------- book covers ----------
+    @staticmethod
+    def book_key(title, author=""):
+        return "book|" + _norm(title) + "|" + _norm(author)
+
+    def book_candidates(self, title, author="", query=None):
+        """Every cover we can find for a book: each Open Library edition, then Google Books."""
+        q_title = query or title
+        out, seen = [], set()
+
+        def add(url, source, note=""):
+            if url and url not in seen:
+                seen.add(url)
+                out.append({"url": url, "thumb": url.replace("-L.jpg", "-M.jpg"), "source": source, "note": note})
+        try:
+            q = "title=" + urllib.parse.quote(q_title) + ("&author=" + urllib.parse.quote(author) if author and not query else "")
+            body, _ = _get("https://openlibrary.org/search.json?limit=12&fields=title,cover_i,first_publish_year,ratings_count&" + q)
+            docs = sorted([d for d in json.loads(body).get("docs", []) if d.get("cover_i")],
+                          key=lambda x: (-similar(q_title, x.get("title", "")), -(x.get("ratings_count") or 0)))
+            for d in docs[:12]:
+                add(f"https://covers.openlibrary.org/b/id/{d['cover_i']}-L.jpg?default=false", "Open Library", str(d.get("first_publish_year") or ""))
+        except Exception:
+            pass
+        try:
+            qq = f'intitle:"{q_title}"' + (f' inauthor:"{author}"' if author and not query else "")
+            body, _ = _get("https://www.googleapis.com/books/v1/volumes?maxResults=12&q=" + urllib.parse.quote(qq))
+            for it in json.loads(body).get("items", []):
+                v = it.get("volumeInfo") or {}
+                links = v.get("imageLinks") or {}
+                url = links.get("thumbnail") or links.get("smallThumbnail")
+                if url:
+                    url = url.replace("http://", "https://").replace("&edge=curl", "").replace("zoom=1", "zoom=0")
+                    add(url, "Google Books", " · ".join(x for x in (v.get("publisher"), (v.get("publishedDate") or "")[:4]) if x))
+        except Exception:
+            pass
+        return out
+
+    def _replace(self, key, img, src, suffix):
+        old = self.index.get(key, {}).get("file")
+        if old:
+            try:
+                os.remove(os.path.join(self.dir, old))
+            except OSError:
+                pass
+        return self._store(key, img, src, suffix=suffix)
+
+    def set_book_from_url(self, title, author, url):
+        if not url.startswith("https://"):
+            raise ValueError("Only https images can be used.")
+        img, ctype = _get(url, timeout=30)
+        if "image" not in ctype or len(img) > 25 * 1024 * 1024 or len(img) < 1000:
+            raise ValueError("That link isn't a usable image.")
+        return self._replace(self.book_key(title, author), img, "picked", "-picked")
+
+    def set_book_custom(self, title, author, src_path):
+        with open(src_path, "rb") as f:
+            img = f.read()
+        if len(img) > 25 * 1024 * 1024:
+            raise ValueError("That image is over 25 MB.")
+        return self._replace(self.book_key(title, author), img, "custom", "-custom")
+
+    def forget_book(self, title, author="", mine_too=False):
+        """Refresh info drops the downloaded cover; your own pick goes only when you ask for the automatic one back."""
+        key = self.book_key(title, author)
+        e = self.index.get(key)
+        if e and (mine_too or e.get("src") not in USER_CHOSEN):
+            self.index.pop(key, None)
+            if e.get("file"):
+                try:
+                    os.remove(os.path.join(self.dir, e["file"]))
+                except OSError:
+                    pass
+            self._save()
+
     def book_cover(self, title, author=""):
-        key = "book|" + _norm(title) + "|" + _norm(author)
+        key = self.book_key(title, author)
         entry = self.index.get(key)
         if entry:
             fname = entry.get("file")

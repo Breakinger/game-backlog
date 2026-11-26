@@ -107,6 +107,8 @@ def parse_feed(raw, source):
     return out
 
 
+BROWSER_FETCH = {"fn": None}   # set by the app: reads a Reddit page through its own browser engine
+_plain_blocked = {"until": 0}    # once plain requests are turned away, go straight to the browser for a while
 REDDIT_APP = {"id": None}   # optional: your own free Reddit app ID (Settings), the reliable way past Reddit's blocks
 _reddit_token = {"token": None, "until": 0}
 
@@ -170,22 +172,33 @@ def reddit(sub, label):
                 return _reddit_posts(json.load(r), label)
         except Exception as e:
             errors.append(f"oauth: {e}")
-    for host in ("www.reddit.com", "old.reddit.com"):
-        for ua in (BROWSER_UA, REDDIT_UA):
+    if time.time() > _plain_blocked["until"]:
+        for host in ("www.reddit.com", "old.reddit.com"):
+            for ua in (BROWSER_UA, REDDIT_UA):
+                try:
+                    data = json.loads(_get(f"https://{host}/r/{sub}/new.json?limit=50&raw_json=1", ua, accept="application/json"))
+                    return _reddit_posts(data, label)
+                except Exception as e:
+                    errors.append(f"{host} json: {e}")
+        for host in ("www.reddit.com", "old.reddit.com"):
+            for ua in (BROWSER_UA, REDDIT_UA):
+                try:
+                    items = parse_feed(_get(f"https://{host}/r/{sub}/new/.rss", ua, accept="application/atom+xml,application/xml"), label)
+                    for i in items:
+                        i["summary"] = ""
+                    return items
+                except Exception as e:
+                    errors.append(f"{host} rss: {e}")
+        _plain_blocked["until"] = time.time() + 6 * 3600
+    # the app's own browser engine: Reddit serves it like any visitor
+    if BROWSER_FETCH["fn"]:
+        for host in ("www.reddit.com", "old.reddit.com"):
             try:
-                data = json.loads(_get(f"https://{host}/r/{sub}/new.json?limit=50&raw_json=1", ua, accept="application/json"))
+                data = json.loads(BROWSER_FETCH["fn"](f"https://{host}/r/{sub}/new.json?limit=50&raw_json=1"))
                 return _reddit_posts(data, label)
             except Exception as e:
-                errors.append(f"{host} json: {e}")
-    for host in ("www.reddit.com", "old.reddit.com"):
-        for ua in (BROWSER_UA, REDDIT_UA):
-            try:
-                items = parse_feed(_get(f"https://{host}/r/{sub}/new/.rss", ua, accept="application/atom+xml,application/xml"), label)
-                for i in items:
-                    i["summary"] = ""
-                return items
-            except Exception as e:
-                errors.append(f"{host} rss: {e}")
+                errors.append(f"{host} browser: {e}")
+    _plain_blocked["until"] = 0   # nothing worked: try every way again next time
     raise IOError("Reddit refused every way in (" + "; ".join(errors[-2:]) + ")")
 
 
