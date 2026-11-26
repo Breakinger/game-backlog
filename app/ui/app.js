@@ -518,12 +518,72 @@ function welcomeHTML() {
       <div class="actions"><button class="primary" id="wSettings">Open settings</button></div></div>`;
   }
   if (!state.settings.sheet_url && api) {
-    return `<div class="welcome"><h1>Welcome</h1><p class="intro">Connect your Google Sheet to load your backlog. Your sheet stays private.</p>
-      <div class="actions"><button class="primary" id="wSettings">Connect the sheet</button></div></div>`;
+    return `<div class="welcome"><h1>Welcome</h1><p class="intro">Already using Masterlog on another PC? Copy everything from it in one go: open Masterlog there, then press the button below. Otherwise, connect your Google Sheet. Your sheet stays private.</p>
+      <div class="actions"><button class="primary" id="wPair">Copy from my other PC</button><button class="ghost" id="wSettings">Connect the sheet</button></div></div>`;
   }
   return `<div class="welcome"><h1>Loading your backlog</h1><p class="intro">Reading the sheet…</p></div>`;
 }
-function bindWelcome() { $("#wSettings")?.addEventListener("click", () => openSettings(true)); }
+function bindWelcome() { $("#wSettings")?.addEventListener("click", () => openSettings(true)); $("#wPair")?.addEventListener("click", () => openPair("receive")); }
+
+/* ---------- your other PCs: copy everything over the home network ---------- */
+let pairTimer = null, pairMode = null;
+function openPair(mode) {
+  pairMode = mode;
+  if ($("#settings").open) $("#settings").close();
+  $("#pairDialog").showModal();
+  if (mode === "share") { Promise.resolve(api?.share_start()).then(paintPair); }
+  else findPCs();
+  clearInterval(pairTimer);
+  pairTimer = setInterval(async () => {
+    if (!$("#pairDialog").open) return clearInterval(pairTimer);
+    const st = await Promise.resolve(pairMode === "share" ? api?.share_status() : api?.receive_status()).catch(() => null);
+    if (st && (pairMode === "share" || st.stage !== "off")) paintPair(st);
+  }, 600);
+}
+async function findPCs() {
+  $("#pairBody").innerHTML = `<h2 id="pairTitle">Copy from my other PC</h2><p class="news-loading"><span class="spinner"></span> Looking for Masterlog on your network…</p>`;
+  const r = await Promise.resolve(api?.receive_find()).catch(() => ({ pcs: [] }));
+  const pcs = r?.pcs || [];
+  $("#pairBody").innerHTML = `<h2 id="pairTitle">Copy from my other PC</h2>
+    ${pcs.length ? `<p>Pick the PC to copy from:</p><div class="pclist">${pcs.map(p => `<button type="button" class="pcpick" data-pcip="${esc(p.ip)}" data-pcport="${p.port}"><b>${esc(p.name)}</b><small>${esc(p.ip)}</small></button>`).join("")}</div>`
+      : `<p>No PC found yet. On the PC you already use, open Masterlog → Settings → <b>Your PCs</b> → <b>Set up another PC</b>, then look again.</p>`}
+    <div class="row"><button type="button" class="ghost small" id="pairAgain">Look again</button></div>
+    <details class="howto"><summary>Still not found?</summary><p class="fine">Both PCs must be on the same network. If Windows asked the other PC whether Masterlog may use the network, it needs <b>Allow</b>. You can also type the address the other PC shows:</p>
+      <div class="row"><input id="pairIp" type="text" inputmode="decimal" placeholder="192.168.1.20" aria-label="Other PC's address"><button type="button" class="primary small" id="pairIpGo">Connect</button></div></details>`;
+}
+function paintPair(st) {
+  const b = $("#pairBody");
+  if (!st || !b) return;
+  const done = `<p class="pair-ok">✓ Done.</p>`;
+  if (pairMode === "share") {
+    const where = (st.ips || []).join(", ");
+    const ui = {
+      waiting: `<h2 id="pairTitle">Set up another PC</h2><ol class="pairsteps"><li>On the other PC, install Masterlog and open it.</li><li>Choose <b>Copy from my other PC</b> (on the welcome screen, or Settings → Your PCs).</li><li>Check both screens show the same code, then press <b>Send</b> here.</li></ol>
+        <p class="fine">Waiting for the other PC${where ? ` · this PC is <b>${esc(where)}</b>` : ""}. Sharing stops on its own in ten minutes. If Windows asks whether Masterlog may use the network, choose <b>Allow</b> (private networks).</p>${st.note ? `<p class="muted">${esc(st.note)}</p>` : ""}<p class="news-loading"><span class="spinner"></span> Waiting…</p>`,
+      code: `<h2 id="pairTitle">${esc(st.peer || "Another PC")} wants a copy</h2><p>Does it show this code?</p><div class="paircode">${esc(st.code || "")}</div>
+        <div class="row"><button type="button" class="ghost" data-pairdecide="0">No, cancel</button><button type="button" class="primary" data-pairdecide="1">Codes match, send</button></div>`,
+      sending: `<h2 id="pairTitle">Sending to ${esc(st.peer || "the other PC")}…</h2><p class="news-loading"><span class="spinner"></span> Encrypting and sending your settings, keys, covers and ambience.</p>`,
+      done: `<h2 id="pairTitle">${esc(st.peer || "The other PC")} is set up</h2>${done}<p>Press <b>Restart Masterlog</b> on it and your backlog appears there. From now on both PCs stay in step through your sheet.</p>`,
+      expired: `<h2 id="pairTitle">Sharing stopped</h2><p>Ten minutes passed without a PC asking. Start again when the other PC is ready.</p><button type="button" class="primary" id="pairRestart">Share again</button>`,
+      error: `<h2 id="pairTitle">That didn't work</h2><p>${esc(st.error || "")}</p><button type="button" class="primary" id="pairRestart">Try again</button>`,
+    }[st.stage];
+    if (ui && b.dataset.stage !== st.stage + (st.code || "")) { b.innerHTML = ui; b.dataset.stage = st.stage + (st.code || ""); if (st.stage === "code") { try { FX.play.notify(); } catch {} } }
+    return;
+  }
+  const ui = {
+    connecting: `<h2 id="pairTitle">Connecting…</h2><p class="news-loading"><span class="spinner"></span> Reaching ${esc(st.peer || "")}.</p>`,
+    code: `<h2 id="pairTitle">Confirm on ${esc(st.peer || "your other PC")}</h2><p>Check that your other PC shows the same code, then press <b>Send</b> there.</p><div class="paircode">${esc(st.code || "")}</div><p class="news-loading"><span class="spinner"></span> Waiting for the other PC…</p>`,
+    saving: `<h2 id="pairTitle">Saving…</h2><p class="news-loading"><span class="spinner"></span> Putting everything in place.</p>`,
+    done: `<h2 id="pairTitle">Copied from ${esc(st.peer || "your other PC")}</h2>${done}<p>${pairSummary(st.summary)}</p><div class="row"><button type="button" class="primary" id="pairRestartApp">Restart Masterlog</button></div>`,
+    error: `<h2 id="pairTitle">That didn't work</h2><p>${esc(st.error || "")}</p><button type="button" class="primary" id="pairAgain">Try again</button>`,
+  }[st.stage];
+  if (ui && b.dataset.stage !== st.stage + (st.code || "")) { b.innerHTML = ui; b.dataset.stage = st.stage + (st.code || ""); if (st.stage === "done") { try { FX.play.save(); } catch {} } }
+}
+function pairSummary(s) {
+  if (!s) return "";
+  const keys = (s.keys || []).map(k => ({ steam: "Steam", psn: "PlayStation", igdb: "IGDB", youtube: "YouTube", ebay: "eBay", reddit: "Reddit", nexus: "Nexus Mods" }[k] || k));
+  return [s.sheet ? "Your sheet connection" : "", keys.length ? `${keys.join(", ")} keys` : "", s.covers ? `${s.covers} cover${s.covers > 1 ? "s" : ""} you picked` : "", s.audio ? "your ambience track" : ""].filter(Boolean).join(", ") + " came over. Restart to load it all.";
+}
 
 function homeHTML() {
   const rows = shelves().filter(s => s.items.length).map((s, i) => `
@@ -1405,6 +1465,7 @@ async function sync(manual) {
   if (res && !res.error) {
     const before = JSON.stringify([state.games, state.books, state.canEdit]);
     applyData(res); state.error = null;
+    if (res.state_changed) { const s = await api.get_settings().catch(() => null); if (s) { state.settings = s; render(); } }
     $("#banner").hidden = true;
     const editing = document.activeElement?.closest?.("#editForm, #runForm");
     if ((before !== JSON.stringify([state.games, state.books, state.canEdit]) || manual) && !editing) {
@@ -1842,6 +1903,18 @@ function bindGlobal() {
     const t = e.target.closest(".itile"); if (t) return importPick(form, +t.dataset.i);
   });
   $("#bigBtn").addEventListener("click", toggleBigPicture);
+  $("#pairShare").addEventListener("click", () => openPair("share"));
+  $("#pairReceive").addEventListener("click", () => openPair("receive"));
+  $("#pairClose").addEventListener("click", () => { $("#pairDialog").close(); });
+  $("#pairDialog").addEventListener("close", () => { clearInterval(pairTimer); if (pairMode === "share") api?.share_stop(); $("#pairBody").dataset.stage = ""; });
+  $("#pairDialog").addEventListener("click", e => {
+    const d = e.target.closest("[data-pairdecide]"); if (d) { api?.share_decide(d.dataset.pairdecide === "1"); return; }
+    if (e.target.closest("#pairRestart")) { $("#pairBody").dataset.stage = ""; Promise.resolve(api?.share_start()).then(paintPair); return; }
+    if (e.target.closest("#pairAgain")) { $("#pairBody").dataset.stage = ""; return findPCs(); }
+    if (e.target.closest("#pairRestartApp")) { api?.restart_app(); return; }
+    const pc = e.target.closest("[data-pcip]"); if (pc) { api?.receive_start(pc.dataset.pcip, +pc.dataset.pcport); return; }
+    if (e.target.closest("#pairIpGo")) { const ip = $("#pairIp").value.trim(); if (ip) Promise.resolve(api?.receive_start(ip)).then(st => st?.stage === "error" && paintPair(st)); }
+  });
   $("#walkBtn").addEventListener("click", openWalk);
   $("#soundBtn").addEventListener("click", () => {
     const on = state.settings.sound_on === false;

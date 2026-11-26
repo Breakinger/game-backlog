@@ -1,4 +1,7 @@
 """Masterlog: a console-style library for your games and books, on top of your Google Sheet."""
+import base64
+import hashlib
+import socket
 import json
 import os
 import re
@@ -19,6 +22,7 @@ import youtube
 import feeds
 import deals
 import modpacks
+import pair
 import twitch
 import names
 import socketserver
@@ -55,6 +59,10 @@ DEFAULTS = {"sheet_url": sheet.DEFAULT_SHEET, "sheet_key": "", "sgdb_key": "", "
 PREFS = ("view_mode", "refresh_minutes", "sound_on", "ambient_volume", "fx_volume", "intro", "big_picture",
          "steam_cc", "ps_locale", "money", "auto_names", "scale", "ui_state", "eshop_country", "classic")
 PRIVATE = ("sgdb_key", "sheet_key", "ambience_path")
+# what stays with each PC when you copy Masterlog to another one
+MACHINE_ONLY = ("ambience_path", "heroic_linked", "big_picture", "state_meta")
+# small things kept the same on all your PCs through your sheet's script (version 3)
+SHARED_PREFS = ("classic", "steam_cc", "ps_locale", "money", "auto_names", "eshop_country", "ranking")
 AUDIO_TYPES = {".mp3": "audio/mpeg", ".ogg": "audio/ogg", ".opus": "audio/ogg", ".m4a": "audio/mp4", ".aac": "audio/aac",
                ".wav": "audio/wav", ".flac": "audio/flac", ".webm": "audio/webm"}
 COPY_LIMIT = 60 * 1024 * 1024  # smaller files are copied next to the settings, so moving the original doesn't break it
@@ -391,6 +399,11 @@ class Api:
             except Exception as e:  # report, keep showing the last good data
                 return {"error": str(e) or e.__class__.__name__, "code": getattr(e, "code", None)}
             data["can_edit"] = bool(client)
+            if client and (data.get("script_version") or 1) >= 3:
+                try:
+                    data["state_changed"] = self._state_sync(client)
+                except Exception:
+                    pass
             if data.get("ranking") is None:
                 data["ranking"] = [{"rank": i + 1, "game": n} for i, n in enumerate(self._local_ranking())]
                 data["ranking_local"] = True
@@ -1146,7 +1159,183 @@ class Api:
     def update_progress(self):
         return self._updater.progress
 
+    # ----- your other PCs: copy everything once over your network, then keep in step through the sheet -----
+    def _bundle(self):
+        if not self._vault.get("sync"):   # the key your PCs use to seal account keys they share through the sheet
+            self._vault.set("sync", {"key": base64.b64encode(os.urandom(32)).decode()})
+        saver.flush()   # anything still waiting to be written goes in too
+        files = {"accounts.json": base64.b64encode(json.dumps(self._accounts.state).encode()).decode(),
+                 "names.json": base64.b64encode(json.dumps(self._names).encode()).decode()}
+        for name in ("dlc_owned.json", "last_sync.json"):
+            try:
+                with open(os.path.join(self._dir, name), "rb") as f:
+                    files[name] = base64.b64encode(f.read()).decode()
+            except OSError:
+                pass
+        audio = None
+        p = self._ambience_file()
+        if p and os.path.getsize(p) <= 60 * 1024 * 1024:
+            with open(p, "rb") as f:
+                audio = {"ext": os.path.splitext(p)[1].lower(), "data": base64.b64encode(f.read()).decode()}
+        return {"v": 1, "from": socket.gethostname(), "t": time.time(), "version": VERSION,
+                "settings": {k: v for k, v in self._settings.items() if k not in MACHINE_ONLY},
+                "vault": dict(self._vault._data), "files": files, "covers": self._art.mine(with_files=True), "audio": audio}
+
+    def _apply_bundle(self, b):
+        if b.get("v") != 1:
+            raise ValueError("That PC runs a different Masterlog. Update both and try again.")
+        for name, data in (b.get("files") or {}).items():
+            if name not in ("accounts.json", "names.json", "dlc_owned.json", "last_sync.json"):
+                continue
+            tmp = os.path.join(self._dir, name + ".tmp")
+            with open(tmp, "wb") as f:
+                f.write(base64.b64decode(data))
+            os.replace(tmp, os.path.join(self._dir, name))
+        for k, v in (b.get("vault") or {}).items():
+            self._vault.set(k, v)          # sealed again with this PC's own Windows protection
+        covers = 0
+        for k, item in (b.get("covers") or {}).items():
+            covers += bool(_safe(self._art.adopt, k, item))
+        incoming = {k: v for k, v in (b.get("settings") or {}).items() if k not in MACHINE_ONLY}
+        self._settings.update(incoming)
+        a = b.get("audio")
+        if a and a.get("ext") in AUDIO_TYPES:
+            folder = os.path.join(self._dir, "audio")
+            os.makedirs(folder, exist_ok=True)
+            dest = os.path.join(folder, "ambience" + a["ext"])
+            with open(dest, "wb") as f:
+                f.write(base64.b64decode(a["data"]))
+            self._settings["ambience_path"] = dest
+        self._settings.pop("state_meta", None)
+        self._write_settings()
+        self._client = None
+        saver.flush()
+        return {"from": b.get("from"), "keys": sorted(k for k in (b.get("vault") or {}) if k != "sync"), "covers": covers, "audio": bool(a),
+                "sheet": bool(incoming.get("sheet_key"))}
+
+    def share_start(self):
+        if not getattr(self, "_share", None):
+            self._share = pair.Share(self._bundle)
+        try:
+            return self._share.start()
+        except OSError as e:
+            return {"stage": "error", "error": f"Couldn't open the network for sharing ({e})."}
+
+    def share_status(self):
+        return getattr(self, "_share", None) and self._share.state or {"stage": "off"}
+
+    def share_decide(self, ok):
+        if getattr(self, "_share", None):
+            self._share.decide(ok)
+        return True
+
+    def share_stop(self):
+        if getattr(self, "_share", None):
+            self._share.stop()
+        return True
+
+    def receive_find(self):
+        try:
+            return {"pcs": pair.discover()}
+        except OSError as e:
+            return {"pcs": [], "error": str(e)}
+
+    def receive_start(self, ip, port=None):
+        if not getattr(self, "_receive", None):
+            self._receive = pair.Receive(self._apply_bundle)
+        try:
+            return self._receive.start((ip or "").strip(), port or pair.PORT)
+        except ValueError as e:
+            return {"stage": "error", "error": str(e)}
+
+    def receive_status(self):
+        return getattr(self, "_receive", None) and self._receive.state or {"stage": "off"}
+
+    def restart_app(self):
+        """After copying from another PC: start again so every account and key is picked up."""
+        if getattr(sys, "frozen", False):
+            env = {k: v for k, v in os.environ.items() if not k.startswith(("_PYI", "_MEI"))}
+            env["PYINSTALLER_RESET_ENVIRONMENT"] = "1"
+            import subprocess
+            subprocess.Popen([sys.executable], cwd=os.path.dirname(sys.executable), env=env,
+                             creationflags=0x00000008 | 0x00000200, close_fds=True)
+            threading.Timer(0.6, self._quit).start()
+        return True
+
+    # keeping your PCs in step: small things only, through your sheet's script; account keys go encrypted
+    def _state_sections(self):
+        out = {"prefs": {k: self._settings.get(k) for k in SHARED_PREFS if k in self._settings},
+               "blacklist": sorted(self._accounts.state.get("blacklist") or []),
+               "dlc": self.dlc_marks(), "names": self._names,
+               "covers": {k: {kk: v[kk] for kk in ("src", "url", "t")} for k, v in self._art.mine().items() if v.get("url")}}
+        sync = (self._vault.get("sync") or {}).get("key")
+        if sync:
+            secret = {k: v for k, v in self._vault._data.items() if k != "sync"}
+            out["secrets"] = {"blob": base64.b64encode(pair.seal(base64.b64decode(sync), secret, b"masterlog secrets")).decode(),
+                              "hash": hashlib.sha256(json.dumps(secret, sort_keys=True).encode()).hexdigest()}
+        return out
+
+    def _apply_section(self, name, data):
+        if name == "prefs":
+            self._settings.update({k: v for k, v in (data or {}).items() if k in SHARED_PREFS})
+            self._write_settings()
+        elif name == "blacklist":
+            self._accounts.state["blacklist"] = sorted(set(data or []))
+            self._accounts._save()
+        elif name == "dlc":
+            tmp = self._dlc_path() + ".tmp"
+            with open(tmp, "w", encoding="utf-8") as f:
+                json.dump(data or {}, f, ensure_ascii=False)
+            os.replace(tmp, self._dlc_path())
+        elif name == "names":
+            self._names = data or {}
+            saver.save_later(self._names_path, lambda: self._names)
+        elif name == "covers":
+            for k, item in (data or {}).items():
+                _safe(self._art.adopt, k, item)
+        elif name == "secrets":
+            sync = (self._vault.get("sync") or {}).get("key")
+            if sync and data and data.get("blob"):
+                secret = pair.unseal(base64.b64decode(sync), base64.b64decode(data["blob"]), b"masterlog secrets")
+                for k in set(self._vault._data) - set(secret) - {"sync"}:
+                    self._vault.set(k, None)
+                for k, v in secret.items():
+                    if k != "sync":
+                        self._vault.set(k, v)
+                feeds.REDDIT_APP["id"] = (self._vault.get("reddit") or {}).get("id")
+
+    def _state_sync(self, client):
+        if not self._vault.get("sync"):
+            self._vault.set("sync", {"key": base64.b64encode(os.urandom(32)).decode()})
+        meta = self._settings.setdefault("state_meta", {})      # section -> {"hash", "t"} as this PC last knew it
+        local = self._state_sections()
+        now = time.time()
+        for name, data in local.items():
+            h = data["hash"] if name == "secrets" else hashlib.sha256(json.dumps(data, sort_keys=True).encode()).hexdigest()
+            if meta.get(name, {}).get("hash") != h:
+                meta[name] = {"hash": h, "t": now}             # changed here since last time
+        remote = (client.state_get() or {}).get("state") or {}
+        push, changed = {}, False
+        for name in set(local) | set(remote):
+            mine, theirs = meta.get(name), remote.get(name)
+            if theirs and (not mine or theirs.get("t", 0) > mine.get("t", 0)):
+                try:
+                    self._apply_section(name, theirs.get("data"))
+                    applied = self._state_sections().get(name)
+                    h = applied["hash"] if name == "secrets" else hashlib.sha256(json.dumps(applied, sort_keys=True).encode()).hexdigest()
+                    meta[name] = {"hash": h, "t": theirs.get("t", 0)}
+                    changed = True
+                except Exception:
+                    continue
+            elif mine and name in local and (not theirs or mine.get("t", 0) > theirs.get("t", 0)):
+                push[name] = {"t": mine["t"], "data": local[name]}
+        if push:
+            client.state_put(push)
+        self._write_settings()
+        return changed
+
     def _quit(self):
+        saver.flush()   # os._exit skips the usual on-close writes
         try:
             if self._window:
                 self._window.destroy()

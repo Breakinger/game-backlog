@@ -1,5 +1,6 @@
 /**
- * Masterlog connection (version 2: adds the Ranking tab).
+ * Masterlog connection (version 3: keeps your PCs in step: the All Time Classic, hidden games, DLC marks,
+ * covers you picked, and your account keys, sealed so only your PCs can open them).
  *
  * Paste this into your sheet (Extensions → Apps Script), then Deploy → New deployment →
  * Web app, Execute as: Me, Who has access: Anyone. Copy the Web app link into the app's Settings.
@@ -42,7 +43,7 @@ function route_(p) {
   const key = props.getProperty('KEY');
   if (p.action === 'pair') {
     if (key) {
-      return { error: 'This sheet is already connected to an app. To connect again, open Extensions → Apps Script in the sheet and run resetConnection.', code: 'paired' };
+      return { error: 'This sheet is already connected to Masterlog. To use it on another PC, open Masterlog on the PC that is connected and choose Settings → Your PCs → Set up another PC. (To start over instead, run resetConnection in Extensions → Apps Script.)', code: 'paired' };
     }
     const fresh = Utilities.getUuid().replace(/-/g, '') + Utilities.getUuid().replace(/-/g, '');
     props.setProperty('KEY', fresh);
@@ -55,6 +56,8 @@ function route_(p) {
   if (p.action === 'update') return withLock_(() => update_(p));
   if (p.action === 'add') return withLock_(() => add_(p));
   if (p.action === 'rank') return withLock_(() => rank_(p));
+  if (p.action === 'state_get') return { state: stateRead_() };
+  if (p.action === 'state_put') return withLock_(() => statePut_(p));
   return { error: 'Unknown action: ' + p.action };
 }
 
@@ -124,7 +127,7 @@ function read_() {
     plays: table_('plays'),
     books: table_('books'),
     ranking: ranking_(),
-    script: 2,
+    script: 3,
   };
 }
 
@@ -214,4 +217,33 @@ function add_(p) {
   if (!row) { sh.insertRowAfter(sh.getMaxRows()); row = sh.getMaxRows(); }
   const skipped = write_(sh, row, h, p.values);
   return { ok: true, row: row, skipped: skipped };
+}
+
+/* ---------- what your PCs share besides the sheet (kept in this script's private properties) ---------- */
+function stateRead_() {
+  const props = PropertiesService.getScriptProperties();
+  const n = Number(props.getProperty('STATE_N') || 0);
+  let text = '';
+  for (let i = 0; i < n; i++) text += props.getProperty('STATE_' + i) || '';
+  try { return text ? JSON.parse(text) : {}; } catch (err) { return {}; }
+}
+
+function statePut_(p) {
+  const cur = stateRead_();
+  const incoming = p.sections || {};
+  Object.keys(incoming).forEach(function (k) {
+    const s = incoming[k];
+    if (s && (!cur[k] || Number(s.t || 0) > Number(cur[k].t || 0))) cur[k] = { t: Number(s.t || 0), data: s.data };
+  });
+  const text = JSON.stringify(cur);
+  if (text.length > 380000) throw new Error('Too much to keep in step between PCs.');
+  const props = PropertiesService.getScriptProperties();
+  const old = Number(props.getProperty('STATE_N') || 0);
+  const parts = {};
+  let n = 0;
+  for (let i = 0; i < text.length; i += 2500) parts['STATE_' + (n++)] = text.slice(i, i + 2500);
+  parts.STATE_N = String(n);
+  props.setProperties(parts);
+  for (let i = n; i < old; i++) props.deleteProperty('STATE_' + i);
+  return { ok: true };
 }

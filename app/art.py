@@ -351,7 +351,10 @@ class Art:
                 os.remove(os.path.join(self.dir, old))
             except OSError:
                 pass
-        return self._store(key, img, "picked", suffix="-picked")
+        uri = self._store(key, img, "picked", suffix="-picked")
+        self.index[key]["url"] = url
+        self._save()
+        return uri
 
     def cover(self, name, platform="", hints=None):
         """A URL (or data: URI) for the game's cover, or None. Your own picks are never replaced."""
@@ -441,7 +444,11 @@ class Art:
         img, ctype = _get(url, timeout=30)
         if "image" not in ctype or len(img) > 25 * 1024 * 1024 or len(img) < 1000:
             raise ValueError("That link isn't a usable image.")
-        return self._replace(self.book_key(title, author), img, "picked", "-picked")
+        key = self.book_key(title, author)
+        uri = self._replace(key, img, "picked", "-picked")
+        self.index[key]["url"] = url
+        self._save()
+        return uri
 
     def set_book_custom(self, title, author, src_path):
         with open(src_path, "rb") as f:
@@ -462,6 +469,41 @@ class Art:
                 except OSError:
                     pass
             self._save()
+
+    # ---------- your own covers travel with you to your other PCs ----------
+    def mine(self, with_files=False):
+        out = {}
+        for k, e in self.index.items():
+            if e.get("src") not in USER_CHOSEN or not e.get("file"):
+                continue
+            item = {"src": e["src"], "url": e.get("url", ""), "file": e["file"], "t": e.get("t", 0)}
+            if with_files:
+                try:
+                    with open(os.path.join(self.dir, e["file"]), "rb") as f:
+                        item["data"] = base64.b64encode(f.read()).decode()
+                except OSError:
+                    continue
+            out[k] = item
+        return out
+
+    def adopt(self, key, item):
+        """Take a cover from your other PC: the image itself, or its source link to fetch again."""
+        cur = self.index.get(key) or {}
+        if cur.get("src") in USER_CHOSEN and cur.get("url") == item.get("url") and cur.get("t", 0) >= item.get("t", 0) and cur.get("file") \
+                and os.path.exists(os.path.join(self.dir, cur["file"])):
+            return False
+        if item.get("data"):
+            img = base64.b64decode(item["data"])
+        elif item.get("url", "").startswith("https://"):
+            img, ctype = _get(item["url"], timeout=30)
+            if "image" not in ctype or len(img) < 1000:
+                return False
+        else:
+            return False
+        uri = self._replace(key, img, item.get("src") or "picked", "-" + (item.get("src") or "picked"))
+        self.index[key].update({"url": item.get("url", ""), "t": item.get("t") or time.time()})
+        self._save()
+        return bool(uri)
 
     def book_cover(self, title, author=""):
         key = self.book_key(title, author)

@@ -65,6 +65,7 @@
       <button type="button" data-stab="accounts">Accounts</button>
       <button type="button" data-stab="deals">Deals &amp; regions</button>
       <button type="button" data-stab="sound">Sound &amp; look</button>
+      <button type="button" data-stab="pcs">Your PCs</button>
       <button type="button" data-stab="about">About</button>
     </div>
 
@@ -158,6 +159,18 @@
       <p class="fine">Pick an audio file on this PC (MP3, OGG, M4A, WAV). If it carries intro and loop marks, the intro plays at startup and the rest loops seamlessly. The file stays on this PC. Ambience pauses when Masterlog isn't the window you're using.</p>
     </div>
 
+    <div class="spane" data-spane="pcs" hidden>
+      <div class="pcs">
+        <div class="pcs-card"><h3>Use Masterlog on another PC</h3>
+          <p>Copies everything from this PC to the other one in one go: the sheet connection, linked accounts and keys, covers you picked, your ambience track and your settings. No signing in or pasting links again.</p>
+          <button type="button" class="primary" id="pairShare">Set up another PC</button></div>
+        <div class="pcs-card"><h3>This is the new PC</h3>
+          <p>Copy everything from the PC you already use. Open Masterlog there too.</p>
+          <button type="button" class="ghost" id="pairReceive">Copy from my other PC</button></div>
+      </div>
+      <p class="fine">Both PCs need to be on the same network (your home Wi-Fi). The copy goes straight from one PC to the other, encrypted, and never through the internet; you confirm a six-digit code on both screens first. Afterwards your PCs keep the All Time Classic, hidden games, DLC marks, picked covers and account keys the same through your sheet's connection script (version 3), with the keys sealed so only your PCs can read them.</p>
+    </div>
+
     <div class="spane" data-spane="about" hidden>
       <div class="row version-row"><span id="versionText"></span><button type="button" class="ghost small" id="checkUpdates">Check for updates</button></div>
       <div class="row"><button type="button" class="ghost" id="clearCovers">Download covers again</button></div>
@@ -169,6 +182,11 @@
       <button value="save" class="primary" id="saveSettings">Save</button>
     </div>
   </form>
+</dialog>
+
+<dialog id="pairDialog" class="settings pairdlg" aria-labelledby="pairTitle">
+  <div id="pairBody"></div>
+  <div class="row"><span class="spacer"></span><button type="button" class="ghost" id="pairClose">Close</button></div>
 </dialog>
 
 <dialog id="addDialog" class="settings">

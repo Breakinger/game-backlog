@@ -256,6 +256,12 @@ class ScriptClient:
         result["script_version"] = out.get("script") or 1
         return result
 
+    def state_get(self):
+        return self._call(body={"action": "state_get", "key": self.key})
+
+    def state_put(self, sections):
+        return self._call(body={"action": "state_put", "key": self.key, "sections": sections})
+
     def rank(self, names):
         return self._call(body={"action": "rank", "key": self.key, "list": [{"game": n} for n in names]})
 
