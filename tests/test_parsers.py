@@ -26,6 +26,7 @@ def page(name):
     raw = open(path, "rb").read().decode("utf-8", "replace")
     if name.endswith(".json"):
         d = json.loads(raw)
+        assert "error" not in d, f"{name}: the site said {d['error'].get('info') if isinstance(d['error'], dict) else d['error']}"
         return (d.get("parse") or {}).get("text") if "parse" in d and isinstance(d["parse"].get("text"), str) else d
     return raw
 

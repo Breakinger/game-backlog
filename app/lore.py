@@ -359,7 +359,7 @@ class _Ceremony(HTMLParser):
     def __init__(self):
         super().__init__()
         self.depth, self.heading, self.in_head, self.year = 0, "", False, ""
-        self.headers, self.col, self.cell, self.li, self.bold, self.skip = [], 0, None, None, 0, 0
+        self.headers, self.col, self.cell, self.li, self.bold, self.skip = [], 0, None, [], 0, 0
         self.cells = []
 
     def handle_starttag(self, tag, attrs):
@@ -379,7 +379,10 @@ class _Ceremony(HTMLParser):
         elif tag in ("b", "strong"):
             self.bold += 1
         elif tag == "li" and self.cell is not None:
-            self.li = {"text": "", "bold": False}
+            # the winner's entry holds the nominees in a list of its own: keep them in page order, winner first
+            item = {"text": "", "bold": False}
+            self.cell["items"].append(item)
+            self.li.append(item)
 
     def handle_endtag(self, tag):
         if tag in ("h2", "h3", "h4"):
@@ -390,16 +393,16 @@ class _Ceremony(HTMLParser):
             self.skip -= 1
         elif tag in ("b", "strong") and self.bold:
             self.bold -= 1
-        elif tag == "li" and self.li is not None and self.cell is not None:
-            self.li["text"] = re.sub(r"\s+", " ", self.li["text"]).strip()
-            if self.li["text"]:
-                self.cell["items"].append(self.li)
-            self.li = None
+        elif tag == "li" and self.li and self.cell is not None:
+            item = self.li.pop()
+            item["text"] = re.sub(r"\s+", " ", item["text"]).strip()
         elif self.depth == 1 and tag in ("td", "th") and self.cell is not None:
             c = self.cell
             c["lead"] = re.sub(r"\s+", " ", c["lead"]).strip()
+            c["items"] = [i for i in c["items"] if i["text"]]
             if c["th"]:
-                self.row_th.append(c["lead"])
+                # 'The "Game of the Year" Award' is the Game of the Year category
+                self.row_th.append(re.sub(r'^the\s+["“]?|["”]?\s+award$', "", c["lead"], flags=re.I).strip('"“” '))
             else:
                 c["year"] = self.year
                 c["header"] = self.headers[c["col"]] if c["col"] < len(self.headers) else ""
@@ -415,10 +418,10 @@ class _Ceremony(HTMLParser):
             self.heading += data
         if self.skip or self.cell is None:
             return
-        if self.li is not None:
-            self.li["text"] += data
+        if self.li:
+            self.li[-1]["text"] += data
             if self.bold and data.strip():
-                self.li["bold"] = True
+                self.li[-1]["bold"] = True
         else:
             self.cell["lead"] += data
             if self.bold:

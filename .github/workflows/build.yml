@@ -12,7 +12,27 @@ env:
   IMPORTS: "import sheet, art, info, igdb, updater, vault, accounts, youtube, feeds, deals, modpacks, twitch, saver, names, guides, pair, lore, family, chrome, platforms, goty, events, health, main, version"
 
 jobs:
+  tests:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Install test tools
+        run: |
+          pip install pytest playwright cryptography Pillow
+          python -m playwright install --with-deps chromium
+      - name: Parsers, on saved copies of the sites they read
+        run: python -m pytest -q tests/test_parsers.py
+      - name: The app in a browser, on a stand-in library
+        run: |
+          python tests/ui/make_mock.py
+          python dev/build_preview.py
+          python -m pytest -q tests/ui/test_smoke.py
+
   windows:
+    needs: tests
     runs-on: windows-latest
     steps:
       - uses: actions/checkout@v4
@@ -44,6 +64,7 @@ jobs:
           path: dist/Masterlog.exe
 
   steamdeck:
+    needs: tests
     runs-on: ubuntu-24.04
     steps:
       - uses: actions/checkout@v4

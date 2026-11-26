@@ -864,7 +864,8 @@ function gotyDefaultYear() {
   const ys = gotyState.data?.years || [];
   return (ys.find(y => y.tga?.winner) || ys[0])?.year;
 }
-function fillGotyHome() {
+function fillGotyHome() { keepFocus($("#gotyHome"), fillGotyHomeNow); }
+function fillGotyHomeNow() {
   const box = $("#gotyHome");
   if (!box) return;
   const ys = gotyState.data?.years || [];
@@ -4032,7 +4033,18 @@ function eventCard(e, i) {
     <div class="ev-side">${eventSide(e)}</div>
   </article>`;
 }
-function fillEvents() {
+/* a section that redraws itself (events, what's new, Game of the Year) keeps keyboard and controller focus where it was */
+function keepFocus(box, redraw) {
+  const a = document.activeElement, inside = box && a && box.contains(a);
+  const idx = inside ? [...box.querySelectorAll(NAV_SEL)].indexOf(a) : -1;
+  redraw();
+  if (inside && !box.contains(document.activeElement)) {
+    const items = [...box.querySelectorAll(NAV_SEL)];
+    (items[idx] || items[0])?.focus({ preventScroll: true });
+  }
+}
+function fillEvents() { keepFocus($("#eventsHome"), fillEventsNow); }
+function fillEventsNow() {
   const box = $("#eventsHome");
   if (!box) return;
   const list = eventState.data?.events || [];

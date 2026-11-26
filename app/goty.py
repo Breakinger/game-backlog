@@ -59,7 +59,7 @@ STEAM = {
 }
 
 WP = "https://en.wikipedia.org/w/api.php?format=json&formatversion=2&redirects=1&action=parse&prop=text&page="
-PAGES = {"tga": "The Game Award for Game of the Year", "gj": "Golden Joystick Award for Ultimate Game of the Year",
+PAGES = {"tga": "The Game Award for Game of the Year", "gj": "Golden Joystick Award for Game of the Year",
          "bafta": "British Academy Games Award for Best Game", "steam": "Steam Awards"}
 WEEK = 7 * 86400
 

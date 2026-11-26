@@ -16,7 +16,7 @@ OUT = os.path.join(ROOT, "fixtures")
 WP = "https://en.wikipedia.org/w/api.php?format=json&formatversion=2&redirects=1&"
 PAGES = {
     "wp_tga.json": WP + "action=parse&prop=text&page=" + urllib.parse.quote("The Game Award for Game of the Year"),
-    "wp_gj.json": WP + "action=parse&prop=text&page=" + urllib.parse.quote("Golden Joystick Award for Ultimate Game of the Year"),
+    "wp_gj.json": WP + "action=parse&prop=text&page=" + urllib.parse.quote("Golden Joystick Award for Game of the Year"),
     "wp_bafta.json": WP + "action=parse&prop=text&page=" + urllib.parse.quote("British Academy Games Award for Best Game"),
     "wp_steam_awards.json": WP + "action=parse&prop=text&page=" + urllib.parse.quote("Steam Awards"),
     "wp_tga2022.json": WP + "action=parse&prop=text&page=" + urllib.parse.quote("The Game Awards 2022"),
