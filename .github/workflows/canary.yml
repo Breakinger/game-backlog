@@ -8,7 +8,7 @@ on:
   workflow_dispatch:
 
 permissions:
-  contents: read
+  contents: write   # only to save the fresh copies on the fixtures-snapshot branch
 
 jobs:
   canary:
@@ -31,3 +31,14 @@ jobs:
           name: fixtures
           path: tests/fixtures
           retention-days: 14
+      - name: Save the copies on the fixtures-snapshot branch
+        if: always()
+        run: |
+          git config user.name "masterlog-canary"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          rm -rf /tmp/fx && cp -r tests/fixtures /tmp/fx
+          if git fetch -q origin fixtures-snapshot; then git checkout -q -B fixtures-snapshot FETCH_HEAD; else git checkout -q --orphan fixtures-snapshot && git rm -rq --cached . && git clean -fdq -e tests; fi
+          rm -rf fixtures && cp -r /tmp/fx fixtures
+          git add fixtures
+          git commit -qm "Fresh copies of the pages Masterlog reads, $(date -u +%F)" || echo "nothing changed"
+          git push -q origin fixtures-snapshot
