@@ -2037,3 +2037,12 @@ body.chrome:not(.bigpic) .caseview .refreshinfo { right: 70px; }
 @keyframes medalglint { 0%, 70%, 100% { opacity: 0; transform: scale(.4); } 80% { opacity: 1; transform: scale(1.15); } }
 :is(.grid, .shelf-row) .case:not(.live) .glint { animation-play-state: paused; }
 body.calm .glint { animation-play-state: paused; }
+
+/* Game of the Year frames: everything centred */
+.ygoty { text-align: center; }
+.ygoty h4 { justify-content: center; }
+.ygrow { justify-content: center; }
+.yg { align-items: center; text-align: center; }
+.yg .milestone { align-self: center; }
+.ygwait-label { text-align: center; }
+.ygpick { margin-left: auto; margin-right: auto; }
