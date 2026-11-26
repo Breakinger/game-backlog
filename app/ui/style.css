@@ -2020,3 +2020,20 @@ body.chrome:not(.bigpic) .caseview .refreshinfo { right: 70px; }
 /* room above History covers grows with the cover size setting, so the fire never reaches the text */
 .year .detail .shelf-row { padding-top: calc(112px * var(--scale) * .3 + 18px); }
 .year .best { margin-bottom: 4px; }
+
+/* Legendary keeps its number under the diamond */
+.m-crimson b { top: 63%; color: #FFFFFF; text-shadow: 0 1px 1px rgba(120, 30, 0, .8); font-size: max(7px, calc(7.5px * var(--scale))); }
+/* completion medals: their own shapes, bigger than ranking medals, with a slow shine */
+.medal.m-full, .medal.m-plat { width: calc(21px * var(--scale) + 5px); aspect-ratio: 30 / 32; margin-top: -1px; }
+.medal.m-plat { aspect-ratio: 30 / 34; }
+.m-full { filter: drop-shadow(0 0 5px rgba(63, 224, 143, .55)) drop-shadow(0 2px 3px rgba(0, 0, 0, .55)); }
+.m-full .hex { stroke: #6B4300; stroke-width: .6; }
+.m-full .tick { fill: none; stroke: #FFFFFF; stroke-width: 2.6; stroke-linecap: round; stroke-linejoin: round; }
+.m-plat { filter: drop-shadow(0 0 6px rgba(190, 210, 255, .75)) drop-shadow(0 2px 3px rgba(0, 0, 0, .55)); }
+.m-plat .handle { fill: none; stroke: #C9D6EE; stroke-width: 1.6; stroke-linecap: round; }
+.m-plat .plinth { fill: #3B4A6E; stroke: #9FB1D4; stroke-width: .6; }
+.m-plat .star { fill: #5B7BD8; }
+.m-full .glint, .m-plat .glint { fill: #FFFFFF; transform-box: fill-box; transform-origin: center; animation: medalglint 3.2s ease-in-out infinite; }
+@keyframes medalglint { 0%, 70%, 100% { opacity: 0; transform: scale(.4); } 80% { opacity: 1; transform: scale(1.15); } }
+:is(.grid, .shelf-row) .case:not(.live) .glint { animation-play-state: paused; }
+body.calm .glint { animation-play-state: paused; }

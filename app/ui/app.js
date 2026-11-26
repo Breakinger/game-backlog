@@ -271,16 +271,24 @@ function caseHTML(g, o = {}) {
 function factsOf(g) { return state.facts[g.name] || {}; }
 /* medals sit beside the game's name, under the cover, so they never cover its art, logo or tags */
 function medalSVG(kind) {
-  const inner = kind === "crimson" ? `<path class="gem" d="M8.2 19.2h7.6l2.4 3.2-6.2 7-6.2-7z"/><path class="gemline" d="M5.8 22.4h12.4M10 19.2l2 10.2 2-10.2"/>`
-    : kind === "plat" ? `<path class="cup" d="M8.4 17.4h7.2v2.6a3.6 3.6 0 0 1-7.2 0zM11 23.4h2v2.2h2.2v1.4H8.8v-1.4H11z"/><path class="cupline" d="M8.4 18.4H6.6a1.8 1.8 0 0 0 1.9 2.4M15.6 18.4h1.8a1.8 1.8 0 0 1-1.9 2.4"/>`
-    : "";
+  // completion: their own shapes, so they never read as a ranking medal
+  if (kind === "full") return `<svg viewBox="0 0 30 32" aria-hidden="true"><defs><linearGradient id="mlFullRim" x1="0" y1="0" x2="1" y2="1"><stop offset="0" stop-color="#FFF4C2"/><stop offset=".45" stop-color="#F2B92C"/><stop offset="1" stop-color="#A86A06"/></linearGradient><linearGradient id="mlFullCore" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#3FE08F"/><stop offset="1" stop-color="#0E7A45"/></linearGradient></defs>
+    <path class="hex" fill="url(#mlFullRim)" d="M15 1.2 27.6 8.5v15L15 30.8 2.4 23.5v-15z"/><path class="hexin" fill="url(#mlFullCore)" d="M15 5.4 24 10.6v10.8L15 26.6 6 21.4V10.6z"/>
+    <path class="tick" d="M10.2 16.2l3.3 3.4 6.6-7.2"/><path class="glint" d="M23.6 3.2l.7 1.7 1.7.7-1.7.7-.7 1.7-.7-1.7-1.7-.7 1.7-.7z"/></svg>`;
+  if (kind === "plat") return `<svg viewBox="0 0 30 34" aria-hidden="true"><defs><linearGradient id="mlPlat" x1="0" y1="0" x2="1" y2="1"><stop offset="0" stop-color="#FFFFFF"/><stop offset=".3" stop-color="#D9E4F7"/><stop offset=".55" stop-color="#9FB1D4"/><stop offset=".75" stop-color="#E9F0FF"/><stop offset="1" stop-color="#7C8DB3"/></linearGradient></defs>
+    <path class="handle" d="M7.4 6.6H3.8a3.4 3.4 0 0 0 3.6 5.6M22.6 6.6h3.6a3.4 3.4 0 0 1-3.6 5.6"/>
+    <path class="cupb" fill="url(#mlPlat)" d="M7 3.4h16v7.4a8 8 0 0 1-16 0z"/><path class="stem" fill="url(#mlPlat)" d="M13.2 18.4h3.6v5h-3.6z"/>
+    <path class="base" fill="url(#mlPlat)" d="M8.6 23.2h12.8l1.4 4.6H7.2z"/><path class="plinth" d="M6 27.6h18v3.4H6z"/>
+    <path class="star" d="M15 6.2l1.2 2.5 2.7.4-2 1.9.5 2.7-2.4-1.3-2.4 1.3.5-2.7-2-1.9 2.7-.4z"/><path class="glint" d="M24.8.6l.6 1.5 1.5.6-1.5.6-.6 1.5-.6-1.5-1.5-.6 1.5-.6z"/></svg>`;
+  // ranking: a medal on a ribbon; Legendary carries a small fiery-white diamond above its number
+  const inner = kind === "crimson" ? `<path class="gem" d="M9.4 15.4h5.2l1.7 2.1-4.3 4.6-4.3-4.6z"/><path class="gemline" d="M7.7 17.5h8.6M10.8 15.4l1.2 6.7 1.2-6.7"/>` : "";
   return `<svg viewBox="0 0 24 34" aria-hidden="true"><path class="rib r1" d="M4.6 0h5.2l3.4 12.6-4.2 2.2z"/><path class="rib r2" d="M19.4 0h-5.2l-3.4 12.6 4.2 2.2z"/><circle class="disc" cx="12" cy="23" r="9.6"/><circle class="rim" cx="12" cy="23" r="7.6"/>${inner}</svg>`;
 }
 function medalsHTML(g) {
   const out = [], rk = rankOf(g), f = factsOf(g);
-  if (rk && !isClassic(g)) { const t = rankTier(rk); out.push(`<span class="medal m-rank m-${t}" title="${TIER_NAME[t]} medal · #${rk} in your Top 100">${medalSVG(t)}${t === "crimson" ? "" : `<b>${rk}</b>`}</span>`); }
+  if (rk && !isClassic(g)) { const t = rankTier(rk); out.push(`<span class="medal m-rank m-${t}" title="${TIER_NAME[t]} medal · #${rk} in your Top 100">${medalSVG(t)}<b>${rk}</b></span>`); }
   if (f.complete === "Platinum" || (g.platinum && CONSOLES.has(g.platform))) out.push(`<span class="medal m-plat" title="Platinum trophy">${medalSVG("plat")}</span>`);
-  else if (f.complete || g.platinum) out.push(`<span class="medal m-full" title="100%: every achievement">${medalSVG("full")}<b>100</b></span>`);
+  else if (f.complete || g.platinum) out.push(`<span class="medal m-full" title="100%: every achievement">${medalSVG("full")}</span>`);
   const crowns = gotyMedals(g);
   return out.length || crowns ? `<span class="medals">${crowns}${out.join("")}</span>` : "";
 }
