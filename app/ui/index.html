@@ -253,6 +253,15 @@
   <div class="row"><span class="spacer"></span><button type="button" class="ghost" id="pairClose">Close</button></div>
 </dialog>
 
+<dialog id="gotyDialog" class="settings wide gotydlg" aria-labelledby="gotyPickTitle">
+  <form method="dialog"><h2 id="gotyPickTitle">Your Game of the Year</h2>
+    <p class="muted">Games you have that came out this year. The one you crown wears a white crown everywhere in Masterlog.</p>
+    <input type="search" id="gotyPickQ" placeholder="Search your games" aria-label="Search your games">
+    <p class="fine" id="gotyPickNote" aria-live="polite"></p>
+    <div class="gpicklist" id="gotyPickList"></div>
+    <div class="row"><span class="spacer"></span><button value="cancel" class="ghost">Close</button></div>
+  </form>
+</dialog>
 <dialog id="addDialog" class="settings">
   <form method="dialog" id="addForm"></form>
 </dialog>

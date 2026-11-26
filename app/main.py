@@ -61,12 +61,12 @@ DEFAULTS = {"sheet_url": sheet.DEFAULT_SHEET, "sheet_key": "", "sgdb_key": "", "
             "money": "native", "auto_names": True, "scale": 1, "ui_state": {}, "eshop_country": "DE",
             "native_titlebar": False, "smooth_scroll": True, "pad_scroll": 1.0}
 PREFS = ("native_titlebar", "pad_scroll", "smooth_scroll", "view_mode", "refresh_minutes", "sound_on", "ambient_volume", "fx_volume", "intro", "big_picture",
-         "steam_cc", "ps_locale", "money", "auto_names", "scale", "ui_state", "eshop_country", "classic")
+         "steam_cc", "ps_locale", "money", "auto_names", "scale", "ui_state", "eshop_country", "classic", "my_goty")
 PRIVATE = ("sgdb_key", "sheet_key", "ambience_path")
 # what stays with each PC when you copy Masterlog to another one
 MACHINE_ONLY = ("ambience_path", "heroic_linked", "big_picture", "state_meta", "pair_pending", "joined", "native_titlebar", "pad_scroll")
 # small things kept the same on all your PCs through your sheet's script (version 3)
-SHARED_PREFS = ("classic", "steam_cc", "ps_locale", "money", "auto_names", "eshop_country", "ranking")
+SHARED_PREFS = ("classic", "my_goty", "steam_cc", "ps_locale", "money", "auto_names", "eshop_country", "ranking")
 AUDIO_TYPES = {".mp3": "audio/mpeg", ".ogg": "audio/ogg", ".opus": "audio/ogg", ".m4a": "audio/mp4", ".aac": "audio/aac",
                ".wav": "audio/wav", ".flac": "audio/flac", ".webm": "audio/webm"}
 COPY_LIMIT = 60 * 1024 * 1024  # smaller files are copied next to the settings, so moving the original doesn't break it
@@ -185,6 +185,9 @@ class Api:
         self._art.mc_cover = lambda name: _safe(info.mc_cover, name)
         self._igdb.meta_lookup = self._meta
         self._info = info.Info(self._dir, self._art, self._igdb)
+        import goty
+        import lore
+        self._goty = goty.Goty(self._dir, lore._json)
         self._info.youtube_key = lambda: (self._vault.get("youtube") or {}).get("key")
         self._feeds = feeds.Feeds()
         feeds.REDDIT_APP["id"] = (self._vault.get("reddit") or {}).get("id")
@@ -1311,6 +1314,35 @@ class Api:
 
     def updated(self, games):
         return _safe(self._info.updated, games) or {}
+
+    def goty(self):
+        """Every year's Game of the Year winners (The Game Awards, Golden Joysticks, BAFTA, Steam Awards)."""
+        try:
+            return self._goty.table()
+        except Exception as e:
+            return {"years": [], "error": str(e)}
+
+    def release_years(self, names):
+        """{name: year} for games whose release date is already known; the rest are looked up quietly in the
+        background (a few at a time), so asking again a little later fills them in."""
+        out, missing = {}, []
+        for n in (names or [])[:600]:
+            hit = self._info.cache.get("about", self._info._key({"name": n}))
+            m = re.search(r"(19[789]\d|20\d\d)", str((hit or {}).get("release") or "")) if hit is not None else None
+            if m:
+                out[n] = int(m.group(1))
+            elif hit is None:
+                missing.append(n)
+        if missing and not getattr(self, "_years_busy", False):
+            def fill(batch):
+                self._years_busy = True
+                try:
+                    for n in batch:
+                        _safe(self._info.about, {"name": n})
+                finally:
+                    self._years_busy = False
+            threading.Thread(target=fill, args=(missing[:40],), daemon=True).start()
+        return {"years": out, "pending": len(missing)}
 
     def awards(self, game):
         """Real-world wins and nominations: The Game Awards first, then the Golden Joysticks, BAFTA and the Steam Awards."""
