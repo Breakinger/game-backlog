@@ -1322,27 +1322,91 @@ class Api:
         except Exception as e:
             return {"years": [], "error": str(e)}
 
+    def _release_year(self, name):
+        """When a game first came out, on any platform. Steam's date is the PC release, which can be a port a year or
+        more later (Red Dead Redemption 2: 2018 on consoles, 2019 on PC) and doesn't exist for console games, so it's
+        weighed against IGDB's first release date and Wikipedia ('a 2017 action-adventure game'). An earlier year
+        wins when it's at most five years earlier (a port); much earlier means a remake (Resident Evil 4, 2005 vs
+        2023), and then the version you have counts."""
+        key = info._norm(name)
+        hit = self._info.cache.get("ryear", key)
+        if hit is not None and (hit.get("y") or time.time() - (hit.get("t") or 0) < 7 * 86400):
+            return hit.get("y")
+        y, failed = self._goty.year_of(name), False
+        if not y:
+            yr = lambda v: int(m.group(1)) if (m := re.search(r"\b(19[789]\d|20\d\d)\b", str(v or ""))) else None
+            steam = yr((_safe(self._info.about, {"name": name}) or {}).get("release"))
+            originals = []
+            try:
+                ig = self._igdb.game(name) if self._igdb and self._igdb.configured() else None
+                if ig and ig.get("first_release_date"):
+                    originals.append(time.gmtime(int(ig["first_release_date"])).tm_year)
+            except Exception:
+                failed = True
+            try:
+                import lore
+                w = lore.wikipedia(name)
+                if w:
+                    wy = yr(w.get("description")) or yr((re.search(r"\bis an? ((?:19|20)\d\d)\b", w.get("extract") or "") or [None, None])[1])
+                    if wy:
+                        originals.append(wy)
+            except Exception:
+                failed = True
+            orig = min(originals) if originals else None
+            if steam and orig:
+                y = orig if 0 <= steam - orig <= 5 else steam
+            else:
+                y = steam or orig
+        # nothing found because a site couldn't be reached: look again in an hour rather than in a week
+        stamp = time.time() - (7 * 86400 - 3600 if not y and failed else 0)
+        self._info.cache.put("ryear", key, {"y": y, "t": stamp})
+        return y
+
+    def release_year(self, name):
+        return _safe(self._release_year, name)
+
     def release_years(self, names):
-        """{name: year} for games whose release date is already known; the rest are looked up quietly in the
-        background (a few at a time), so asking again a little later fills them in."""
+        """{name: year} for games whose release year is known; the rest are looked up in the background, four at a
+        time, so asking again a little later fills them in."""
         out, missing = {}, []
-        for n in (names or [])[:600]:
-            hit = self._info.cache.get("about", self._info._key({"name": n}))
-            m = re.search(r"(19[789]\d|20\d\d)", str((hit or {}).get("release") or "")) if hit is not None else None
-            if m:
-                out[n] = int(m.group(1))
-            elif hit is None:
+        for n in (names or [])[:800]:
+            hit = self._info.cache.get("ryear", info._norm(n))
+            if hit is not None and (hit.get("y") or time.time() - (hit.get("t") or 0) < 7 * 86400):
+                if hit.get("y"):
+                    out[n] = hit["y"]
+            else:
                 missing.append(n)
-        if missing and not getattr(self, "_years_busy", False):
-            def fill(batch):
+        with self._lock_years():
+            queue = getattr(self, "_years_queue", None)
+            if queue is None:
+                queue = self._years_queue = []
+            fresh = [n for n in missing if n not in queue]
+            queue.extend(fresh)
+            if queue and not getattr(self, "_years_busy", False):
                 self._years_busy = True
-                try:
-                    for n in batch:
-                        _safe(self._info.about, {"name": n})
-                finally:
-                    self._years_busy = False
-            threading.Thread(target=fill, args=(missing[:40],), daemon=True).start()
-        return {"years": out, "pending": len(missing)}
+                threading.Thread(target=self._fill_years, daemon=True).start()
+            pending = len(queue)
+        return {"years": out, "pending": pending}
+
+    def _lock_years(self):
+        if not hasattr(self, "_years_lock"):
+            self._years_lock = threading.Lock()
+        return self._years_lock
+
+    def _fill_years(self):
+        from concurrent.futures import ThreadPoolExecutor
+        try:
+            with ThreadPoolExecutor(4) as pool:
+                while True:
+                    with self._lock_years():
+                        batch = self._years_queue[:8]
+                    if not batch:
+                        break
+                    list(pool.map(lambda n: _safe(self._release_year, n), batch))
+                    with self._lock_years():
+                        self._years_queue = [n for n in self._years_queue if n not in batch]
+        finally:
+            self._years_busy = False
 
     def awards(self, game):
         """Real-world wins and nominations: The Game Awards first, then the Golden Joysticks, BAFTA and the Steam Awards."""

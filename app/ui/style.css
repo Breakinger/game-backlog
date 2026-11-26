@@ -2004,3 +2004,6 @@ body.chrome:not(.bigpic) .caseview .refreshinfo { right: 70px; }
 .year .y { display: flex; align-items: center; white-space: nowrap; }
 .ycrowns { vertical-align: middle; }
 .ycrowns { font-size: 0; line-height: 0; align-items: center; align-self: center; }
+
+.gpick-other, .gpick-empty { grid-column: 1 / -1; margin: 6px 0 0; }
+.gpick-other { font-size: 13px; color: var(--muted); font-weight: 600; }

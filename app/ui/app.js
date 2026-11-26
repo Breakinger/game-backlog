@@ -900,10 +900,13 @@ async function openGotyPick(year) {
   const pool = collapse(state.games.filter(g => g.status !== "Wishlist" && !g.virtual));
   const paint = years => {
     const q = rankKey($("#gotyPickQ").value || "");
-    const list = pool.filter(g => years[g.name] === +year && (!q || rankKey(g.name).includes(q)))
-      .sort((a, b) => (played(b) - played(a)) || ((b.score ?? -1) - (a.score ?? -1)) || a.name.localeCompare(b.name));
-    $("#gotyPickList").innerHTML = list.length ? list.map(g => `<button type="button" class="gpick ${played(g) ? "" : "unplayed"}" data-gchoose="${esc(g.name)}"><div class="art" data-kind="game" data-id="${g.id}"></div><b>${esc(g.name)}</b><small>${played(g) ? `${esc(statusOf(g))}${g.score != null ? ` · ${scoreText(g.score)}` : ""}` : "Not played yet"}</small></button>`).join("")
-      : `<p class="muted">No games from ${year} found yet${years.__pending ? "" : ". Right-click a game and choose Crown as my Game of the Year to pick it directly."}</p>`;
+    const order = (a, b) => (played(b) - played(a)) || ((b.score ?? -1) - (a.score ?? -1)) || a.name.localeCompare(b.name);
+    const list = pool.filter(g => years[g.name] === +year && (!q || rankKey(g.name).includes(q))).sort(order);
+    // searching also finds your games from other years (or with no known date), in case a date is off
+    const extra = q ? pool.filter(g => years[g.name] !== +year && rankKey(g.name).includes(q)).sort(order).slice(0, 24) : [];
+    const card = (g, other) => `<button type="button" class="gpick ${played(g) ? "" : "unplayed"}" data-gchoose="${esc(g.name)}"><div class="art" data-kind="game" data-id="${g.id}"></div><b>${esc(g.name)}</b><small>${other ? (years[g.name] ? `Came out in ${years[g.name]}` : "Release year unknown") : played(g) ? `${esc(statusOf(g))}${g.score != null ? ` · ${scoreText(g.score)}` : ""}` : "Not played yet"}</small></button>`;
+    $("#gotyPickList").innerHTML = (list.length ? list.map(g => card(g, false)).join("") : `<p class="muted gpick-empty">No ${q ? "matching " : ""}games from ${year} found yet${years.__pending ? "" : ". Search for one by name to pick it anyway."}</p>`)
+      + (extra.length ? `<h4 class="gpick-other">Your other games matching “${esc($("#gotyPickQ").value.trim())}”</h4>${extra.map(g => card(g, true)).join("")}` : "");
     activateArt($("#gotyPickList"));
   };
   const known = {};
@@ -933,10 +936,9 @@ function setMyGoty(year, name) {
 }
 async function crownMine(g) {
   toast(`Checking when ${g.name} came out…`);
-  const a = await Promise.resolve(api?.about(g)).catch(() => null);
-  const m = String(a?.release || "").match(/(19[789]\d|20\d\d)/);
-  if (!m) return toast(`Couldn't find when ${g.name} came out. Choose it from History → Games of the Year instead.`, "err");
-  const year = +m[1], prev = myGoty()[year];
+  const year = await Promise.resolve(api?.release_year(g.name)).catch(() => null);
+  if (!year) return toast(`Couldn't find when ${g.name} came out. Open History, pick the year, and search for it in "Choose your Game of…".`, "err");
+  const prev = myGoty()[year];
   setMyGoty(year, g.name);
   if (prev && prev !== g.name) toast(`${g.name} is your Game of ${year}, replacing ${prev}.`, "ok");
 }

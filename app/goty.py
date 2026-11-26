@@ -178,6 +178,17 @@ def parse_winners(html, all_win=False):
     return out
 
 
+ROMAN = {"ii": "2", "iii": "3", "iv": "4", "v": "5", "vi": "6", "vii": "7", "viii": "8", "ix": "9", "x": "10"}
+
+
+def _key(name):
+    """'The Legend of Zelda: Breath of the Wild' and 'Legend of Zelda - Breath of the Wild' are the same key."""
+    n = re.sub(r"[™®©]", "", (name or "").lower()).replace("&", " and ")
+    n = re.sub(r"^(tom clancy'?s|marvel'?s|sid meier'?s)\s+", "", n)
+    words = [ROMAN.get(w, w) for w in re.sub(r"[^a-z0-9]+", " ", n).split() if w != "the"]
+    return " ".join(words)
+
+
 class Goty:
     def __init__(self, data_dir, fetch_json):
         self.path = os.path.join(data_dir, "goty.json")
@@ -228,6 +239,18 @@ class Goty:
                 os.replace(tmp, self.path)
         finally:
             self.busy = False
+
+    def year_of(self, name):
+        """The year a game came out, when it was up for The Game Awards' Game of the Year (those line-ups are by
+        release year, so they settle ports and re-releases: Red Dead Redemption 2 is 2018, not its 2019 PC port)."""
+        k = _key(name)
+        for y, (w, noms) in TGA.items():
+            if k in {_key(w)} | {_key(n) for n in noms}:
+                return y
+        for y, v in (self.live.get("tga") or {}).items():
+            if v and k in {_key(v[0])} | {_key(n) for n in (v[1] or [])}:
+                return int(y)
+        return None
 
     def table(self):
         """Every year, newest first: {year, tga: {winner, nominees}, gj: [...], bafta, steam}. Refreshes weekly."""
