@@ -14,6 +14,8 @@ import urllib.error
 import urllib.parse
 import urllib.request
 
+IDLE = lambda: {}   # minutes Masterlog spent idling each Steam game for cards (set by main; see cards.py)
+
 from art import similar, same_title, _norm
 import saver
 
@@ -499,7 +501,16 @@ class Accounts:
                     f = facts.setdefault(best["name"], {})
                     f.setdefault("sources", []).append(src)
                     f.setdefault("copies", []).append({"src": src, "platform": a.get("platform") or {"steam": "Steam", "itch": "itch.io"}.get(src), "id": a["id"]})
-                    f["minutes"] = max(f.get("minutes") or 0, a.get("minutes") or 0)
+                    mins = a.get("minutes") or 0
+                    if src == "steam":
+                        try:
+                            idled = int(IDLE().get(str(a.get("appid")), 0))
+                        except Exception:
+                            idled = 0
+                        if idled:
+                            mins = max(0, mins - idled)   # card idling isn't playing: keep the hours real
+                            f["idle_minutes"] = idled
+                    f["minutes"] = max(f.get("minutes") or 0, mins)
                     if a.get("last_played"):
                         f["last_played"] = a["last_played"]
                     if a.get("achievements"):

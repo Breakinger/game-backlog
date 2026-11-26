@@ -1,4 +1,9 @@
 """Masterlog: a console-style library for your games and books, on top of your Google Sheet."""
+import sys as _sys
+if __name__ == "__main__" and "--idle" in _sys.argv:
+    # a card-idling helper: tells Steam one game is running, and nothing else (see cards.py)
+    import cards as _cards
+    _sys.exit(_cards.helper_main(_sys.argv))
 import base64
 import hashlib
 import socket
@@ -90,8 +95,9 @@ class BrowserFetch:
     """Reads a Reddit listing through a hidden window of the app's own browser engine (Edge WebView2). Reddit turns away
     plain requests from apps but serves a normal browser, and since November 2025 it no longer hands out app IDs.
     Map Genie and some game wikis use the same kind of bot check, so their pages are read this way too.
-    Only those sites are ever loaded here, and only to read public pages."""
-    HOSTS = ("www.reddit.com", "old.reddit.com", "mapgenie.io", "store.steampowered.com")
+    Only those sites are ever loaded here. Card idling also reads two of your own Steam pages here (your badges and
+    your licences), using the Steam sign-in this PC's Masterlog windows remember; nothing is ever posted."""
+    HOSTS = ("www.reddit.com", "old.reddit.com", "mapgenie.io", "store.steampowered.com", "steamcommunity.com")
     HOST_SUFFIXES = (".fandom.com", ".wiki.fextralife.com")
 
     def __init__(self):
@@ -211,6 +217,11 @@ class Api:
         feeds.REDDIT_APP["id"] = (self._vault.get("reddit") or {}).get("id")
         self._family = family.Family(self._dir, self._vault)
         self._browser = BrowserFetch()
+        import cards
+        self._cards = cards.Cards(self._dir, self._browser.get)
+        accounts.IDLE = self._cards.idle_minutes   # idled time comes off the Steam hours Masterlog shows
+        import atexit
+        atexit.register(self._cards.shutdown)
         feeds.BROWSER_FETCH["fn"] = self._browser.get
         import guides
         guides.BROWSER = self._browser.get
@@ -1235,6 +1246,61 @@ class Api:
         threading.Thread(target=watch, daemon=True).start()
         return {"ok": True, "done": False}
 
+    # ----- Steam trading card idling (cards.py) -----
+    def cards_view(self, looking=False):
+        c = self._cards
+        if looking and not c.active and not c.scanning and time.time() - (c.data.get("t") or 0) > 3600 and c.data.get("signed_in") is not False:
+            threading.Thread(target=c.scan, daemon=True).start()
+        return c.view()
+
+    def cards_scan(self):
+        threading.Thread(target=self._cards.scan, daemon=True).start()
+        return True
+
+    def cards_start(self):
+        return self._cards.start()
+
+    def cards_stop(self):
+        self._cards.stop("Stopped.")
+        return True
+
+    def cards_settings(self, new=None):
+        return self._cards.settings(new if isinstance(new, dict) else None)
+
+    def cards_skip(self, appid, on=True):
+        self._cards.skip(int(appid), bool(on))
+        return True
+
+    def cards_ignore(self, name):
+        self._cards.ignore(str(name or "")[:120])
+        return True
+
+    def cards_signin(self):
+        """Steam's own sign-in page in a Masterlog window; it closes by itself once your badges page opens."""
+        import webview
+        import cards
+        win = webview.create_window("Sign in to Steam · Masterlog", cards.SIGNIN, width=980, height=780, background_color="#171A21")
+
+        def watch():
+            end = time.time() + 15 * 60
+            while time.time() < end:
+                time.sleep(1.5)
+                try:
+                    url = win.get_current_url() or ""
+                except Exception:
+                    return
+                if re.match(r"https://steamcommunity\.com/(id|profiles)/[^/]+/badges", url):
+                    try:
+                        win.destroy()
+                    except Exception:
+                        pass
+                    self._cards.data["signed_in"] = None
+                    self._cards.note = ""
+                    self._cards.scan()
+                    return
+        threading.Thread(target=watch, daemon=True).start()
+        return True
+
     def steam_family_unlink(self):
         self._family.forget()
         return True
@@ -2051,6 +2117,7 @@ def main():
         fullscreen=full, zoomable=True,
     )
     api._fullscreen = full
+    api._window.events.closed += lambda *a: api._cards.shutdown()
     if platforms.WINDOWS:
         api._window.events.shown += api._setup_chrome
     # served over http://127.0.0.1 rather than file://, so embedded YouTube trailers know where they're playing

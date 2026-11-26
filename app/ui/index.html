@@ -34,6 +34,9 @@
       <svg viewBox="0 0 24 24" width="20" height="20"><path fill="currentColor" d="M3 3h2v18H3zm16 0h2v18h-2zM7 5h2v4H7zm3-1h2v5h-2zm3 2h2v3h-2zM7 11h3v4H7zm4 0h2v4h-2zm3-1h2v5h-2zM7 17h2v3H7zm3 0h3v3h-3zm4 0h2v3h-2zM5 9.5h14v1H5zm0 6h14v1H5z"/></svg>
     </button>
     <button class="icon" id="soundBtn" title="Sound" aria-label="Sound"></button>
+    <button class="icon" id="cardsBtn" title="Card idling" aria-label="Card idling">
+      <svg viewBox="0 0 24 24" width="20" height="20"><path fill="currentColor" d="M8.2 3.1 18.6 5a1.6 1.6 0 0 1 1.3 1.9l-2.6 13.7a1.6 1.6 0 0 1-1.9 1.3L5 20a1.6 1.6 0 0 1-1.3-1.9L6.3 4.4a1.6 1.6 0 0 1 1.9-1.3zm.3 2L6 18.2l9.7 1.8 2.5-13.1zM12 8.5l1 2.3 2.4.4-1.8 1.6.4 2.4-2.2-1.2-2.2 1.1.5-2.4-1.7-1.7 2.4-.3z"/></svg>
+    </button>
     <button class="icon" id="claudeBtn" title="Ask Claude about your library" aria-label="Ask Claude">
       <svg viewBox="0 0 24 24" width="20" height="20"><path fill="currentColor" d="M12 2l1.8 6.2L20 10l-6.2 1.8L12 18l-1.8-6.2L4 10l6.2-1.8zM19 15l.9 2.1L22 18l-2.1.9L19 21l-.9-2.1L16 18l2.1-.9z"/></svg>
     </button>
@@ -265,6 +268,22 @@
   <div class="row"><span class="spacer"></span><button type="button" class="ghost" id="pairClose">Close</button></div>
 </dialog>
 
+<dialog id="cardsDialog" class="settings wide cardsdlg" aria-labelledby="cardsTitle">
+  <form method="dialog">
+    <div class="cardshead"><h2 id="cardsTitle">Card idling</h2><span class="cstate" id="cardsState" aria-live="polite"></span></div>
+    <p class="muted">Masterlog runs your Steam games in the background so they drop their trading cards. Nothing is downloaded or opened: Steam simply sees the game as running. When you start a real game, idling pauses until you're done.</p>
+    <div class="cardsbar" id="cardsBar"></div>
+    <div class="cardsopts">
+      <label class="check"><input type="checkbox" id="cInvisible"> Go invisible on Steam while idling, and back to online when it stops, so friends don't see a stream of games</label>
+      <label class="check"><input type="checkbox" id="cRefund"> Leave games bought in the last 14 days alone while they're under 2 hours, so you can still refund them</label>
+      <label class="cpar">Games idled together until each passes 2 hours <select id="cParallel"><option value="1">1</option><option value="4">4</option><option value="8">8</option><option value="16">16</option><option value="32">32</option></select></label>
+    </div>
+    <p class="fine cnote" id="cardsNote" aria-live="polite"></p>
+    <div class="cardlist" id="cardsList"></div>
+    <p class="fine">Masterlog never sees your Steam password: it reads your own badges and licences pages through Steam's sign-in in a Masterlog window. Time spent idling is counted per game and kept apart from the hours you played.</p>
+    <div class="row"><span class="spacer"></span><button value="cancel" class="ghost">Close</button></div>
+  </form>
+</dialog>
 <dialog id="gotyDialog" class="settings wide gotydlg" aria-labelledby="gotyPickTitle">
   <form method="dialog"><h2 id="gotyPickTitle">Your Game of the Year</h2>
     <p class="muted">Games you have that came out this year. The one you crown wears a white crown everywhere in Masterlog.</p>
@@ -316,6 +335,7 @@
 <script src="js/06-settings.js"></script>
 <script src="js/07-input.js"></script>
 <script src="js/08-home.js"></script>
+<script src="js/08b-cards.js"></script>
 <script src="js/09-start.js"></script>
 </body>
 </html>

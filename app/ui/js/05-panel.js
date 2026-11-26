@@ -375,6 +375,7 @@ function gameOverviewHTML(g) {
   if (upgradeLabel(g)) kv.push(["Upgrade", upgradeLabel(g)]);
   const fa = factsOf(g);
   if (fa.minutes) kv.push([`Played (${(fa.sources || []).map(s => ({ steam: "Steam", psn: "PlayStation", heroic: "Heroic", itch: "itch.io" }[s])).join(", ")})`, `${Math.round(fa.minutes / 6) / 10} h${fa.last_played ? ` · last ${typeof fa.last_played === "number" ? ago(fa.last_played) : ago(String(fa.last_played).slice(0, 10))}` : ""}`]);
+  if (fa.idle_minutes) kv.push(["Idled for cards", `${Math.round(fa.idle_minutes / 6) / 10} h, not counted as played`]);
   if (fa.achievements) kv.push(["Achievements", `${fa.achievements.done} / ${fa.achievements.total}`]);
   if (fa.trophies) kv.push(["Trophies", `${fa.trophies.progress}%${fa.trophies.platinum ? " · Platinum earned" : ""}`]);
   if (g.migrate_to) kv.push(["Migrate to", g.migrate_to]);

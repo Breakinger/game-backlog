@@ -33,6 +33,16 @@ When a new version is out, an **Update** button appears in the top bar. Click it
 - PS4 discs and Switch 1 games show whether the upgrade to PS5 or Switch 2 is free or paid.
 - Epic and GOG games are grouped as Heroic in the library and launch through Heroic.
 
+## Steam card idling
+
+The cards button in the top bar runs your Steam games in the background so they drop their trading cards.
+
+- It reads which games still drop cards from your own Steam badges page, through Steam's sign-in in a Masterlog window. Masterlog never sees your password.
+- Steam sees the game as running through Valve's own Steam library (steam_api), taken from a game you have installed (on Windows it must carry Valve's signature). Nothing connects to game servers, and idling pauses while you play a real game.
+- Optional: Steam goes invisible while idling and back to online when it stops.
+- Optional, on by default: games bought in the last 14 days are left alone while they're under 2 hours, so they stay refundable.
+- Idled time is counted per game and kept apart from the hours you played.
+
 ## Controls
 
 - Arrow keys or a gamepad move around, Enter opens a game, Esc closes.

@@ -2219,3 +2219,27 @@ form:has(select[name="platform"] option:checked:is([value="PS5"], [value="PS4"],
 .sparks { top: -4%; height: 34%; }
 .cosmos.aura { inset: -4% -6%; filter: blur(8px); }
 .classic-award.oncover { left: -7%; top: -5%; width: 34%; }
+
+/* card idling */
+#cardsBtn.on { color: #7CF0B0; background: rgba(46, 204, 113, .16); box-shadow: inset 0 0 0 1px rgba(124, 240, 176, .45); }
+.cardsdlg { width: min(760px, 94vw); }
+.cardshead { display: flex; align-items: center; gap: 12px; }
+.cstate { font-size: 12px; font-weight: 700; padding: 3px 10px; border-radius: 999px; background: rgba(255,255,255,.08); color: var(--silver); }
+.cstate.on { background: rgba(46, 204, 113, .18); color: #7CF0B0; } .cstate.paused { background: rgba(255, 197, 49, .16); color: #FFD46B; }
+.cardsbar { display: flex; flex-wrap: wrap; align-items: center; gap: 12px; }
+.cardsbar .primary.stop { background: #8C2F39; border-color: #C24A57; }
+.csum { color: var(--silver); font-size: 14px; } .csum b { color: #fff; font-size: 16px; }
+.cardsopts { display: grid; gap: 8px; }
+.settings .cpar { display: flex; align-items: center; gap: 10px; } .settings .cpar select { padding: 6px 10px; }
+.cnote:empty { display: none; } .cnote { color: #FFD46B; }
+.cardlist { display: grid; gap: 6px; max-height: 46vh; overflow: auto; padding-right: 4px; }
+.crow { display: grid; grid-template-columns: 92px 1fr auto auto; gap: 12px; align-items: center; padding: 6px 10px 6px 6px; border-radius: 10px; background: rgba(6, 12, 31, .45); border: 1px solid var(--line); }
+.crow img { width: 92px; height: 34px; object-fit: cover; border-radius: 5px; background: #0B1124; }
+.cinfo { display: grid; gap: 2px; min-width: 0; } .cinfo b { font-weight: 600; color: #fff; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.cinfo small { color: var(--muted); font-size: 12px; } .cinfo .cwhy { color: #FFD46B; }
+.cchip { font-size: 11.5px; font-weight: 700; padding: 2px 9px; border-radius: 999px; background: rgba(255,255,255,.07); color: var(--silver); white-space: nowrap; }
+.st-idling .cchip { background: rgba(46, 204, 113, .18); color: #7CF0B0; } .st-starting .cchip { background: rgba(127, 166, 255, .16); color: #A9C4FF; }
+.st-held .cchip { background: rgba(255, 197, 49, .14); color: #FFD46B; } .st-done { opacity: .6; }
+.st-idling { border-color: rgba(124, 240, 176, .45); }
+.settings label.cskip { display: flex; align-items: center; gap: 6px; font-size: 12.5px; color: var(--muted); cursor: pointer; }
+.cempty { text-align: center; padding: 16px 0; }

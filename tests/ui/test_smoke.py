@@ -123,3 +123,25 @@ def test_books(page):
     page.wait_for_timeout(800)
     page.evaluate("switchCatalog('games'); 1")
     ok(page)
+
+
+def test_card_idling(page):
+    page.keyboard.press("Escape")
+    page.evaluate("document.querySelectorAll('dialog[open]').forEach(d => d.close())")
+    page.click("#cardsBtn")
+    page.wait_for_selector("#cardsDialog[open] .crow")
+    assert page.locator("#cardsDialog .crow").count() >= 2
+    assert page.locator("#cardsBar [data-cards]").count() >= 1
+    page.check("#cardsDialog [data-cskip]") if page.locator("#cardsDialog [data-cskip]:not(:checked)").count() else None
+    page.evaluate("document.querySelector('#cardsDialog').close()")
+    ok(page)
+
+
+def test_diagnostics(page):
+    page.evaluate("document.querySelectorAll('dialog[open]').forEach(d => d.close())")
+    page.click("#settingsBtn")
+    page.click("[data-stab=health]")
+    page.click("[data-diag=show]")
+    page.wait_for_function("document.querySelector('#diagText').value.length > 20")
+    page.evaluate("document.querySelectorAll('dialog[open]').forEach(d => d.close())")
+    ok(page)
