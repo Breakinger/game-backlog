@@ -17,8 +17,6 @@ REDDIT_UA = "windows:masterlog:1.0 (personal game backlog app)"
 FRESH = 15 * 60   # each source is fetched at most every 15 minutes
 
 SECTIONS = {
-    "leaks": [("reddit", "GamingLeaksAndRumours", "r/GamingLeaksAndRumours")],
-    "marvel": [("reddit", "MarvelStudiosSpoilers", "r/MarvelStudiosSpoilers"), ("reddit", "DCULeaks", "r/DCULeaks")],
     "breaking": [
         ("rss", ["https://feeds.feedburner.com/ign/games-all", "https://www.ign.com/rss/v2/articles/feed?categories=games"], "IGN"),
         ("rss", ["https://www.pcgamer.com/rss/"], "PC Gamer"),

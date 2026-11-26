@@ -1,3 +1,4 @@
 pywebview>=5.1
 pyinstaller>=6.10
 cryptography>=42
+Pillow>=10

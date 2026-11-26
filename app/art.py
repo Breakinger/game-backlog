@@ -2,6 +2,7 @@
 Store's portrait cover), then IGDB's box art, then SteamGridDB, and are cached on disk so each is downloaded once."""
 import base64
 import difflib
+import io
 import json
 import os
 import re
@@ -76,7 +77,7 @@ def companies_agree(meta, developers, publishers):
     return bool(mine & theirs)
 
 
-COVER_VERSION = 4   # 4: covers must be the cover shape (2:3); box scans with console banners and wide art are passed over
+COVER_VERSION = 5   # 5: no platform strips printed on the art (Masterlog draws its own band); 4: the cover shape (2:3)
 APPID_VERSION = 2  # raising this re-downloads every cover you didn't pick yourself
 PC_PLATFORMS = {"Steam", "GOG", "Epic Games", "EA", "EA App", "Ubisoft Connect", "PC (Other)", "itch.io", "Emulation", ""}
 PS_PLATFORMS = {"PS5", "PS4", "PS2"}
@@ -134,6 +135,77 @@ def image_size(b):
     except Exception:
         pass
     return None
+
+
+try:
+    from PIL import Image
+except Exception:   # the cover still works without it, just without strip detection
+    Image = None
+
+
+def _kind(c):
+    r, g, b = c
+    if min(c) > 205:
+        return "white"
+    if max(c) < 42:
+        return "black"
+    if r > 150 and g < 80 and b < 95:
+        return "red"
+    if b > 120 and b > r + 45 and b >= g:
+        return "blue"
+    if g > 130 and g > r + 35 and g > b + 35:
+        return "green"
+    return None
+
+
+def banner_rows(img):
+    """How many pixel rows at the top of box art are a platform strip (the PS5 white bar, the PS4 blue bar, Switch red,
+    Xbox white or green, PS2 black), or 0. A strip is a band of one colour across the top with a clean edge under it."""
+    if Image is None or not img:
+        return 0
+    try:
+        im = Image.open(io.BytesIO(img)).convert("RGB")
+    except Exception:
+        return 0
+    W, H = im.size
+    if W < 50 or H < 50:
+        return 0
+    w = 64
+    h = max(16, round(w * H / W))
+    px = im.resize((w, h)).load()
+
+    def share(y, kind):
+        return sum(1 for x in range(w) if _kind(px[x, y]) == kind) / w
+    counts = {}
+    for x in range(w):
+        k = _kind(px[x, 1])
+        counts[k] = counts.get(k, 0) + 1
+    band = max((k for k in counts if k), key=lambda k: counts[k], default=None)
+    if not band or counts[band] / w < 0.55:
+        return 0
+    end = 0
+    for y in range(1, int(h * 0.2) + 1):
+        if share(y, band) < 0.42:
+            end = y
+            break
+    if not end or not (0.04 <= end / h <= 0.17):
+        return 0
+    below = [share(y, band) for y in range(end, min(h, end + 3))]
+    need = 0.25 if band in ("white", "black") else 0.35
+    if max(below) > need:
+        return 0
+    return min(H - 1, round((end + 1) / h * H))
+
+
+def without_banner(img):
+    """The art with its platform strip cut off (JPEG), or None when there isn't one."""
+    rows = banner_rows(img)
+    if not rows:
+        return None
+    im = Image.open(io.BytesIO(img)).convert("RGB")
+    out = io.BytesIO()
+    im.crop((0, rows, im.size[0], im.size[1])).save(out, "JPEG", quality=92)
+    return out.getvalue()
 
 
 def shape_off(img):
@@ -312,17 +384,22 @@ class Art:
         are kept only as a last resort, closest shape first."""
         best, best_src, best_off = None, None, 9
         for img, src in self._official_all(name, platform, hints):
+            clean = without_banner(img)
+            if clean:                       # box art with a console strip: keep the art, lose the strip, rank it lower
+                img, penalty = clean, 0.1
+            else:
+                penalty = 0
             off = shape_off(img)
-            if off <= SHAPE_OK:
+            if off <= SHAPE_OK and not penalty:
                 return img, src
-            if off < best_off:
-                best, best_src, best_off = img, src, off
+            if off + penalty < best_off:
+                best, best_src, best_off = img, src, off + penalty
         if self.sgdb_key and best_off > SHAPE_OK:   # SteamGridDB's covers are made to the exact shape
             appid = hints.get("appid") or self.steam_appid(name)
             try:
                 for x in self.sgdb_grids(name, appid, limit=6):
                     img = self._first_image([x["url"]])
-                    if img and shape_off(img) <= SHAPE_OK:
+                    if img and shape_off(img) <= SHAPE_OK and not banner_rows(img):
                         return img, "sgdb"
             except Exception:
                 pass
@@ -354,7 +431,7 @@ class Art:
                     img = self._first_image([u])
                     if img:
                         yield img, src
-                        if shape_off(img) <= SHAPE_OK:
+                        if shape_off(img) <= SHAPE_OK and not banner_rows(img):
                             return
             except Exception:
                 continue
@@ -437,7 +514,8 @@ class Art:
             if have and entry.get("v", 1) < COVER_VERSION and entry.get("src") not in USER_CHOSEN and plat_group(entry.get("plat", "")) == plat_group(platform or ""):
                 try:
                     with open(os.path.join(self.dir, fname), "rb") as fh:
-                        if shape_off(fh.read(65536)) <= SHAPE_OK:
+                        data = fh.read()
+                        if shape_off(data) <= SHAPE_OK and not banner_rows(data):
                             entry["v"] = COVER_VERSION    # already the right shape: keep it
                             self._save()
                 except OSError:

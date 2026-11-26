@@ -219,10 +219,16 @@ class Api:
 
             def _ui(self):
                 """The app's own page, served from http://localhost so embedded Twitch and YouTube players accept it."""
-                name = os.path.basename(urllib.parse.unquote(self.path[4:].split("?", 1)[0])) or "index.html"
-                types = {".html": "text/html; charset=utf-8", ".js": "text/javascript; charset=utf-8", ".css": "text/css; charset=utf-8"}
+                rel = urllib.parse.unquote(self.path[4:].split("?", 1)[0]).strip("/") or "index.html"
+                parts = rel.split("/")
+                # the page's own files, and pictures in its img folder; nothing else, and never outside the ui folder
+                if len(parts) > 2 or (len(parts) == 2 and parts[0] != "img") or any(p in ("", ".", "..") for p in parts):
+                    return self.send_error(404)
+                name = parts[-1]
+                types = {".html": "text/html; charset=utf-8", ".js": "text/javascript; charset=utf-8", ".css": "text/css; charset=utf-8",
+                         ".png": "image/png", ".svg": "image/svg+xml", ".webp": "image/webp", ".jpg": "image/jpeg"}
                 ext = os.path.splitext(name)[1].lower()
-                path = resource(os.path.join("ui", name))
+                path = resource(os.path.join("ui", *parts))
                 if ext not in types or not os.path.isfile(path):
                     return self.send_error(404)
                 with open(path, "rb") as f:
@@ -1404,6 +1410,8 @@ class Api:
         sync = (self._vault.get("sync") or {}).get("key")
         if sync:
             secret = {k: v for k, v in self._vault._data.items() if k not in ("sync", "device")}
+            if self._settings.get("sgdb_key"):
+                secret["_sgdb"] = self._settings["sgdb_key"]          # the SteamGridDB key travels the same sealed way
             out["secrets"] = {"blob": base64.b64encode(pair.seal(base64.b64decode(sync), secret, b"masterlog secrets")).decode(),
                               "hash": hashlib.sha256(json.dumps(secret, sort_keys=True).encode()).hexdigest()}
         return out
@@ -1434,6 +1442,11 @@ class Api:
                 raise ValueError("no sealing key yet")
             if sync and data and data.get("blob"):
                 secret = pair.unseal(base64.b64decode(sync), base64.b64decode(data["blob"]), b"masterlog secrets")
+                sg = secret.pop("_sgdb", None)
+                if sg and sg != self._settings.get("sgdb_key"):
+                    self._settings["sgdb_key"] = sg
+                    self._art.sgdb_key = sg
+                    self._write_settings()
                 for k in set(self._vault._data) - set(secret) - {"sync", "device"}:
                     self._vault.set(k, None)
                 for k, v in secret.items():

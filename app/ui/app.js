@@ -40,7 +40,7 @@ const FALLBACK_OPTIONS = {
 const TABS = {
   games: [["home", "Home"], ["library", "Library"], ["wishlist", "Wishlist"], ["deals", "Deals"], ["played", "Completed"], ["ranking", "Top 100"], ["stats", "Your years"]],
   books: [["shelf", "Shelf"], ["books", "All books"], ["bookyears", "Read"]],
-  news: [["leaks", "Leaks & rumours"], ["breaking", "Breaking news"], ["yours", "Your games"], ["marvel", "Marvel & DC"]],
+  news: [["breaking", "Breaking news"], ["yours", "Your games"]],
 };
 
 const state = {
@@ -48,7 +48,7 @@ const state = {
   games: [], plays: [], books: [], options: { games: {}, plays: {}, books: {} }, canEdit: false,
   syncedAt: null, error: null, settings: {}, updated: {}, facts: {}, candidates: [],
   view: "home", focusId: null, mode: "covers",
-  filter: { q: "", status: new Set(), plats: new Set(), playOn: "All", prio: new Set(), formats: new Set(), sort: "priority" },
+  filter: { q: "", status: new Set(), plats: new Set(), prio: new Set(), formats: new Set(), sort: "priority" },
   bfilter: { q: "", status: new Set(), prio: new Set(), formats: new Set(), author: null, series: null, sort: "series" },
   openYears: new Set([new Date().getFullYear()]),
 };
@@ -207,7 +207,7 @@ function effectLayer(g) {
   const st = statusOf(g);
   let out = "";
   const rk = rankOf(g);
-  if (isClassic(g)) out += `<div class="cosmos aura" aria-hidden="true"><i></i><i></i></div><span class="classic-award oncover" title="All Time Classic${rk ? ` · #${rk} in your Top 100` : ""}">${CLASSIC_IMG}</span>`;
+  if (isClassic(g)) out += `<div class="flames classic-flames" aria-hidden="true"><i></i><i></i><i></i><i></i><i></i></div><div class="cosmos aura" aria-hidden="true"><i></i><i></i></div><span class="classic-award oncover" title="All Time Classic${rk ? ` · #${rk} in your Top 100` : ""}">${CLASSIC_IMG}</span>`;
   else if (rk && rk <= 10) { const t = rankTier(rk); out += `<span class="favstar award t-${t}" title="${TIER_NAME[t]} · #${rk} in your Top 100">${awardSVG(t)}<b>${rk}</b></span>`; }
   if (g.priority === "Extreme" && g.status !== "Completed" && g.status !== "Dropped") out += `<div class="flames" aria-hidden="true"><i></i><i></i><i></i><i></i><i></i></div>`;
   if ((st === "Paused" || g.status === "Paused") && st !== "Second chance") out += `<div class="cobweb" aria-hidden="true"><svg viewBox="0 0 60 60"><path d="M0 0L60 60M0 0L60 22M0 0L22 60M0 0L60 0M0 0L0 60M10 0Q8 8 0 10M22 0Q18 18 0 22M36 0Q30 30 0 36M52 0Q42 42 0 52"/></svg></div><div class="dust" aria-hidden="true"></div>`;
@@ -273,7 +273,7 @@ function shelves() {
     { title: "Replays", items: G.filter(g => (g.runs || 0) > 1 && g.status !== "Wishlist").sort(byDone), view: "library", preset: { status: "Replays" } },
     { title: "Newly updated", items: fresh, view: "library" },
     { title: "Up next", items: G.filter(g => g.status === "Library").sort(byPrio).slice(0, 24), view: "library", preset: { status: "Library" } },
-    { title: "On the Steam Deck", items: G.filter(g => g.play_on === "Steam Deck" && ["Library", "Playing", "Paused"].includes(g.status)).sort(byPrio), view: "library", preset: { playOn: "Steam Deck" } },
+    { title: "On the Steam Deck", items: G.filter(g => g.play_on === "Steam Deck" && ["Library", "Playing", "Paused"].includes(g.status)).sort(byPrio), view: "library", preset: { plats: ["deck"] } },
     { title: "Upgrade these to PS5 or Switch 2", items: G.filter(g => g.upgrade && g.upgrade !== "No upgrade" && UPGRADE_TO[g.platform] && g.status !== "Completed" && !g.upgrade_owned && !factsOf(g).ps5_version), view: "library" },
     { title: "Wishlist, top priority", items: G.filter(g => g.status === "Wishlist").sort(byPrio).slice(0, 24), view: "wishlist" },
     { title: "Plan to migrate", items: G.filter(migrating), view: "library", preset: { status: "Plan to migrate" } },
@@ -379,6 +379,12 @@ function setClassic(g) {
   const before = state.settings.classic;
   state.settings.classic = g ? g.name : "";
   api?.set_pref("classic", state.settings.classic);
+  // the classic stands above the Top 100, not in it
+  if (g && state.ranking?.length) {
+    const k = rankKey(g.name);
+    const at = state.ranking.findIndex(n => rankKey(n) === k || rankMatch(n)?.g === g);
+    if (at >= 0) { state.ranking.splice(at, 1); rankIndex = null; saveRanking(`${g.name} left the Top 100 to stand above it.`); }
+  }
   render();
   if (g) { try { FX.play.notify(); } catch {} toast(`${g.name} is your All Time Classic.`, "party", before && rankKey(before) !== rankKey(g.name) ? { label: "Undo", run: () => setClassic(state.games.find(x => x.name === before) || { name: before }) } : null); }
   else toast("The All Time Classic award is free again.");
@@ -430,7 +436,7 @@ async function addMissingRanked() {
   if (!api || !state.canEdit || state.rankingLocal || !state.games.length || !(state.ranking || []).length) return;
   rankOf({ name: "" });
   const tried = new Set(uiGet("rank_added", []));
-  const missing = state.ranking.filter(n => !rankMatches.get(n) && !tried.has(rankKey(n)));
+  const missing = state.ranking.filter(n => !rankMatches.get(n) && !tried.has(rankKey(n)) && rankKey(n) !== rankKey(state.settings.classic || ""));
   if (!missing.length || addMissingRanked.busy) return;
   addMissingRanked.busy = true;
   uiSet("rank_added", [...tried, ...missing.map(rankKey)]);
@@ -877,9 +883,7 @@ function filtered() {
     if (state.view === "library" && g.status === "Wishlist" && !f.status.has("Wishlist")) return false;
     // inside one group any match counts; across groups every group has to match
     if (f.status.size && ![...f.status].some(st => SPECIAL[st] ? SPECIAL[st](g) : statusOf(g) === st || (st === "Dropped" && g.status === "Dropped"))) return false;
-    if (f.plats.size && !f.plats.has(groupOf(g.platform))) return false;
-    if (f.playOn === "Console" && !CONSOLES.has(g.platform)) return false;
-    if (["PC", "Steam Deck"].includes(f.playOn) && (g.play_on !== f.playOn || CONSOLES.has(g.platform))) return false;
+    if (f.plats.size && !PLAT_LEAVES.some(l => f.plats.has(l.key) && l.match(g))) return false;
     if (f.prio.size && !f.prio.has(g.priority || "None")) return false;
     if (f.formats.size && !f.formats.has(g.format || "Digital")) return false;
     if (q && !`${g.name} ${g.genre} ${g.developer} ${g.publisher} ${g.platform}`.toLowerCase().includes(q)) return false;
@@ -908,23 +912,47 @@ function applyScale(v, save) {
   if (save) { clearTimeout(applyScale.t); applyScale.t = setTimeout(() => api?.set_pref("scale", v), 400); }
 }
 const modeSwitch = () => `<div class="seg mode" data-mode><button aria-pressed="${state.mode === "covers"}" data-v="covers" title="Covers">▦ Covers</button><button aria-pressed="${state.mode === "list"}" data-v="list" title="List">☰ List</button></div>`;
+/* where you play: PC (Steam, Heroic, Exiled, itch.io), Consoles, Handhelds; pick as many as you like */
+const PLAT_TREE = [
+  { group: "PC", items: [
+    { key: "steam", label: "Steam", c: "#66C0F4", match: g => g.platform === "Steam" },
+    { sub: "Heroic", c: "#9F7AEA", items: [{ key: "epic", label: "Epic", match: g => g.platform === "Epic Games" }, { key: "gog", label: "GOG", match: g => g.platform === "GOG" }] },
+    { sub: "Exiled", c: "#FF6B6B", items: [{ key: "ea", label: "EA", match: g => g.platform === "EA" || g.platform === "EA App" }, { key: "ubisoft", label: "Ubisoft", match: g => g.platform === "Ubisoft Connect" }] },
+    { key: "itch", label: "itch.io", c: "#FA5C5C", match: g => g.platform === "itch.io" },
+    { key: "pcother", label: "Other PC", c: "#ADB5BD", match: g => g.platform === "PC (Other)" || g.platform === "Emulation" },
+  ] },
+  { group: "Consoles", items: [
+    { key: "ps5", label: "PlayStation 5", c: "#3D8BFF", match: g => g.platform === "PS5" || g.platform === "PS4" },
+    { key: "ps2", label: "PlayStation 2", c: "#C9D1DC", match: g => g.platform === "PS2" },
+  ] },
+  { group: "Handhelds", items: [
+    { key: "switch", label: "Nintendo Switch 2", c: "#FF3B4A", match: g => g.platform === "Switch 2" || g.platform === "Switch" },
+    { key: "deck", label: "Steam Deck", c: "#1A9FFF", match: g => g.play_on === "Steam Deck" },
+  ] },
+];
+const PLAT_LEAVES = PLAT_TREE.flatMap(t => t.items.flatMap(i => i.sub ? i.items.map(x => ({ ...x, c: i.c })) : [i]));
+function platPicker(f) {
+  const has = new Set(PLAT_LEAVES.filter(l => state.games.some(l.match)).map(l => l.key));
+  const leaf = (l, c) => `<button type="button" class="pleaf" data-pleaf="${l.key}" aria-pressed="${f.plats.has(l.key)}" style="--c:${c || l.c}">${esc(l.label)}</button>`;
+  const allOn = keys => keys.length && keys.every(k => f.plats.has(k));
+  return `<div class="plats" role="group" aria-label="Where you play">${PLAT_TREE.map(t => {
+    const items = t.items.map(i => i.sub ? { ...i, items: i.items.filter(x => has.has(x.key)) } : i).filter(i => i.sub ? i.items.length : has.has(i.key));
+    if (!items.length) return "";
+    const keys = items.flatMap(i => i.sub ? i.items.map(x => x.key) : [i.key]);
+    return `<div class="pgroup"><button type="button" class="phead" data-pgroup="${keys.join(",")}" aria-pressed="${allOn(keys)}">${t.group}</button>${items.map(i => i.sub
+      ? `<span class="psub" style="--c:${i.c}"><button type="button" class="psubhead" data-pgroup="${i.items.map(x => x.key).join(",")}" aria-pressed="${allOn(i.items.map(x => x.key))}">${i.sub}</button>${i.items.map(x => leaf(x, i.c)).join("")}</span>`
+      : leaf(i)).join("")}</div>`;
+  }).join("")}</div>`;
+}
 function libraryHTML() {
   const f = state.filter;
   const statuses = state.view === "wishlist" ? [] : state.view === "played" ? ["Completed", "Dropped", "Second chance", "Replays"] : ["Library", "Playing", "Paused", "Completed", "Dropped", "Second chance", "Wishlist", "Live service", "Modpacks", "Replays", "Plan to migrate"];
-  const present = new Set(state.games.map(g => groupOf(g.platform)));
-  const groups = [...new Set(Object.keys(PLAT).map(groupOf))].filter(p => present.has(p));
-  const chips = groups.map(p => {
-    const c = GROUP_STYLE[p] || PLAT[p] || PLAT_FALLBACK;
-    const label = GROUP_LABEL[p] || p;
-    return `<button class="chip" data-plat="${esc(p)}" aria-pressed="${f.plats.has(p)}" style="--c:${c.chip};--t:${c.chipText}"><i></i>${esc(label)}</button>`;
-  }).join("");
   const list = filtered();
-  const active = f.status.size + f.prio.size + f.formats.size + f.plats.size + (f.playOn !== "All") + !!f.q + !!f.genre + !!f.studio;
+  const active = f.status.size + f.prio.size + f.formats.size + f.plats.size + !!f.q + !!f.genre + !!f.studio;
   const pinned = [f.genre ? `<button class="chip on" data-unpin="genre">Genre: ${esc(f.genre.join(", "))} ✕</button>` : "", f.studio ? `<button class="chip on" data-unpin="studio">Made by: ${esc(f.studio.join(", "))} ✕</button>` : ""].join("");
   return `<div class="toolbar">
       <div class="line">
         <input class="search" id="search" type="search" placeholder="Search games, genres, studios" value="${esc(f.q)}">
-        ${seg(f, "playOn", ["All", "PC", "Steam Deck", "Console"])}
         ${scaleSlider()}
         <select class="pick" id="sort">${[["priority", "Sort by priority"], ["name", "Sort by name"], ["score", "Sort by score"], ["recent", "Recently finished"], ["hours", "Most hours"], ["platform", "Sort by platform"]].map(([v, l]) => `<option value="${v}" ${f.sort === v ? "selected" : ""}>${l}</option>`).join("")}</select>
         ${modeSwitch()}
@@ -933,9 +961,9 @@ function libraryHTML() {
         ${active ? `<button class="ghost small" id="clearFilters">Clear filters (${active})</button>` : ""}
         ${state.canEdit ? `<button class="ghost small" data-add="games">+ Add game</button>${state.view === "wishlist" ? `<button class="ghost small" data-itch>Browse itch.io</button>` : `<button class="ghost small" data-modpacks>+ Modpack</button>`}` : ""}
       </div>
-      ${statuses.length ? `<div class="line">${multi(f.status, "status", statuses)}</div>` : ""}
-      <div class="line">${multi(f.prio, "prio", [...Object.keys(PRIO_ORDER), "None"], { None: "No priority" })}${multi(f.formats, "formats", ["Physical", "Digital"])}</div>
-      <div class="line">${chips}</div>
+      ${statuses.length ? `<div class="line frow frow-status">${multi(f.status, "status", statuses)}</div>` : ""}
+      <div class="line frow frow-heat">${multi(f.prio, "prio", [...Object.keys(PRIO_ORDER), "None"], { None: "No priority" })}${multi(f.formats, "formats", ["Physical", "Digital"])}</div>
+      <div class="line frow frow-plats">${platPicker(f)}</div>
       ${pinned ? `<div class="line">${pinned}</div>` : ""}
     </div>
     ${!list.length ? `<p class="empty">No games match these filters. Clear the search or pick another platform.</p>`
@@ -1086,8 +1114,8 @@ function bookLibraryHTML() {
       ${state.canEdit ? `<button class="ghost small" data-add="books">+ Add book</button>` : ""}
       <button class="ghost small walkbtn" data-walk title="Walk through your bookshelves (Ctrl+L)">Walk the shelves</button>
     </div>
-    <div class="line">${multi(asSet(f.status), "status", opts("books", "status")).replace('data-multi="status"', 'data-bmulti="status"')}</div>
-    <div class="line">${multi(asSet(f.prio), "prio", [...Object.keys(PRIO_ORDER), "None"], { None: "No priority" }).replace('data-multi="prio"', 'data-bmulti="prio"')}${multi(asSet(f.formats), "formats", opts("books", "format")).replace('data-multi="formats"', 'data-bmulti="formats"')}</div>
+    <div class="line frow frow-status">${multi(asSet(f.status), "status", opts("books", "status")).replace('data-multi="status"', 'data-bmulti="status"')}</div>
+    <div class="line frow frow-heat">${multi(asSet(f.prio), "prio", [...Object.keys(PRIO_ORDER), "None"], { None: "No priority" }).replace('data-multi="prio"', 'data-bmulti="prio"')}${multi(asSet(f.formats), "formats", opts("books", "format")).replace('data-multi="formats"', 'data-bmulti="formats"')}</div>
     ${f.author || f.series ? `<div class="line">${f.author ? `<button class="chip on" data-bunpin="author">By ${esc(f.author)} ✕</button>` : ""}${f.series ? `<button class="chip on" data-bunpin="series">Series: ${esc(f.series)} ✕</button>` : ""}</div>` : ""}
     </div>
     ${!list.length ? `<p class="empty">No books match.</p>` : state.mode === "list" ? bookListHTML(list) : `<div class="grid books-grid">${list.map(b => bookHTML(b)).join("")}</div>`}`;
@@ -2039,6 +2067,19 @@ function bindGlobal() {
   $("#coverFile").addEventListener("click", () => customCover(true));
   $("#coverAuto").addEventListener("click", () => customCover(false));
   $("#ambClear").addEventListener("click", () => chooseAmbience(true));
+  // the top bar steps out of the way once you scroll; the little arrow brings it back
+  const mainEl = $("#view"), peekBtn = $("#barPeek");
+  mainEl.addEventListener("scroll", () => {
+    const y = mainEl.scrollTop, b = document.body.classList;
+    if (y > 90 && !b.contains("bar-away")) b.add("bar-away");
+    else if (y < 30 && b.contains("bar-away")) { b.remove("bar-away", "bar-peek"); peekBtn.setAttribute("aria-expanded", "false"); }
+  }, { passive: true });
+  peekBtn.addEventListener("click", () => {
+    const on = document.body.classList.toggle("bar-peek");
+    peekBtn.setAttribute("aria-expanded", String(on));
+    peekBtn.title = on ? "Hide the top bar" : "Show the top bar";
+    try { FX.play.tab(); } catch {}
+  });
   $("#copyScript").addEventListener("click", copyScript);
   $("#copyManifest").addEventListener("click", copyManifest);
   document.querySelectorAll("[data-stab]").forEach(b => b.addEventListener("click", () => showSettingsTab(b.dataset.stab)));
@@ -2096,13 +2137,17 @@ function bindGlobal() {
     if (more) {
       const s = shelves()[+more.dataset.shelf];
       const pre = s?.preset || {};
-      state.filter = { q: "", status: asSet(pre.status), plats: new Set(), playOn: pre.playOn || "All", prio: new Set(), formats: new Set(), sort: s?.title.startsWith("Finished") ? "recent" : "priority" };
+      state.filter = { q: "", status: asSet(pre.status), plats: new Set(pre.plats || []), prio: new Set(), formats: new Set(), sort: s?.title.startsWith("Finished") ? "recent" : "priority" };
       return go(more.dataset.go);
     }
     const yr = e.target.closest(".year > button");
     if (yr) { const y = +yr.parentElement.dataset.year; state.openYears.has(y) ? state.openYears.delete(y) : state.openYears.add(y); yr.parentElement.classList.toggle("open"); activateArt(yr.parentElement); return; }
     const chip = e.target.closest("[data-plat]");
     if (chip) { const p = chip.dataset.plat; state.filter.plats.has(p) ? state.filter.plats.delete(p) : state.filter.plats.add(p); return render(); }
+    const pl = e.target.closest("[data-pleaf]");
+    if (pl) { const k = pl.dataset.pleaf, P = state.filter.plats; P.has(k) ? P.delete(k) : P.add(k); try { FX.play.tab(); } catch {} return render(); }
+    const pg = e.target.closest("[data-pgroup]");
+    if (pg) { const keys = pg.dataset.pgroup.split(","), P = state.filter.plats, on = keys.every(k => P.has(k)); keys.forEach(k => on ? P.delete(k) : P.add(k)); try { FX.play.tab(); } catch {} return render(); }
     const m = e.target.closest("[data-mode] button");
     if (m) { state.mode = m.dataset.v; api?.set_pref("view_mode", state.mode); return render(); }
     const mb = e.target.closest("[data-multi] button");
@@ -2111,7 +2156,7 @@ function bindGlobal() {
       if (mb.dataset.v === "All") set.clear(); else set.has(mb.dataset.v) ? set.delete(mb.dataset.v) : set.add(mb.dataset.v);
       state.filter[key] = set; return render();
     }
-    if (e.target.closest("#clearFilters")) { state.filter = { q: "", status: new Set(), plats: new Set(), playOn: "All", prio: new Set(), formats: new Set(), sort: state.filter.sort }; return render(); }
+    if (e.target.closest("#clearFilters")) { state.filter = { q: "", status: new Set(), plats: new Set(), prio: new Set(), formats: new Set(), sort: state.filter.sort }; return render(); }
     const up = e.target.closest("[data-unpin]"); if (up) { state.filter[up.dataset.unpin] = null; return render(); }
     const segB = e.target.closest("[data-seg] button");
     if (segB) { state.filter[segB.parentElement.dataset.seg] = segB.dataset.v; return render(); }
@@ -2545,7 +2590,7 @@ async function ctxAction(li) {
   if (act === "refresh") { openPanel("game", g.id); return refreshGame(); }
   if (act === "genre" || act === "dev" || act === "pub") {
     const vals = act === "genre" ? splitList(g.genre) : splitList(act === "dev" ? g.developer : g.publisher);
-    state.filter = { q: "", status: new Set(), plats: new Set(), playOn: "All", prio: new Set(), formats: new Set(), sort: "priority",
+    state.filter = { q: "", status: new Set(), plats: new Set(), prio: new Set(), formats: new Set(), sort: "priority",
       genre: act === "genre" ? vals : null, studio: act !== "genre" ? vals : null };
     if (state.catalog !== "games") switchCatalog("games");
     return go("library");
@@ -2709,7 +2754,7 @@ function switchCatalog(cat) {
   if (cat === state.catalog) return;
   if (cat === "news") $("#newsDot").hidden = true;
   state.catalog = cat;
-  state.view = cat === "books" ? "shelf" : cat === "news" ? "leaks" : "home";
+  state.view = cat === "books" ? "shelf" : cat === "news" ? "breaking" : "home";
   state.focusId = null;
   closePanel(); render(); $("#view").scrollTop = 0;
 }
@@ -2942,10 +2987,8 @@ async function fillWhatsNew() {
 
 /* ---------- News ---------- */
 const NEWS_INFO = {
-  leaks: "Newest posts from r/GamingLeaksAndRumours. Rumours aren't confirmed until a studio says so.",
   breaking: "IGN, PC Gamer, Kotaku, Eurogamer, Steam, Bloomberg and Jason Schreier, newest first.",
   yours: "Patches, major updates and news for the games you're playing, own and want.",
-  marvel: "Newest from r/MarvelStudiosSpoilers and r/DCULeaks. Spoiler-tagged posts stay hidden until you click them.",
 };
 const KIND_LABEL = { major: "Major update", update: "Update", minor: "Patch", release: "Release", news: "News" };
 const newsState = { data: {}, source: {}, loading: {}, seen: {} };
@@ -2997,7 +3040,7 @@ function paintNews(sec) {
   const seenBefore = newsState.seen[sec] || 0;
   const blocked = (d.errors || []).filter(e => / blocked$/.test(e)).map(e => e.split(":")[0]);
   const other = (d.errors || []).filter(e => !/ blocked$/.test(e)).map(e => e.split(":")[0]);
-  const errs = (blocked.length ? `<p class="fine nerr">Reddit is refusing Masterlog for ${esc(blocked.join(", "))}. A free Reddit app ID fixes this: <button class="linkish" id="redditHelp">set it up in Settings</button>.</p>` : "")
+  const errs = (blocked.length ? `<p class="fine nerr">Reddit isn't letting Masterlog read ${esc(blocked.join(", "))} right now. It tries again in a few minutes.</p>` : "")
     + (other.length ? `<p class="fine nerr">Couldn't reach ${esc(other.join(", "))} just now. Showing the rest.</p>` : "");
   if (!items.length) {
     body.innerHTML = errs + `<p class="muted news-empty">${sec === "yours" && d.pending ? "Fetching news for your games. This fills in over the next minute." : "Nothing here yet."}</p>`;
@@ -3015,10 +3058,10 @@ function fmtDateTime(ts) {
 async function checkNewsDot() {
   if (!api || state.catalog === "news") return;
   try {
-    const r = await api.news_section("leaks");
-    newsState.data.leaks = { ...r, t: Date.now() };
+    const r = await api.news_section("yours");
+    newsState.data.yours = { ...r, t: Date.now() };
     const newest = Math.max(0, ...(r.items || []).map(i => i.date || 0));
-    $("#newsDot").hidden = !(newsState.seen.leaks && newest > newsState.seen.leaks);
+    $("#newsDot").hidden = !(newsState.seen.yours && newest > newsState.seen.yours);
   } catch {}
 }
 
