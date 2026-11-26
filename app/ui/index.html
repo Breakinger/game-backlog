@@ -79,7 +79,9 @@
         <ol>
           <li>In your Google Sheet, open <b>Extensions → Apps Script</b>.</li>
           <li>Delete what's in the editor, paste the connection script, and press <b>Save</b>. <button type="button" class="linkish" id="copyScript">Copy the script</button></li>
-          <li>Press <b>Deploy → New deployment</b>, pick type <b>Web app</b>, set <b>Execute as: Me</b> and <b>Who has access: Anyone</b>, then <b>Deploy</b>.</li>
+          <li>In the editor, open <b>Project Settings</b> (gear icon), tick <b>Show "appsscript.json" manifest file</b>, go back to the editor, open <b>appsscript.json</b>, replace everything in it, and <b>Save</b>. <button type="button" class="linkish" id="copyManifest">Copy the manifest</button></li>
+          <li>Turn on the <b>Google Apps Script API</b>: <button type="button" class="linkish" data-url="https://script.google.com/home/usersettings">open this page</button> and switch it <b>On</b>. With the manifest, this lets the script update itself whenever Masterlog does, so you never paste it again.</li>
+          <li>Press <b>Deploy → New deployment</b> (or <b>Manage deployments → Edit → New version</b> if it's already deployed), pick type <b>Web app</b>, set <b>Execute as: Me</b> and <b>Who has access: Anyone</b>, then <b>Deploy</b>.</li>
           <li>Google asks you to authorize. If it says the app isn't verified, choose <b>Advanced → Go to (unsafe)</b>. It's your own script.</li>
           <li>Copy the <b>Web app</b> link and paste it above. The sheet stays private: the app pairs with the script and keeps a secret key on this PC.</li>
         </ol>

@@ -273,6 +273,9 @@ class ScriptClient:
         result["script_version"] = out.get("script") or 1
         return result
 
+    def self_update(self, code, version):
+        return self._call(body={"action": "self_update", "key": self.key, "code": code, "version": version}, timeout=120)
+
     def delete(self, tab, row, name):
         return self._call(body={"action": "delete", "key": self.key, "tab": tab, "row": row, "name": name})
 

@@ -1593,6 +1593,17 @@ function applyData(res) {
   if (!rankDirty) { state.ranking = (res.ranking || []).map(r => r.game); state.rankingLocal = !!res.ranking_local; }
   rankIndex = null;
 }
+/* the sheet's connection script: updates itself from version 6; older ones need one last paste */
+function scriptNotice(res) {
+  const n = res.script_note;
+  if (n?.ok) toast(`Your sheet's connection script updated itself to version ${n.version}.`, "ok");
+  else if (n?.error) toast(`Couldn't update the sheet's connection script: ${n.error}`, "err", { label: "How to fix", run: () => openSettings(true) });
+  const cur = res.script_version || 1, want = res.script_bundled || 0;
+  if (state.canEdit && cur < 6 && want > cur && !scriptNotice.shown) {
+    scriptNotice.shown = true;
+    setTimeout(() => toast(`Your sheet's connection script is version ${cur}. Update it one last time (with the manifest) and it keeps itself up to date from then on.`, "", { label: "Show me", run: () => { openSettings(true); const d = document.querySelector("#settings details.howto"); if (d) d.open = true; } }), 4000);
+  }
+}
 async function sync(manual) {
   if (!api) return;
   setSync("busy", "Syncing…");
@@ -1609,6 +1620,7 @@ async function sync(manual) {
     }
     refreshUpdated();
     setTimeout(addMissingRanked, 1500);
+    scriptNotice(res);
   } else {
     state.error = res?.error || "Unknown error";
     if (state.games.length) {
@@ -1782,6 +1794,13 @@ async function copyScript() {
   try { await navigator.clipboard.writeText(text); }
   catch { const t = document.createElement("textarea"); t.value = text; document.body.append(t); t.select(); document.execCommand("copy"); t.remove(); }
   toast("Script copied. Paste it into Apps Script.", "ok");
+}
+async function copyManifest() {
+  const text = await api?.connection_manifest();
+  if (!text) return;
+  try { await navigator.clipboard.writeText(text); }
+  catch { const t = document.createElement("textarea"); t.value = text; document.body.append(t); t.select(); document.execCommand("copy"); t.remove(); }
+  toast("Manifest copied. Paste it over everything in appsscript.json.", "ok");
 }
 
 /* ---------- linked accounts ---------- */
@@ -2021,6 +2040,7 @@ function bindGlobal() {
   $("#coverAuto").addEventListener("click", () => customCover(false));
   $("#ambClear").addEventListener("click", () => chooseAmbience(true));
   $("#copyScript").addEventListener("click", copyScript);
+  $("#copyManifest").addEventListener("click", copyManifest);
   document.querySelectorAll("[data-stab]").forEach(b => b.addEventListener("click", () => showSettingsTab(b.dataset.stab)));
   $("#settingsForm").addEventListener("input", e => { if (["sound_on", "ambient_volume", "fx_volume"].includes(e.target.name)) applySound({ ...state.settings, ...soundSettings() }); });
   $("#accountsBox").addEventListener("click", e => {

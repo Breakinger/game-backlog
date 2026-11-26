@@ -1,5 +1,9 @@
 /**
- * Masterlog connection (version 5: adds deleting rows, with undo). Besides reading and writing the sheet, it lets more PCs use Masterlog:
+ * Masterlog connection (version 6: updates itself). When Masterlog gets a newer connection script, the app
+ * sends it here and this script replaces its own code and moves its web app link to the new version, so you
+ * never paste it again. Only your connected Masterlog can do that (it must carry the secret key), and the code
+ * comes from the app you already trust to update itself. Needs, once: the Apps Script API switched on
+ * (script.google.com → Settings) and the manifest from Masterlog's Settings (Project Settings → appsscript.json). Besides reading and writing the sheet, it lets more PCs use Masterlog:
  * a new PC asks here, you tick Allow next to its code in the "Masterlog PCs" tab, and it gets its own key.
  * It also keeps your PCs in step (All Time Classic, hidden games, DLC marks, covers, your ambience track)
  * and passes your account keys between them sealed, so this script never sees them in the clear.
@@ -65,6 +69,7 @@ function route_(p) {
   if (p.action === 'update') return withLock_(() => update_(p));
   if (p.action === 'add') return withLock_(() => add_(p));
   if (p.action === 'delete') return withLock_(() => delete_(p));
+  if (p.action === 'self_update') return withLock_(() => selfUpdate_(p));
   if (p.action === 'restore') return withLock_(() => restore_(p));
   if (p.action === 'rank') return withLock_(() => rank_(p));
   if (p.action === 'state_get') return stateGet_(p.device);
@@ -138,7 +143,7 @@ function read_() {
     plays: table_('plays'),
     books: table_('books'),
     ranking: ranking_(),
-    script: 5,
+    script: 6,
   };
 }
 
@@ -427,4 +432,46 @@ function fileGet_(p) {
   const files = filesFolder_().getFilesByName(name);
   if (!files.hasNext()) return { error: 'No such file.' };
   return { data: Utilities.base64Encode(files.next().getBlob().getBytes()) };
+}
+
+/* ---------- updating itself: new code from your Masterlog, same web app link ---------- */
+function api_(method, path, body) {
+  const res = UrlFetchApp.fetch('https://script.googleapis.com/v1/projects/' + ScriptApp.getScriptId() + path, {
+    method: method, contentType: 'application/json', muteHttpExceptions: true,
+    headers: { Authorization: 'Bearer ' + ScriptApp.getOAuthToken() },
+    payload: body ? JSON.stringify(body) : undefined,
+  });
+  const out = JSON.parse(res.getContentText() || '{}');
+  if (res.getResponseCode() >= 300) {
+    const msg = (out.error && out.error.message) || ('HTTP ' + res.getResponseCode());
+    if (/has not been used|is disabled|not enabled/i.test(msg)) throw new Error('Turn on the Apps Script API: open script.google.com → Settings → Google Apps Script API → On.');
+    if (/insufficient|scope/i.test(msg)) throw new Error('The script needs the manifest from Masterlog (Settings → Sheet & sources) to update itself.');
+    throw new Error(msg);
+  }
+  return out;
+}
+
+function selfUpdate_(p) {
+  const code = String(p.code || '');
+  if (code.indexOf('Masterlog connection') < 0 || code.indexOf('function route_') < 0) throw new Error('That isn\'t a Masterlog connection script.');
+  const content = api_('get', '/content');
+  let replaced = false;
+  const files = (content.files || []).map(f => {
+    if (f.type === 'SERVER_JS' && !replaced && (String(f.source).indexOf('Masterlog connection') >= 0 || (content.files || []).filter(x => x.type === 'SERVER_JS').length === 1)) {
+      replaced = true;
+      return { name: f.name, type: f.type, source: code };
+    }
+    return { name: f.name, type: f.type, source: f.source };
+  });
+  if (!replaced) files.push({ name: 'Masterlog', type: 'SERVER_JS', source: code });
+  api_('put', '/content', { files: files });
+  const version = api_('post', '/versions', { description: 'Masterlog connection ' + (p.version || '') });
+  const url = ScriptApp.getService().getUrl() || '';
+  const deps = (api_('get', '/deployments').deployments || []).filter(d => (d.entryPoints || []).some(e => e.entryPointType === 'WEB_APP'));
+  const mine = deps.find(d => d.entryPoints.some(e => e.webApp && url && (e.webApp.url === url || url.indexOf(d.deploymentId) >= 0))) || deps[0];
+  if (!mine) throw new Error('No web app deployment found to update.');
+  api_('put', '/deployments/' + mine.deploymentId, { deploymentConfig: {
+    scriptId: ScriptApp.getScriptId(), versionNumber: version.versionNumber,
+    manifestFileName: 'appsscript', description: 'Masterlog connection ' + (p.version || '') } });
+  return { ok: true, version: p.version, scriptVersion: version.versionNumber };
 }

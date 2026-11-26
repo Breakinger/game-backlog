@@ -437,6 +437,12 @@ class Api:
             except Exception as e:  # report, keep showing the last good data
                 return {"error": str(e) or e.__class__.__name__, "code": getattr(e, "code", None)}
             data["can_edit"] = bool(client)
+            if client:
+                self._maybe_update_script(client, data.get("script_version") or 1)
+                data["script_bundled"] = self._script_bundled()[0]
+                note = getattr(self, "_script_note", None)
+                if note:
+                    data["script_note"], self._script_note = note, None
             if client and (data.get("script_version") or 1) >= 4:
                 data["state_changed"] = getattr(self, "_state_changed", False)
                 self._state_changed = False
@@ -1236,6 +1242,33 @@ class Api:
         self._window.toggle_fullscreen()
         self._fullscreen = not getattr(self, "_fullscreen", bool(self._settings.get("big_picture")))
         return self._fullscreen
+
+    # ----- the sheet's connection script keeps itself up to date (version 6 and later) -----
+    def _script_bundled(self):
+        try:
+            with open(resource(os.path.join("ui", "connect.gs")), encoding="utf-8") as f:
+                code = f.read()
+            m = re.search(r"^\s*script: (\d+),", code, re.M)
+            return (int(m.group(1)) if m else 0), code
+        except OSError:
+            return 0, ""
+
+    def _maybe_update_script(self, client, current):
+        bundled, code = self._script_bundled()
+        if current < 6 or bundled <= current or getattr(self, "_script_tried", 0) >= bundled:
+            return
+        self._script_tried = bundled                  # once per version per run
+        def run():
+            try:
+                client.self_update(code, bundled)
+                self._script_note = {"ok": True, "version": bundled}
+            except Exception as e:
+                self._script_note = {"error": str(e), "version": bundled}
+        threading.Thread(target=run, daemon=True).start()
+
+    def connection_manifest(self):
+        with open(resource(os.path.join("ui", "appsscript.json")), encoding="utf-8") as f:
+            return f.read()
 
     def connection_script(self):
         with open(resource(os.path.join("ui", "connect.gs")), encoding="utf-8") as f:
