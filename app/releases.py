@@ -14,6 +14,38 @@ DATE_RX = re.compile(r"(?:(\d{1,2})\s+(jan|feb|mar|apr|may|jun|jul|aug|sep|oct|n
                      r"(?:(jan|feb|mar|apr|may|jun|jul|aug|sep|oct|nov|dec)[a-z]*\.?\s+(\d{1,2}),?\s+((?:19|20)\d\d))|"
                      r"(?:(jan|feb|mar|apr|may|jun|jul|aug|sep|oct|nov|dec)[a-z]*\s+((?:19|20)\d\d))|((?:19|20)\d\d)", re.I)
 
+# An edition of a game (Special, Definitive, Legendary, Game of the Year, Director's Cut…) is the same game, updated:
+# it keeps the original's release date, and its own date shows as a line under it. A remaster or remake sold as a new
+# game under a new name ("Oblivion Remastered", "Resident Evil 4" from 2023 is set apart by its date) is a new release.
+# An update that stays on the game's own store page (The Witcher 3's next-gen update) keeps its name, so it was never
+# anything but the original.
+EDITION_RX = re.compile(r"[\s:\-–—(]+(?:the\s+)?(special|definitive|legendary|complete|ultimate|enhanced|anniversary|"
+                        r"game of the year|goty|deluxe|digital deluxe|gold|premium|extended|director'?s|final|collector'?s)"
+                        r"(?:\s+(edition|cut))?\)?\s*$", re.I)
+NEW_RELEASE_RX = re.compile(r"\b(remaster(?:ed)?|remake|reimagined|reforged|reborn)\b", re.I)
+
+
+def edition_of(name):
+    """'The Elder Scrolls V: Skyrim Special Edition' → ('The Elder Scrolls V: Skyrim', 'Special Edition'), or None
+    when the name isn't an edition of another game (or is a remaster or remake, which count as new releases)."""
+    name = (name or "").strip()
+    if not name or NEW_RELEASE_RX.search(name):
+        return None
+    m = EDITION_RX.search(name)
+    if not m:
+        return None
+    word, tail = m.group(1).lower(), (m.group(2) or "").lower()
+    if word.startswith(("director", "final")):
+        if tail != "cut":
+            return None
+    elif word not in ("game of the year", "goty") and tail != "edition":
+        return None
+    base = name[:m.start()].strip(" :-–—(")
+    if len(base) < 2:
+        return None
+    return base, re.sub(r"\s+", " ", m.group(0).strip(" :-–—()"))
+
+
 # platform names, as IGDB and Wikipedia write them, to the short names Masterlog shows
 PLATFORMS = [
     (r"\bpc\b|windows|microsoft windows|\bwin\b|steam", "PC"), (r"playstation 5|\bps5\b", "PS5"), (r"playstation 4|\bps4\b", "PS4"),

@@ -1449,6 +1449,14 @@ class Api:
         hit = self._info.cache.get("ryear", key)
         if hit is not None and (hit.get("y") or time.time() - (hit.get("t") or 0) < 7 * 86400):
             return hit.get("y")
+        import releases
+        ed = releases.edition_of(name)
+        if ed:
+            # an edition counts in the year the game first came out (Skyrim Special Edition: 2011)
+            y = self._release_year(ed[0])
+            if y:
+                self._info.cache.put("ryear", key, {"y": y, "t": time.time()})
+                return y
         y, failed = self._goty.year_of(name), False
         if not y:
             yr = lambda v: int(m.group(1)) if (m := re.search(r"\b(19[789]\d|20\d\d)\b", str(v or ""))) else None
@@ -1480,11 +1488,32 @@ class Api:
         return y
 
     def release_info(self, game):
-        """When it came out, where first, later ports, and newer versions (see releases.py)."""
+        """When it came out, where first, later ports, and newer versions (see releases.py). An edition (Skyrim
+        Special Edition) is the original game, updated: it shows the original's release, with its own date as a
+        line under it. A date you set in Modify always wins."""
         import releases
-        import lore
         name = (game or {}).get("name") or ""
         manual = (game or {}).get("release")
+        ed = None if manual else releases.edition_of(name)
+        if not ed:
+            return self._rinfo(name, manual)
+        key = "ed|" + info._norm(name)
+        hit = self._info.cache.get("rinfo", key)
+        if hit is not None:
+            return dict(hit)
+        base, own = self._rinfo(ed[0], None) or {}, self._rinfo(name, None) or {}
+        if base.get("date") and (not own.get("date") or base["date"] <= own["date"] + 86400):
+            later = own.get("date") and own["date"] - base["date"] > 31 * 86400
+            out = {**base, "edition_of": ed[0],
+                   "edition": {"name": ed[1], "date": own["date"] if later else None, "precision": own.get("precision")}}
+        else:
+            out = own   # the original couldn't be found (or came out after it, so it's not the same game)
+        self._info.cache.put("rinfo", key, out)
+        return dict(out)
+
+    def _rinfo(self, name, manual):
+        import releases
+        import lore
         year = int(str(manual)[:4]) if manual and str(manual)[:4].isdigit() else None
         key = info._norm(name) + f"|{year or ''}"
         hit = self._info.cache.get("rinfo", key)
@@ -1535,7 +1564,8 @@ class Api:
                 import releases
                 out[name] = releases._ts(*[int(x) for x in manual.split("-")[:3]])
                 continue
-            hit = self._info.cache.get("rinfo", info._norm(name) + "|")
+            import releases
+            hit = self._info.cache.get("rinfo", ("ed|" + info._norm(name)) if releases.edition_of(name) else info._norm(name) + "|")
             if hit is not None:
                 if hit.get("date"):
                     out[name] = hit["date"]

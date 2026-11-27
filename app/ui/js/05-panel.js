@@ -796,6 +796,7 @@ function releaseHTML(g, r) {
       <b>${esc(n.name)}</b><small>${esc(n.kind)}${y ? `, ${y}` : ""}${own ? " · in your library" : ""}</small></button>`;
   }).join("");
   return `<div class="relmain"><small>Released</small><b>${esc(fmtRelease(r.date, r.precision))}</b>${plats ? `<span>on ${esc(plats)}</span>` : ""}${r.manual ? `<i class="relset" title="The release date you set">set by you</i>` : ""}</div>
+    ${r.edition ? `<div class="relport"><span class="relarrow" aria-hidden="true">↳</span>${esc(r.edition.name)}${r.edition.date ? ` <b>${esc(fmtRelease(r.edition.date, r.edition.precision))}</b>` : ""}<small class="relnote"> · the same game, updated</small></div>` : ""}
     ${(r.ports || []).map(p => `<div class="relport"><span class="relarrow" aria-hidden="true">↳</span>${esc(p.platform)} port <b>${esc(fmtRelease(p.date, p.precision))}</b></div>`).join("")}
     ${newer ? `<div class="relnew"><span>Newer version${(r.newer || []).length > 1 ? "s" : ""}:</span>${newer}</div>` : ""}`;
 }

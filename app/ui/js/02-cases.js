@@ -82,7 +82,7 @@ function achBadge(g) {
   return "";
 }
 /* status you can see at a glance: flames for Extreme, a gold pulse for High, a green glow when completed,
-   cobwebs on paused games, dropped games tossed aside, an extra life for second chances */
+   a pause sign on paused games, cobwebs on low-priority ones, dropped games tossed aside, an extra life for second chances */
 function effectClass(g) {
   const st = statusOf(g), out = [];
   if (isClassic(g)) return "fx-classic";   // the classic outshines every other effect
@@ -93,6 +93,7 @@ function effectClass(g) {
   if (g.status !== "Completed" && g.status !== "Dropped") {
     if (g.priority === "Extreme") out.push("fx-extreme");
     else if (g.priority === "High") out.push("fx-high");
+    else if (g.priority === "Low") out.push("fx-low");
   }
   return out.join(" ");
 }
@@ -105,7 +106,9 @@ function effectLayer(g) {
   else if (g.priority === "High" && g.status !== "Completed" && g.status !== "Dropped") out += `<i class="fxglow high" aria-hidden="true"></i>`;
   if (isClassic(g)) out += `<div class="flames classic-flames" aria-hidden="true"><i></i><i></i><i></i><i></i><i></i><i></i><i></i></div>${SPARKS}<div class="cosmos aura still" aria-hidden="true"></div><span class="classic-award oncover" title="All Time Classic · Mythical">${CLASSIC_IMG}</span>`;
   if (g.priority === "Extreme" && g.status !== "Completed" && g.status !== "Dropped") out += `<div class="flames" aria-hidden="true"><i></i><i></i><i></i><i></i><i></i></div>`;
-  if ((st === "Paused" || g.status === "Paused") && st !== "Second chance") out += `<div class="cobweb" aria-hidden="true"><svg viewBox="0 0 60 60"><path d="M0 0L60 60M0 0L60 22M0 0L22 60M0 0L60 0M0 0L0 60M10 0Q8 8 0 10M22 0Q18 18 0 22M36 0Q30 30 0 36M52 0Q42 42 0 52"/></svg></div><div class="dust" aria-hidden="true"></div>`;
+  if ((st === "Paused" || g.status === "Paused") && st !== "Second chance") out += `<div class="pausemark" aria-hidden="true"><svg viewBox="0 0 40 40"><rect x="9" y="7" width="8" height="26" rx="2"/><rect x="23" y="7" width="8" height="26" rx="2"/></svg></div>`;
+  // low priority: gathering dust on the shelf
+  if (g.priority === "Low" && g.status !== "Completed" && g.status !== "Dropped") out += `<div class="cobweb" aria-hidden="true"><svg viewBox="0 0 60 60"><path d="M0 0L60 60M0 0L60 22M0 0L22 60M0 0L60 0M0 0L0 60M10 0Q8 8 0 10M22 0Q18 18 0 22M36 0Q30 30 0 36M52 0Q42 42 0 52"/></svg></div><div class="dust" aria-hidden="true"></div>`;
   if (st === "Second chance") out += `<span class="extralife" title="Second chance"><svg viewBox="0 0 24 24"><path d="M12 21s-7.5-4.6-9.5-9.1C1 8.4 3.2 5 6.6 5c2 0 3.4 1.1 4.2 2.4C11.6 6.1 13 5 15 5c3.4 0 5.6 3.4 4.1 6.9C17.1 16.4 12 21 12 21z"/></svg><b>↻ 1UP</b></span>`;
   return out;
 }
